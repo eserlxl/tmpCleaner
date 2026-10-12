@@ -16,7 +16,8 @@ install-conf:
 	else \
 		install -Dm644 tmpcleaner.conf $$c.new && \
 		install -Dm644 tmpcleaner.conf $$c.default && \
-		echo "Notice: $$c has local changes; new defaults installed as $$c.new (please merge)"; \
+		echo "Notice: $$c has local changes; new defaults installed as $$c.new (please merge)" && \
+		{ diff -u $$c $$c.new || true; }; \
 	fi
 
 uninstall:
