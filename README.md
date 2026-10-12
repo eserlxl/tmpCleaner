@@ -47,10 +47,10 @@ Linux with systemd (`systemd-tmpfiles`: systemd >= 249 for the service, >= 256 f
 
 **Preview first.** On a machine that keeps work in `/tmp` (build trees,
 snapshots, long-lived tool sessions), the first run can remove a lot. Save a
-preview of what would go, without deleting:
+preview of what would go to `preview.txt`, without deleting:
 
 ```sh
-sudo TMPCLEANER_CONF=./tmpcleaner.conf sh ./tmpcleaner --dry-run > preview.txt 2>&1
+sudo make preview
 ```
 
 Anything that must survive even while no program uses it goes into the

@@ -26,4 +26,8 @@ uninstall:
 test:
 	sh tests/test.sh
 
-.PHONY: install install-conf uninstall test
+preview:
+	TMPCLEANER_CONF=./tmpcleaner.conf sh ./tmpcleaner --dry-run > preview.txt 2>&1 || true
+	@echo "$$(grep -c 'Would remove' preview.txt) entries would be removed; see preview.txt"
+
+.PHONY: install install-conf uninstall test preview
