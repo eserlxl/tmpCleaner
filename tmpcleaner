@@ -5,6 +5,33 @@
 # timestamps, so a long-running job could otherwise lose files under its feet.
 # Extra arguments (e.g. --dry-run) go to systemd-tmpfiles.
 set -eu
+
+case "${1:-}" in
+	-h|--help)
+		cat <<'EOF'
+Usage: tmpcleaner [options]
+
+Cleans /tmp using systemd-tmpfiles rules while protecting paths currently
+in use by running processes.
+
+Options:
+  -h, --help       Show this help message and exit
+  --print-rules    Print generated tmpfiles rules and exit
+
+Other arguments (such as --dry-run) are passed to systemd-tmpfiles.
+
+Environment variables:
+  TMPCLEANER_CONF           Path to configuration file
+                            (default: /etc/tmpcleaner/tmpcleaner.conf)
+  TMPCLEANER_AGE            Override duration on every d rule (e.g. 6h, 30m)
+  TMPCLEANER_FULL_PERCENT   Threshold percentage of /tmp usage (1-100)
+  TMPCLEANER_FULL_AGE       Age duration to use when /tmp usage meets or
+                            exceeds TMPCLEANER_FULL_PERCENT
+EOF
+		exit 0
+		;;
+esac
+
 conf=${TMPCLEANER_CONF:-/etc/tmpcleaner/tmpcleaner.conf}
 [ -r "$conf" ] || { echo "tmpcleaner: cannot read $conf" >&2; exit 1; }
 if [ "${TMPCLEANER_FULL_PERCENT+x}" ] && [ "${TMPCLEANER_FULL_AGE+x}" ]; then

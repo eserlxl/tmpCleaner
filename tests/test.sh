@@ -124,6 +124,22 @@ if TMPCLEANER_CONF=$dir/missing.conf sh "$here/tmpcleaner"; then
 	echo "FAIL: missing config should fail"
 	fail=1
 fi
+help_out=$(TMPCLEANER_CONF=$dir/missing.conf sh "$here/tmpcleaner" --help) || {
+	echo "FAIL: --help should exit 0 without config"
+	fail=1
+}
+if ! TMPCLEANER_CONF=$dir/missing.conf sh "$here/tmpcleaner" -h >/dev/null; then
+	echo "FAIL: -h should exit 0 without config"
+	fail=1
+fi
+printf '%s\n' "$help_out" | grep -Fq -- '--print-rules' || {
+	echo "FAIL: help should mention --print-rules"
+	fail=1
+}
+printf '%s\n' "$help_out" | grep -Fq 'TMPCLEANER_AGE' || {
+	echo "FAIL: help should mention TMPCLEANER_AGE"
+	fail=1
+}
 gone() { [ ! -e "$dir/$1" ] || { echo "FAIL: $1 should be deleted"; fail=1; }; }
 kept() { [ -e "$dir/$1" ] || { echo "FAIL: $1 should be kept"; fail=1; }; }
 gone old.txt; gone olddir; gone weirdX; gone emptydir
