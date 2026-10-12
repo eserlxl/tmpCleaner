@@ -26,8 +26,10 @@ that a directory will still hold a kept file, so a real run may remove fewer.
 Never deleted:
 
 - Files a running process holds open, and everything inside a directory a
-  running process works in (its current directory). These are collected from
-  `/proc` right before each run.
+  running process works in (its current directory). The in-use list is taken
+  from `/proc` just before each run (a snapshot before cleaning), so files
+  opened during a run are not covered and long-lived work belongs in the
+  exclusion list.
 - X11/ICE socket dirs and X lock files (`/tmp/.X11-unix`, `/tmp/.ICE-unix`,
   `/tmp/.X0-lock`, ...)
 - systemd `PrivateTmp` dirs of running services (`/tmp/systemd-private-*`)
@@ -38,16 +40,16 @@ Only `/tmp` is touched; `/var/tmp` keeps the distribution's defaults.
 
 ## Requirements
 
-Linux with systemd (`systemd-tmpfiles`, age-by syntax: systemd >= 250).
+Linux with systemd (`systemd-tmpfiles`: systemd >= 249 for the service, >= 256 for `--dry-run` previews).
 
 ## Install
 
 **Preview first.** On a machine that keeps work in `/tmp` (build trees,
-snapshots, long-lived tool sessions), the first run can remove a lot. This
-lists what would go, without deleting:
+snapshots, long-lived tool sessions), the first run can remove a lot. Save a
+preview of what would go, without deleting:
 
 ```sh
-sudo TMPCLEANER_CONF=./tmpcleaner.conf sh ./tmpcleaner --dry-run
+sudo TMPCLEANER_CONF=./tmpcleaner.conf sh ./tmpcleaner --dry-run > preview.txt 2>&1
 ```
 
 Anything that must survive even while no program uses it goes into the
