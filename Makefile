@@ -12,7 +12,7 @@ install-conf:
 	@if [ ! -e $(CONFDIR)/tmpcleaner.conf ]; then \
 		install -Dm644 tmpcleaner.conf $(CONFDIR)/tmpcleaner.conf; \
 	elif ! cmp -s tmpcleaner.conf $(CONFDIR)/tmpcleaner.conf; then \
-		install -Dm644 tmpcleaner.conf $(CONFDIR)/tmpcleaner.conf.new; \
+		install -Dm644 tmpcleaner.conf $(CONFDIR)/tmpcleaner.conf.new && \
 		echo "Notice: $(CONFDIR)/tmpcleaner.conf differs from shipped default; new defaults installed as $(CONFDIR)/tmpcleaner.conf.new (please merge)"; \
 	fi
 
