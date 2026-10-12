@@ -96,9 +96,8 @@ in_use() {
 			}
 			return best
 		}
-		function near(pid, path, list, k, m) {
-			m = split(tmppoints[pid], list, SUBSEP)
-			for (k = 2; k <= m; k++) if (under(path, list[k])) return 1
+		function near(pid, path, k) {
+			for (k = 1; k <= ntmp[pid]; k++) if (under(path, point[pid, tmpidx[pid, k]])) return 1
 			return 0
 		}
 		function mounts(pid, file, line, fields, n) {
@@ -112,7 +111,7 @@ in_use() {
 				dev[pid, n] = fields[3]
 				root[pid, n] = decode(fields[4])
 				point[pid, n] = decode(fields[5])
-				if (dev[pid, n] == device) tmppoints[pid] = tmppoints[pid] SUBSEP point[pid, n]
+				if (dev[pid, n] == device) tmpidx[pid, ++ntmp[pid]] = n
 			}
 			close(file)
 			RS = "\0"
@@ -126,7 +125,7 @@ in_use() {
 			if (tmp_root == "") tmp_root = "/"
 			# The device was unknown while "self" was read; list its /tmp-device mounts now.
 			for (n = 1; n <= count["self"]; n++)
-				if (dev["self", n] == device) tmppoints["self"] = tmppoints["self"] SUBSEP point["self", n]
+				if (dev["self", n] == device) tmpidx["self", ++ntmp["self"]] = n
 		}
 		NR % 2 { split($0, parts, "/"); pid = parts[3]; next }
 		{
