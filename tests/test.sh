@@ -179,6 +179,7 @@ fi
 
 fail=0
 # Without /proc nothing in use could be protected, so the run must refuse.
+# shellcheck disable=SC2016 # $1 and $2 are expanded by the inner sh
 if [ "$bind_running" = 1 ] &&
 	unshare -rm sh -c 'mount -t tmpfs tmpfs /proc && TMPCLEANER_CONF=$1 sh "$2" --print-rules' sh "$conf" "$here/tmpcleaner" >/dev/null 2>&1; then
 	echo "FAIL: a run without /proc should fail"
