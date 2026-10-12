@@ -187,7 +187,8 @@ in_use() {
 			# find prints NUL-terminated path/target pairs.
 			RS = "\0"
 		}
-		# The path of target within the /tmp filesystem, or "" when it lies elsewhere.
+		# The path of target within the /tmp filesystem, or "" when it lies
+		# outside /tmp (which may share its filesystem with other trees).
 		function translate(table, target, n, path) {
 			mounts(table)
 			# Cheap pre-check: most targets lie on no mount of the /tmp filesystem.
@@ -195,7 +196,8 @@ in_use() {
 			n = containing(table, target)
 			if (dev[table, n] != device) return ""
 			path = (root[table, n] == "/" ? "" : root[table, n]) suffix(target, point[table, n])
-			return path == "" ? "/" : path
+			if (path == "") path = "/"
+			return under(path, tmp_root) ? path : ""
 		}
 		# Our path of the root directory of pid, searched by inode on /tmp.
 		function locate(pid, cmd, line, saved) {
@@ -235,7 +237,6 @@ in_use() {
 				}
 			}
 			if (path == "") return
-			if (!under(path, tmp_root)) return
 			path = "/tmp" suffix(path, tmp_root)
 			gsub(/\/+/, "/", path)
 			sub(/\/$/, "", path)
