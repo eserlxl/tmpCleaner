@@ -158,6 +158,16 @@ printf '%s\n' "$age_rules" | grep -Eq "^d $dir - - - amM:8h$" || {
 	fail=1
 }
 # Tabs and trailing whitespace must not leave the old age behind as an extra field.
+# The override sets the age field itself: a short rule gains it, and a
+# trailing argument field is left alone.
+for rule in "d $dir|d $dir - - - 8h" "d $dir - - - amM:6h -|d $dir - - - amM:8h -"; do
+	printf '%s\n' "${rule%%|*}" > "$cfg/short.conf"
+	got=$(TMPCLEANER_AGE=8h TMPCLEANER_CONF=$cfg/short.conf sh "$here/tmpcleaner" --print-rules | grep '^d ')
+	[ "$got" = "${rule#*|}" ] || {
+		echo "FAIL: age override should set field 6 of: ${rule%%|*}"
+		fail=1
+	}
+done
 printf 'd\t%s\t-\t-\t-\tamM:6h \n' "$dir" > "$cfg/ws.conf"
 ws_rules=$(TMPCLEANER_AGE=8h TMPCLEANER_CONF=$cfg/ws.conf sh "$here/tmpcleaner" --print-rules)
 if ! { [ "$(printf '%s\n' "$ws_rules" | grep -c '^d')" = 1 ] &&
@@ -237,6 +247,14 @@ echo "$preview" | grep -q 'Would remove.*old\.txt' || {
 }
 [ "$fail" = 0 ] || exit 1
 
+# Through a symlinked parent directory --check must still find the real path.
+ln -s "$dir" "$dir/selflink"
+status=0
+check_out=$(TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --check "$dir/selflink/old.txt") || status=$?
+if [ "$status" -ne 0 ]; then
+	echo "FAIL: --check should resolve a symlinked parent directory"
+	fail=1
+fi
 for name in old.txt 'open a%b.txt' new.txt; do
 	status=0
 	check_out=$(TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --check "$dir/$name") || status=$?

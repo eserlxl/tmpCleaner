@@ -46,12 +46,27 @@ if [ "${1:-}" = --check ]; then
 		*) echo "tmpcleaner: --check requires an absolute path under /tmp" >&2; exit 2 ;;
 	esac
 	# The sentinel keeps trailing newlines that command substitution would strip.
-	check=$(realpath -e -s -- "$2" 2>/dev/null && printf x) || {
+	# Resolve symlinked parent directories (the preview prints real paths) but
+	# keep the last component itself, which systemd-tmpfiles handles as is.
+	# The sentinel keeps trailing newlines that command substitution would strip.
+	path=$2
+	while [ "$path" != / ] && [ "${path%/}" != "$path" ]; do path=${path%/}; done
+	base=${path##*/}
+	case "$base" in
+		.|..) parent=$path base= ;;
+		*) parent=${path%/*} ;;
+	esac
+	check=$(realpath -e -- "${parent:-/}" 2>/dev/null && printf x) || {
 		echo "tmpcleaner: --check path does not exist: $2" >&2
 		exit 2
 	}
 	check=${check%x}
 	check=${check%"$nl"}
+	[ -z "$base" ] || check=${check%/}/$base
+	[ -e "$check" ] || [ -L "$check" ] || {
+		echo "tmpcleaner: --check path does not exist: $2" >&2
+		exit 2
+	}
 	case "$check" in
 		*"$nl"*) echo "tmpcleaner: --check cannot match a path that contains a newline" >&2; exit 2 ;;
 	esac
@@ -213,8 +228,19 @@ in_use() {
 
 rules() {
 	if [ "${TMPCLEANER_AGE+x}" ]; then
-		# Replace the duration of the age field, keeping any age-by letters.
-		LC_ALL=C sed -E "/^[[:space:]]*d[[:space:]]/s/[[:space:]]+([abcmABCM]+:)?[^[:space:]]*[[:space:]]*\$/ \\1$TMPCLEANER_AGE/" "$conf"
+		# Set field 6 (the age) of d rules, keeping any age-by letters and
+		# filling omitted mode/user/group fields; a quoted path holding spaces
+		# cannot be split into fields safely, so such a rule is left as is.
+		AGE=$TMPCLEANER_AGE LC_ALL=C awk '
+		$1 != "d" { print; next }
+		$2 ~ /^"/ && $2 !~ /"$/ { print "tmpcleaner: age override skipped for: " $0 > "/dev/stderr"; print; next }
+		{
+			for (i = NF + 1; i <= 5; i++) $i = "-"
+			prefix = ""
+			if (NF >= 6 && match($6, /^[abcmABCM]+:/)) prefix = substr($6, 1, RLENGTH)
+			$6 = prefix ENVIRON["AGE"]
+			print
+		}' "$conf"
 	else
 		cat "$conf"
 	fi
@@ -301,8 +327,10 @@ trap 'rm -rf "$scratch"' EXIT
 # Snapshot only the trees the d rules clean (normally just /tmp).
 LC_ALL=C awk '$1 == "d" {
 	# A quoted root may hold spaces, so take everything between its quotes.
-	if ($2 ~ /^"/ && match($0, /"[^"]*"/)) print substr($0, RSTART + 1, RLENGTH - 2)
-	else print $2
+	if ($2 ~ /^"/ && match($0, /"[^"]*"/)) root = substr($0, RSTART + 1, RLENGTH - 2)
+	else root = $2
+	gsub(/%%/, "%", root)
+	print root
 }' \
 	"$scratch/rules" > "$scratch/roots"
 snapshot() {
