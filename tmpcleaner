@@ -5,6 +5,7 @@
 # Extra arguments (e.g. --dry-run) go to systemd-tmpfiles.
 set -eu
 conf=${TMPCLEANER_CONF:-/etc/tmpcleaner/tmpcleaner.conf}
+[ -r "$conf" ] || { echo "tmpcleaner: cannot read $conf" >&2; exit 1; }
 
 # Targets of every process's cwd and open fds. One find, not a readlink per fd:
 # a busy desktop has tens of thousands of fds. "/tmp/?*" leaves out /tmp itself,
@@ -15,6 +16,7 @@ in_use() {
 
 {
 	cat "$conf"
+	echo
 	# File names are untrusted (any user can hold a file open), so each must
 	# match only itself. NUL-separated, so a newline in a name cannot start a
 	# new rule. tmpfiles treats a path with * ? [ as a glob: there, escape the

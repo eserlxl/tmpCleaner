@@ -12,6 +12,7 @@ trap 'kill $pids 2>/dev/null; rm -rf "$dir" "$conf"' EXIT
 
 awk '$1 == "d" { gsub(/[bcBC]/, "", $6) } { print }' "$here/tmpcleaner.conf" |
 	sed "s#/tmp#$dir#" > "$conf"
+printf '%s' "$(cat "$conf")" > "$conf"
 
 old() { touch -d '7 hours ago' "$@"; }
 mkdir -p "$dir/emptydir" "$dir/freshdir" "$dir/olddir" "$dir/.X11-unix" "$dir/systemd-private-abc/tmp" "$dir/workdir"
@@ -45,6 +46,10 @@ done
 TMPCLEANER_CONF=$conf sh "$here/tmpcleaner"
 
 fail=0
+if TMPCLEANER_CONF=$dir/missing.conf sh "$here/tmpcleaner"; then
+	echo "FAIL: missing config should fail"
+	fail=1
+fi
 gone() { [ ! -e "$dir/$1" ] || { echo "FAIL: $1 should be deleted"; fail=1; }; }
 kept() { [ -e "$dir/$1" ] || { echo "FAIL: $1 should be kept"; fail=1; }; }
 gone old.txt; gone olddir; gone weirdX; gone emptydir
