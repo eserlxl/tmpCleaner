@@ -257,8 +257,10 @@ in_use() {
 			saved = RS
 			RS = "\n"
 			while ((getline line < file) > 0) {
+				# Cheap pre-check, then the device field itself: a name may hold the text.
 				if (!index(line, " " devhex " ")) continue
 				split(line, fields, " ")
+				if (fields[4] != devhex) continue
 				if (!sub(/^[^ ]+ +[^ ]+ +[^ ]+ +[^ ]+ +[^ ]+ +/, "", line)) continue
 				if (substr(line, 1, 1) != "/" || line in seen) continue
 				seen[line] = 1

@@ -29,7 +29,8 @@ Never deleted:
   memory-mapped files such as loaded libraries, and everything inside a
   directory a running process works in (its current directory) or uses as its
   root directory (chrooted or containerized processes), including files and
-  directories reached through bind mounts. The in-use list is
+  directories reached through bind mounts (a process working in `/tmp` itself
+  does not keep all of `/tmp`). The in-use list is
   taken from `/proc` just before each run (a snapshot before cleaning),
   so files opened during a run are not covered and long-lived work belongs in
   the exclusion list.
