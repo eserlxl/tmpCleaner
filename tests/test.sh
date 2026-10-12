@@ -10,7 +10,7 @@ dir=$(mktemp -d /tmp/tmpcleaner-test.XXXXXX)
 conf=$dir.conf
 pids=
 bindpoint=
-trap 'kill $pids 2>/dev/null; rm -rf "$dir" "$conf" "$bindpoint"' EXIT
+trap 'kill $pids 2>/dev/null || :; rm -rf "$dir" "$conf" "$bindpoint"' EXIT
 
 awk '$1 == "d" { gsub(/[bcBC]/, "", $6) } { print }' "$here/tmpcleaner.conf" |
 	sed "s#/tmp#$dir#" > "$conf"
@@ -150,6 +150,10 @@ if TMPCLEANER_AGE='1h; x' TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --print-ru
 	fail=1
 fi
 rules=$(TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --print-rules)
+if printf '%s\n' "$rules" | grep -Eq '^x "/tmp/*"$'; then
+	echo "FAIL: generated rules must not exclude /tmp itself"
+	fail=1
+fi
 pressure_rules=$(TMPCLEANER_FULL_PERCENT=1 TMPCLEANER_FULL_AGE=30m TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --print-rules)
 printf '%s\n' "$pressure_rules" | grep -Eq "^d $dir - - - amM:30m$" || {
 	echo "FAIL: pressure mode should preserve age-by letters and set 30m"
@@ -234,13 +238,50 @@ fi
 if [ "$bind_running" = 1 ]; then
 	kept work; kept work/f; kept work/cwd/f; kept work/sleep; kept work/libm.so.6
 	gone work/unused
+	# Aliases at /tmp paths and nested binds must protect only the backing file.
+	for mode in direct nested; do
+		mkdir -p "$dir/held" "$dir/big"
+		touch "$dir/held/f" "$dir/big/f"
+		old "$dir/held/f" "$dir/big/f" "$dir/held" "$dir/big"
+		# shellcheck disable=SC2016 # arguments are expanded by the inner sh
+		unshare -rm sh -ec '
+			if [ "$3" = direct ]; then
+				mount --bind "$1/held" "$1/big"
+				exec sleep 60 < "$1/big/f"
+			else
+				mount --bind "$1" "$2"
+				mount --bind "$1/held" "$2/big"
+				exec sleep 60 < "$2/big/f"
+			fi
+		' sh "$dir" "$bindpoint" "$mode" &
+		alias_pid=$!
+		pids="$pids $alias_pid"
+		if [ "$mode" = direct ]; then
+			alias_path=$dir/big/f
+		else
+			alias_path=$bindpoint/big/f
+		fi
+		waited=0
+		until [ "$(readlink "/proc/$alias_pid/fd/0" 2>/dev/null)" = "$alias_path" ]; do
+			if [ "$waited" -ge 100 ]; then
+				echo "FAIL: timed out waiting for $mode bind-mounted process"
+				exit 1
+			fi
+			waited=$((waited + 1))
+			sleep 0.1
+		done
+		TMPCLEANER_CONF=$conf sh "$here/tmpcleaner"
+		gone big/f; kept held/f
+		kill "$alias_pid"
+		wait "$alias_pid" 2>/dev/null || :
+	done
 fi
 
 # A second run tests that the shipped age rule keeps freshly extracted files
 # (birth and ctime stay current even when atime and mtime are backdated).
 dir2=$(mktemp -d /tmp/tmpcleaner-test.XXXXXX)
 conf2=$dir2.conf
-trap 'kill $pids 2>/dev/null; rm -rf "$dir" "$conf" "$dir2" "$conf2" "$bindpoint"' EXIT
+trap 'kill $pids 2>/dev/null || :; rm -rf "$dir" "$conf" "$dir2" "$conf2" "$bindpoint"' EXIT
 
 sed "s#/tmp#$dir2#" "$here/tmpcleaner.conf" > "$conf2"
 touch "$dir2/extracted.txt"
@@ -253,7 +294,7 @@ TMPCLEANER_CONF=$conf2 sh "$here/tmpcleaner"
 # The three-way config upgrade that decides whether a reinstall keeps or replaces
 # an admin's exclusions.
 confdir=$(mktemp -d /tmp/tmpcleaner-test.XXXXXX)
-trap 'kill $pids 2>/dev/null; rm -rf "$dir" "$conf" "$dir2" "$conf2" "$confdir" "$bindpoint"' EXIT
+trap 'kill $pids 2>/dev/null || :; rm -rf "$dir" "$conf" "$dir2" "$conf2" "$confdir" "$bindpoint"' EXIT
 
 make -s -C "$here" install-conf CONFDIR="$confdir" >/dev/null
 cmp -s "$confdir/tmpcleaner.conf" "$here/tmpcleaner.conf" || {

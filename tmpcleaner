@@ -70,9 +70,9 @@ control_escapes=$(
 
 # Targets of every process's exe, cwd, root, open fds and memory-mapped files. One find, not a readlink per fd:
 # a busy desktop has tens of thousands of fds. Translate bind-mount aliases
-# using each process's mount table, but never exclude /tmp itself.
+# using the mount table matching the target, but never exclude /tmp itself.
 in_use() {
-	find /proc/[0-9]*/exe /proc/[0-9]*/cwd /proc/[0-9]*/root /proc/[0-9]*/fd /proc/[0-9]*/map_files -maxdepth 1 -type l -printf '%p\0%l\0' 2>/dev/null |
+	find /proc/self/ns/mnt /proc/[0-9]*/ns/mnt /proc/[0-9]*/exe /proc/[0-9]*/cwd /proc/[0-9]*/root /proc/[0-9]*/fd /proc/[0-9]*/map_files -maxdepth 1 -type l -printf '%p\0%l\0' 2>/dev/null |
 		LC_ALL=C awk '
 		function decode(path) {
 			gsub(/\\040/, " ", path)
@@ -87,6 +87,20 @@ in_use() {
 		function suffix(path, dir) {
 			return dir == "/" ? path : substr(path, length(dir) + 1)
 		}
+		function containing(pid, path, n, best, longest) {
+			for (n = 1; n <= count[pid]; n++) {
+				if (under(path, point[pid, n]) && length(point[pid, n]) >= longest) {
+					longest = length(point[pid, n])
+					best = n
+				}
+			}
+			return best
+		}
+		function near(pid, path, list, k, m) {
+			m = split(tmppoints[pid], list, SUBSEP)
+			for (k = 2; k <= m; k++) if (under(path, list[k])) return 1
+			return 0
+		}
 		function mounts(pid, file, line, fields, n) {
 			if (pid in count) return
 			count[pid] = 0
@@ -94,41 +108,43 @@ in_use() {
 			RS = "\n"
 			while ((getline line < file) > 0) {
 				split(line, fields)
-				if (fields[3] != device) continue
 				n = ++count[pid]
+				dev[pid, n] = fields[3]
 				root[pid, n] = decode(fields[4])
 				point[pid, n] = decode(fields[5])
+				if (dev[pid, n] == device) tmppoints[pid] = tmppoints[pid] SUBSEP point[pid, n]
 			}
 			close(file)
 			RS = "\0"
 		}
 		BEGIN {
-			while ((getline line < "/proc/self/mountinfo") > 0) {
-				split(line, fields)
-				mountpoint = decode(fields[5])
-				if (under("/tmp", mountpoint) && length(mountpoint) > longest) {
-					longest = length(mountpoint)
-					device = fields[3]
-					tmp_root = decode(fields[4])
-					tmp_root = (tmp_root == "/" ? "" : tmp_root) suffix("/tmp", mountpoint)
-					if (tmp_root == "") tmp_root = "/"
-				}
-			}
-			close("/proc/self/mountinfo")
-			RS = "\0"
+			mounts("self")
+			n = containing("self", "/tmp")
+			device = dev["self", n]
+			tmp_root = root["self", n]
+			tmp_root = (tmp_root == "/" ? "" : tmp_root) suffix("/tmp", point["self", n])
+			if (tmp_root == "") tmp_root = "/"
+			# The device was unknown while "self" was read; list its /tmp-device mounts now.
+			for (n = 1; n <= count["self"]; n++)
+				if (dev["self", n] == device) tmppoints["self"] = tmppoints["self"] SUBSEP point["self", n]
 		}
 		NR % 2 { split($0, parts, "/"); pid = parts[3]; next }
 		{
-			if (index($0, "/tmp/") == 1) printf "%s%c", $0, 0
+			if (parts[4] == "ns") { namespace[pid] = $0; next }
 			if (substr($0, 1, 1) != "/" || device == "") next
-			mounts(pid)
-			for (n = 1; n <= count[pid]; n++) {
-				if (!under($0, point[pid, n])) continue
-				path = (root[pid, n] == "/" ? "" : root[pid, n]) suffix($0, point[pid, n])
-				if (!under(path, tmp_root)) continue
-				path = "/tmp" suffix(path, tmp_root)
-				if (path != "/tmp") printf "%s%c", path, 0
-			}
+			table = (namespace[pid] != "" && namespace[pid] == namespace["self"] ? "self" : pid)
+			mounts(table)
+			# Cheap pre-check: most targets lie on no mount of the /tmp filesystem.
+			if (!near(table, $0)) next
+			n = containing(table, $0)
+			if (dev[table, n] != device) next
+			path = (root[table, n] == "/" ? "" : root[table, n]) suffix($0, point[table, n])
+			if (!under(path, tmp_root)) next
+			path = "/tmp" suffix(path, tmp_root)
+			gsub(/\/+/, "/", path)
+			sub(/\/$/, "", path)
+			if (path ~ /(^|\/)\.\.?($|\/)/) next
+			if (index(path, "/tmp/") == 1 && length(path) > 5) printf "%s%c", path, 0
 		}'
 }
 
