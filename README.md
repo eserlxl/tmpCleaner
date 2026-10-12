@@ -1,6 +1,6 @@
 # tmpCleaner
 
-Deletes entries under `/tmp` that are older than 6 hours. Runs as a systemd
+Deletes entries under `/tmp` that are older than 12 hours. Runs as a systemd
 timer: 5 minutes after boot, then every 15 minutes.
 
 The deletion itself is done by `systemd-tmpfiles --clean` with its own rule
@@ -11,14 +11,14 @@ files that running programs still use.
 ## What gets deleted
 
 A file is removed only when its access, birth, status-change and modification
-times are **all** older than 6 hours. So a file that was recently written or
+times are **all** older than 12 hours. So a file that was recently written or
 extracted survives. Reading alone is a weak signal: with the usual `relatime`
 mount option the access time moves at most once a day.
 
 A directory is removed when it is empty (after its old contents are gone) and
-its birth and modification times are older than 6 hours. Its access time is
+its birth and modification times are older than 12 hours. Its access time is
 ignored, because merely listing a directory (`ls`, a `--dry-run` preview)
-renews it. A directory created less than 6 hours ago stays even when empty.
+renews it. A directory created less than 12 hours ago stays even when empty.
 
 Previews print directories as `Would remove directory`; a preview cannot know
 that a directory will still hold a kept file, so a real run may remove fewer.

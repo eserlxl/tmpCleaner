@@ -19,7 +19,7 @@ awk '$1 == "d" { gsub(/[bcBC]/, "", $6) } { print }' "$here/tmpcleaner.conf" |
 	sed "s#/tmp#$dir#" > "$conf"
 printf '%s' "$(cat "$conf")" > "$conf"
 
-old() { touch -d '7 hours ago' "$@"; }
+old() { touch -d '13 hours ago' "$@"; }
 mkdir -p "$dir/emptydir" "$dir/freshdir" "$dir/olddir" "$dir/.X11-unix" "$dir/systemd-private-abc/tmp" "$dir/workdir"
 touch "$dir/old.txt" "$dir/new.txt" "$dir/olddir/f" "$dir/.X11-unix/X0" \
       "$dir/.X0-lock" "$dir/systemd-private-abc/tmp/f" "$dir/open a%b.txt" \
@@ -30,11 +30,11 @@ old "$dir/olddir" "$dir/.X11-unix" "$dir/systemd-private-abc/tmp" \
     "$dir/systemd-private-abc" "$dir/workdir"
 
 # An old empty dir that was just listed goes; a just-created empty one stays.
-touch -m -d '7 hours ago' "$dir/emptydir"
+touch -m -d '13 hours ago' "$dir/emptydir"
 # An old directory still holding a fresh file: announced by the preview, but kept.
 mkdir "$dir/mixed"
 touch "$dir/mixed/fresh"
-touch -m -d '7 hours ago' "$dir/mixed"
+touch -m -d '13 hours ago' "$dir/mixed"
 touch -a "$dir/emptydir"
 
 # Open files with hostile names must protect only themselves: "*" must not
@@ -122,7 +122,7 @@ PY
 	done
 	# touch -h sets the times without opening the socket.
 	# The forging socket stays fresh: its own name is cut at the forged line.
-	touch -h -d '7 hours ago' "$dir/sock" "$nlsock" "$dir/sockdir/s" "$dir/dotsock"
+	touch -h -d '13 hours ago' "$dir/sock" "$nlsock" "$dir/sockdir/s" "$dir/dotsock"
 	sock_running=1
 else
 	echo "SKIP: socket protection (python3 or unshare -rmn is unavailable)"
@@ -287,7 +287,7 @@ if [ "$bind_running" = 1 ]; then
 	TMPDIR=$bindpoint unshare -rm sh -c '
 		mount -t tmpfs -o size=64k,nr_inodes=16 tmpfs /tmp
 		touch /tmp/stale
-		touch -d "7 hours ago" /tmp/stale
+		touch -d "13 hours ago" /tmp/stale
 		i=0
 		while touch "/tmp/f$i" 2>/dev/null; do i=$((i + 1)); done
 		printf "d /tmp - - - amM:6h\n" > "$TMPDIR/full.conf"
@@ -593,7 +593,7 @@ trap 'kill $pids 2>/dev/null || :; rm -rf "$dir" "$cfg" "$dir2" "$bindpoint" "$s
 
 sed "s#/tmp#$dir2#" "$here/tmpcleaner.conf" > "$conf2"
 touch "$dir2/extracted.txt"
-touch -d '7 hours ago' "$dir2/extracted.txt"
+touch -d '13 hours ago' "$dir2/extracted.txt"
 
 run_log=$(TMPCLEANER_CONF=$conf2 sh "$here/tmpcleaner" 2>&1 >/dev/null)
 [ "$run_log" = 'tmpcleaner: removed 0 files and 0 directories' ] || {

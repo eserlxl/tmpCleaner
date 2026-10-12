@@ -1,5 +1,5 @@
 [Unit]
-Description=Delete /tmp entries older than 6 hours
+Description=Delete /tmp entries older than 12 hours
 Documentation=https://github.com/eserlxl/tmpCleaner man:tmpfiles.d(5)
 
 [Service]
