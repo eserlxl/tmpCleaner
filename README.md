@@ -147,7 +147,9 @@ tmpcleaner: removed 3 files and 2 directories
 
 The counts compare listings of the cleaned trees taken just before and just
 after the run, so they are exact for names of any shape; anything another
-program deletes in that second is counted too. systemd-tmpfiles itself logs to
+program deletes in that second is counted too. A `d` path written with escapes
+in the configuration (`\x20`, `\"`) is not decoded for these listings, so
+removals under it are left out of the counts (cleaning is unaffected). systemd-tmpfiles itself logs to
 the journal as usual, so warnings keep their severity.
 
 Change the interval with `sudo systemctl edit tmpcleaner.timer`. A run that
