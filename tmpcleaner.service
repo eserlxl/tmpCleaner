@@ -5,6 +5,8 @@ Documentation=https://github.com/eserlxl/tmpCleaner man:tmpfiles.d(5)
 [Service]
 Type=oneshot
 ExecStart=/usr/local/bin/tmpcleaner
+# A run takes seconds; a hung one (e.g. on a stuck mount) must not block the timer.
+TimeoutStartSec=10min
 # No PrivateTmp: the job must see the real /tmp.
 ProtectSystem=strict
 ReadWritePaths=/tmp

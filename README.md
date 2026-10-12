@@ -81,7 +81,9 @@ systemctl list-timers tmpcleaner.timer
 journalctl -u tmpcleaner.service
 ```
 
-Change the interval with `sudo systemctl edit tmpcleaner.timer`.
+Change the interval with `sudo systemctl edit tmpcleaner.timer`. A run that
+takes longer than ten minutes is stopped and logged as failed; the next timer
+run starts normally.
 
 ### Override the age
 
