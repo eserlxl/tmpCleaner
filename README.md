@@ -77,6 +77,16 @@ to the new defaults. An edited config is kept, and the new defaults land in
 kept in `tmpcleaner.conf.default` to tell the two apart; an install made before
 that file existed gets a `.new` once.
 
+### Options
+
+The wrapper provides the following options:
+
+- `-h`, `--help`: Show this help message and exit (exits 0 even when configuration is missing).
+- `--print-rules`: Print generated tmpfiles rules and exit without deleting anything.
+- `--check PATH`: Report whether an existing absolute `/tmp` path would be removed without deleting anything. Exit 0 if removed, 1 if kept, 2 for an invalid path or usage.
+
+Other arguments (such as `--dry-run`) are passed to `systemd-tmpfiles`.
+
 Later previews: `sudo tmpcleaner --dry-run`. Show the config and generated
 in-use exclusions without deleting anything: `sudo tmpcleaner --print-rules`.
 
@@ -110,9 +120,23 @@ Change the interval with `sudo systemctl edit tmpcleaner.timer`. A run that
 takes longer than ten minutes is stopped and logged as failed; the next timer
 run starts normally.
 
+### Environment variables
+
+The following environment variables configure the wrapper:
+
+- `TMPCLEANER_CONF`: Path to configuration file (default: `/etc/tmpcleaner/tmpcleaner.conf`).
+- `TMPCLEANER_AGE`: Override duration on every `d` rule (e.g. `6h`, `30m`).
+- `TMPCLEANER_FULL_PERCENT`: Threshold percentage of `/tmp` usage (1-100).
+- `TMPCLEANER_FULL_AGE`: Age duration to use when `/tmp` usage meets or exceeds `TMPCLEANER_FULL_PERCENT`.
+- `TMPCLEANER_LIST`: Set to 1 to list removed paths with control bytes and backslashes escaped (default: off).
+
+A configuration file other than the installed one can be previewed with
+`sudo env TMPCLEANER_CONF=/path/to/custom.conf tmpcleaner --dry-run`; an
+unreadable file stops the run before cleaning.
+
 ### Override the age
 
-Set `TMPCLEANER_AGE` to override the duration on every `d` rule while keeping
+Set `TMPCLEANER_AGE` to override the duration on every `d` rule (e.g. `6h`, `30m`) while keeping
 its age-by letters and the config unchanged. Use a non-negative integer with
 an optional unit: `us`, `ms`, `s`, `m`, `min`, `h`, `d`, or `w` (seconds when
 omitted). An empty or invalid value stops the run before cleaning; when unset,
@@ -133,10 +157,11 @@ sudo env TMPCLEANER_AGE=12h tmpcleaner --dry-run
 
 ### Use a shorter age when /tmp is nearly full
 
-Pressure mode is off by default. Set both `TMPCLEANER_FULL_PERCENT` (an integer
-from 1 to 100) and `TMPCLEANER_FULL_AGE` (the same format as `TMPCLEANER_AGE`)
-to enable it. With either variable unset, the usual age applies. When both are
-set, invalid values stop the run before cleaning.
+Pressure mode is off by default. Set both `TMPCLEANER_FULL_PERCENT` (threshold
+percentage of `/tmp` usage, an integer from 1 to 100) and `TMPCLEANER_FULL_AGE`
+(age duration to use when `/tmp` usage meets or exceeds `TMPCLEANER_FULL_PERCENT`,
+in the same format as `TMPCLEANER_AGE`) to enable it. With either variable unset,
+the usual age applies. When both are set, invalid values stop the run before cleaning.
 
 Run `sudo systemctl edit tmpcleaner.service` and add, for example:
 
@@ -162,7 +187,7 @@ cleanup, in addition to the summary. Files are logged as
 `tmpcleaner: removed: PATH` and directories as
 `tmpcleaner: removed directory: PATH`. Control bytes and backslashes in each
 path use `\xHH` escapes so a filename cannot start a new journal line.
-Unset or empty leaves the usual output unchanged; any other value stops
+Unset or empty leaves the usual output unchanged (default: off); any other value stops
 the run before cleaning.
 
 For the service, run `sudo systemctl edit tmpcleaner.service` and add:
