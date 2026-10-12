@@ -211,5 +211,44 @@ TMPCLEANER_CONF=$conf2 sh "$here/tmpcleaner"
 
 [ -e "$dir2/extracted.txt" ] || { echo "FAIL: extracted.txt should be kept"; fail=1; }
 
+# The three-way config upgrade that decides whether a reinstall keeps or replaces
+# an admin's exclusions.
+confdir=$(mktemp -d /tmp/tmpcleaner-test.XXXXXX)
+trap 'kill $pids 2>/dev/null; rm -rf "$dir" "$conf" "$dir2" "$conf2" "$confdir"' EXIT
+
+make -s -C "$here" install-conf CONFDIR="$confdir" >/dev/null
+cmp -s "$confdir/tmpcleaner.conf" "$here/tmpcleaner.conf" || {
+	echo "FAIL: initial install should create tmpcleaner.conf matching shipped file"
+	fail=1
+}
+cmp -s "$confdir/tmpcleaner.conf.default" "$here/tmpcleaner.conf" || {
+	echo "FAIL: initial install should create tmpcleaner.conf.default matching shipped file"
+	fail=1
+}
+
+sed '$d' "$here/tmpcleaner.conf" > "$confdir/tmpcleaner.conf"
+cp "$confdir/tmpcleaner.conf" "$confdir/tmpcleaner.conf.default"
+make -s -C "$here" install-conf CONFDIR="$confdir" >/dev/null
+cmp -s "$confdir/tmpcleaner.conf" "$here/tmpcleaner.conf" || {
+	echo "FAIL: unedited upgrade should update tmpcleaner.conf to shipped file"
+	fail=1
+}
+[ ! -e "$confdir/tmpcleaner.conf.new" ] || {
+	echo "FAIL: unedited upgrade should not create tmpcleaner.conf.new"
+	fail=1
+}
+
+printf 'x /tmp/local-rule\n' >> "$confdir/tmpcleaner.conf"
+make -s -C "$here" install-conf CONFDIR="$confdir" >/dev/null
+grep -Fxq 'x /tmp/local-rule' "$confdir/tmpcleaner.conf" || {
+	echo "FAIL: local rule should survive reinstall"
+	fail=1
+}
+cmp -s "$confdir/tmpcleaner.conf.new" "$here/tmpcleaner.conf" || {
+	echo "FAIL: edited reinstall should create tmpcleaner.conf.new matching shipped file"
+	fail=1
+}
+rm -rf "$confdir"
+
 [ "$fail" = 0 ] && echo "PASS"
 exit "$fail"
