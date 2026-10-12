@@ -100,8 +100,9 @@ Each real run logs one summary, including runs that remove nothing:
 tmpcleaner: removed 3 files and 2 directories
 ```
 
-Warnings keep their journal severity; individual removal debug messages are
-suppressed. Previews and `--print-rules` keep their usual output.
+The counts come from a preview of the same rules taken just before the run;
+systemd-tmpfiles itself logs to the journal as usual, so warnings keep their
+severity. Previews and `--print-rules` keep their usual output.
 
 Change the interval with `sudo systemctl edit tmpcleaner.timer`. A run that
 takes longer than ten minutes is stopped and logged as failed; the next timer
