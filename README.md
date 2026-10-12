@@ -84,8 +84,9 @@ Check one path without deleting anything: `sudo tmpcleaner --check /tmp/my-job/f
 The path must exist and be absolute and under `/tmp`. It prints
 `would be removed: PATH` (exit 0) or `kept: PATH` (exit 1), using the same
 age, pressure and in-use rules as a real run. Invalid paths or missing arguments
-produce a message and exit 2. This is a snapshot; directory results have the
-same preview limitation described above.
+produce a message and exit 2. It reads the preview's text, which a crafted file
+name can imitate, so it may raise a false "would be removed" but never a false
+"kept"; a directory holding names with newlines cannot be judged and exits 2.
 
 Status and logs:
 
@@ -100,9 +101,10 @@ Each real run logs one summary, including runs that remove nothing:
 tmpcleaner: removed 3 files and 2 directories
 ```
 
-The counts come from a preview of the same rules taken just before the run;
-systemd-tmpfiles itself logs to the journal as usual, so warnings keep their
-severity. Previews and `--print-rules` keep their usual output.
+The counts compare listings of the cleaned trees taken just before and just
+after the run, so they are exact for names of any shape; anything another
+program deletes in that second is counted too. systemd-tmpfiles itself logs to
+the journal as usual, so warnings keep their severity.
 
 Change the interval with `sudo systemctl edit tmpcleaner.timer`. A run that
 takes longer than ten minutes is stopped and logged as failed; the next timer
@@ -155,8 +157,8 @@ still apply.
 
 ### List removed paths
 
-Set `TMPCLEANER_LIST=1` to log each preview candidate that no longer exists
-after a real cleanup, in addition to the summary. Files are logged as
+Set `TMPCLEANER_LIST=1` to log each path that disappeared during a real
+cleanup, in addition to the summary. Files are logged as
 `tmpcleaner: removed: PATH` and directories as
 `tmpcleaner: removed directory: PATH`. Control bytes and backslashes in each
 path use `\xHH` escapes so a filename cannot start a new journal line.

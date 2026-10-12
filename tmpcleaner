@@ -244,8 +244,18 @@ if [ -n "$check" ]; then
 	fi
 	# A directory goes only if everything beneath it goes too: the preview
 	# announces old directories even when a kept entry will block the rmdir.
+	# Preview lines are text a crafted name can forge, so errors may only lean
+	# towards "would be removed" (a false alarm), never towards a false "kept":
+	# a directory counts as removable once its lines cover all its entries, and
+	# entries whose names hold a newline (their lines cannot be read) stop the check.
 	entries=0
-	[ -d "$check" ] && [ ! -L "$check" ] && entries=$(find "$check" -mindepth 1 -printf . 2>/dev/null | wc -c)
+	if [ -d "$check" ] && [ ! -L "$check" ]; then
+		if [ -n "$(find "$check" -mindepth 1 -name "*$nl*" -print -quit 2>/dev/null)" ]; then
+			echo "tmpcleaner: --check cannot judge a directory holding names with newlines" >&2
+			exit 2
+		fi
+		entries=$(find "$check" -mindepth 1 -printf . 2>/dev/null | wc -c)
+	fi
 	if printf '%s\n' "$preview" | CHECK=$check ENTRIES=$entries LC_ALL=C awk '
 		BEGIN {
 			path = ENVIRON["CHECK"]
@@ -255,7 +265,7 @@ if [ -n "$check" ]; then
 		$0 == file { found_file = 1 }
 		$0 == directory { found_directory = 1 }
 		/"$/ && (index($0, "Would remove \"" path "/") == 1 || index($0, "Would remove directory \"" path "/") == 1) { inside++ }
-		END { exit !(found_file || (found_directory && inside == ENVIRON["ENTRIES"])) }
+		END { exit !(found_file || (found_directory && inside >= ENVIRON["ENTRIES"] + 0)) }
 		'; then
 		printf 'would be removed: %s\n' "$2"
 		exit 0
@@ -271,52 +281,33 @@ for arg do
 	fi
 done
 
-# Count what the run removes from a preview of the same rules taken just before
-# it, never from the run's own log: the run logs natively to the journal, where
-# a file name holding a newline cannot forge a separate, differently levelled
-# entry. A candidate counts once it is gone after the run ("Would remove
-# directory" is printed for directories that still hold kept files).
-# Private scratch space (mode 0700, random name), excluded from the cleanup so
-# neither another user nor the run itself can touch the files written there.
+# Count what the run removes by comparing NUL-separated snapshots taken
+# before and after it. Names are never parsed out of systemd-tmpfiles' text,
+# where a crafted name could forge or hide a record; the run itself logs
+# natively to the journal. Entries another process deletes during the run are
+# counted too. Scratch files sit in one private directory (mode 0700, random
+# name) that the rules exclude and the snapshots skip.
 scratch=$(mktemp -d)
 trap 'rm -rf "$scratch"' EXIT
-rulefile=$scratch/rules
-files=$scratch/files
-directories=$scratch/directories
 {
 	rules
 	printf 'x %s\n' "$scratch"
-} > "$rulefile"
-systemd-tmpfiles --clean --dry-run - < "$rulefile" 2>&1 |
-	LC_ALL=C awk -v files="$files" -v directories="$directories" '
-	# Only whole one-line messages count. A name holding a newline is split
-	# across lines and cannot be told apart from a forged line, so its parts
-	# are skipped rather than stitched back together.
-	/^Would remove (directory )?".*"$/ {
-		directory = ($0 ~ /^Would remove directory "/)
-		path = substr($0, directory ? 25 : 15)
-		sub(/"$/, "", path)
-		printf "%s%c", path, 0 > (directory ? directories : files)
-	}
-	' || :
-# Preview names are parsed from text, and a crafted name can fake a candidate
-# line. Keep only candidates that exist now, so a listed path always existed
-# before the run and was gone after it.
-for list in "$files" "$directories"; do
-	# shellcheck disable=SC2185 # the start points come from the -files0-from list
-	find -files0-from "$list" -maxdepth 0 -print0 2>/dev/null > "$list.now" || :
-	mv -f "$list.now" "$list"
-done
+} > "$scratch/rules"
+# Snapshot only the trees the d rules clean (normally just /tmp).
+awk '$1 == "d" { print $2 }' "$scratch/rules" > "$scratch/roots"
+snapshot() {
+	while IFS= read -r root; do
+		find "$root" -xdev -mindepth 1 -path "$scratch" -prune -o -printf '%y %p\0' 2>/dev/null || :
+	done < "$scratch/roots" | LC_ALL=C sort -zu > "$1"
+}
+snapshot "$scratch/before"
 
 status=0
-systemd-tmpfiles --clean "$@" - < "$rulefile" || status=$?
+systemd-tmpfiles --clean "$@" - < "$scratch/rules" || status=$?
 
-{
-	# shellcheck disable=SC2185 # the start points come from the -files0-from list
-	find -files0-from "$files" -maxdepth 0 -print0 2>/dev/null || :
-	# shellcheck disable=SC2185 # the start points come from the -files0-from list
-	find -files0-from "$directories" -maxdepth 0 -print0 2>/dev/null || :
-} | LC_ALL=C awk -v files="$files" -v list="${TMPCLEANER_LIST:-}" '
+snapshot "$scratch/after"
+LC_ALL=C comm -z -23 "$scratch/before" "$scratch/after" |
+	LC_ALL=C awk -v list="${TMPCLEANER_LIST:-}" '
 	BEGIN {
 		RS = "\0"
 		for (i = 1; i < 32; i++) escapes[sprintf("%c", i)] = sprintf("\\x%02x", i)
@@ -330,15 +321,11 @@ systemd-tmpfiles --clean "$@" - < "$rulefile" || status=$?
 		}
 		return result
 	}
-	FILENAME == "-" { exists[$0] = 1; next }
-	!($0 in exists) {
-		directory = (FILENAME != files)
-		if (directory) removed_directories++; else removed_files++
-		if (list == 1 && !($0 in logged)) {
-			logged[$0] = 1
-			printf "tmpcleaner: removed%s: %s\n", directory ? " directory" : "", escaped($0)
-		}
+	{
+		directory = (substr($0, 1, 1) == "d")
+		if (directory) directories++; else files++
+		if (list == 1) printf "tmpcleaner: removed%s: %s\n", directory ? " directory" : "", escaped(substr($0, 3))
 	}
-	END { printf "tmpcleaner: removed %d files and %d directories\n", removed_files, removed_directories }
-	' - "$files" "$directories" >&2
+	END { printf "tmpcleaner: removed %d files and %d directories\n", files, directories }
+	' >&2
 exit "$status"

@@ -7,10 +7,12 @@ set -eu
 unset TMPCLEANER_AGE TMPCLEANER_FULL_PERCENT TMPCLEANER_FULL_AGE TMPCLEANER_LIST
 here=$(cd "$(dirname "$0")/.." && pwd)
 dir=$(mktemp -d /tmp/tmpcleaner-test.XXXXXX)
-conf=$dir.conf
+# Fixture configs live in a private directory, never at a guessable /tmp path.
+cfg=$(mktemp -d)
+conf=$cfg/conf
 pids=
 bindpoint=
-trap 'kill $pids 2>/dev/null || :; rm -rf "$dir" "$conf" "$bindpoint"' EXIT
+trap 'kill $pids 2>/dev/null || :; rm -rf "$dir" "$cfg" "$bindpoint"' EXIT
 
 awk '$1 == "d" { gsub(/[bcBC]/, "", $6) } { print }' "$here/tmpcleaner.conf" |
 	sed "s#/tmp#$dir#" > "$conf"
@@ -148,14 +150,14 @@ printf '%s\n' "$age_rules" | grep -Eq "^d $dir - - - amM:8h$" || {
 	fail=1
 }
 # Tabs and trailing whitespace must not leave the old age behind as an extra field.
-printf 'd\t%s\t-\t-\t-\tamM:6h \n' "$dir" > "$dir.ws.conf"
-ws_rules=$(TMPCLEANER_AGE=8h TMPCLEANER_CONF=$dir.ws.conf sh "$here/tmpcleaner" --print-rules)
+printf 'd\t%s\t-\t-\t-\tamM:6h \n' "$dir" > "$cfg/ws.conf"
+ws_rules=$(TMPCLEANER_AGE=8h TMPCLEANER_CONF=$cfg/ws.conf sh "$here/tmpcleaner" --print-rules)
 if ! { [ "$(printf '%s\n' "$ws_rules" | grep -c '^d')" = 1 ] &&
 	printf '%s\n' "$ws_rules" | grep -q ' amM:8h$'; }; then
 	echo "FAIL: age override should rewrite tab-separated rules with trailing space"
 	fail=1
 fi
-rm -f "$dir.ws.conf"
+rm -f "$cfg/ws.conf"
 if TMPCLEANER_AGE='1h; x' TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --print-rules; then
 	echo "FAIL: invalid age override should fail"
 	fail=1
@@ -248,6 +250,12 @@ if [ "$status" -ne 1 ] || [ "$check_out" != "kept: $dir/mixed" ]; then
 	echo "FAIL: --check should keep an old directory that still holds a fresh file"
 	fail=1
 fi
+status=0
+TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --check "$dir" >/dev/null 2>&1 || status=$?
+if [ "$status" -ne 2 ]; then
+	echo "FAIL: --check should refuse a directory holding names with newlines"
+	fail=1
+fi
 for path in '' old.txt / /tmp "$dir/missing" "$dir/../.." "$newline"; do
 	status=0
 	check_out=$(TMPCLEANER_CONF=$dir/missing.conf sh "$here/tmpcleaner" --check "$path" 2>&1) || status=$?
@@ -268,12 +276,13 @@ run_log=$(TMPCLEANER_LIST=1 TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" 2>&1 >/d
 
 fail=0
 if ! { [ "$(printf '%s\n' "$run_log" | grep -c '^tmpcleaner: removed [0-9]')" = 1 ] &&
-	printf '%s\n' "$run_log" | grep -Fxq "tmpcleaner: removed $((3 + bind_running)) files and 2 directories"; }; then
+	printf '%s\n' "$run_log" | grep -Fxq "tmpcleaner: removed $((5 + bind_running)) files and 2 directories"; }; then
 	echo "FAIL: real run should log one summary with the expected removal counts"
 	fail=1
 fi
 if ! { [ "$(printf '%s\n' "$run_log" | grep -Fxc "tmpcleaner: removed: $dir/old.txt")" = 1 ] &&
-	[ "$(printf '%s\n' "$run_log" | grep -c '^tmpcleaner: removed: ')" = "$((3 + bind_running))" ] &&
+	[ "$(printf '%s\n' "$run_log" | grep -Fxc "tmpcleaner: removed: $dir/old\x0a<0>forged")" = 1 ] &&
+	[ "$(printf '%s\n' "$run_log" | grep -c '^tmpcleaner: removed: ')" = "$((5 + bind_running))" ] &&
 	[ "$(printf '%s\n' "$run_log" | grep -c '^tmpcleaner: removed directory: ')" = 2 ]; }; then
 	echo "FAIL: listing should log every removed path once with newlines escaped"
 	fail=1
@@ -295,12 +304,12 @@ if printf '%s\n' "$run_log" | grep -q 'Removing'; then
 	echo "FAIL: removal debug lines should not leak into the log"
 	fail=1
 fi
-printf 'd relative-path - - - 1h\n' > "$dir.bad.conf"
-if TMPCLEANER_CONF=$dir.bad.conf sh "$here/tmpcleaner" 2>/dev/null; then
+printf 'd relative-path - - - 1h\n' > "$cfg/bad.conf"
+if TMPCLEANER_CONF=$cfg/bad.conf sh "$here/tmpcleaner" 2>/dev/null; then
 	echo "FAIL: a systemd-tmpfiles error should make tmpcleaner fail"
 	fail=1
 fi
-rm -f "$dir.bad.conf"
+rm -f "$cfg/bad.conf"
 if TMPCLEANER_CONF=$dir/missing.conf sh "$here/tmpcleaner"; then
 	echo "FAIL: missing config should fail"
 	fail=1
@@ -386,21 +395,21 @@ fi
 
 # The run keeps its own scratch files even when they sit in the cleaned tree.
 dir3=$(mktemp -d /tmp/tmpcleaner-test.XXXXXX)
-printf 'd %s - - - amM:0\n' "$dir3" > "$dir3.conf"
+printf 'd %s - - - amM:0\n' "$dir3" > "$cfg/conf3"
 touch "$dir3/f"
 status=0
-scratch_log=$(TMPDIR=$dir3 TMPCLEANER_AGE=0 TMPCLEANER_CONF=$dir3.conf sh "$here/tmpcleaner" 2>&1) || status=$?
-if [ "$status" -ne 0 ] || ! printf '%s\n' "$scratch_log" | grep -q '^tmpcleaner: removed [0-9]'; then
+scratch_log=$(TMPDIR=$dir3 TMPCLEANER_AGE=0 TMPCLEANER_CONF=$cfg/conf3 sh "$here/tmpcleaner" 2>&1) || status=$?
+if [ "$status" -ne 0 ] || ! printf '%s\n' "$scratch_log" | grep -Fxq 'tmpcleaner: removed 1 files and 0 directories'; then
 	echo "FAIL: the run must not remove its own scratch files"
 	fail=1
 fi
-rm -rf "$dir3" "$dir3.conf"
+rm -rf "$dir3" "$cfg/conf3"
 
 # A second run tests that the shipped age rule keeps freshly extracted files
 # (birth and ctime stay current even when atime and mtime are backdated).
 dir2=$(mktemp -d /tmp/tmpcleaner-test.XXXXXX)
-conf2=$dir2.conf
-trap 'kill $pids 2>/dev/null || :; rm -rf "$dir" "$conf" "$dir2" "$conf2" "$bindpoint"' EXIT
+conf2=$cfg/conf2
+trap 'kill $pids 2>/dev/null || :; rm -rf "$dir" "$cfg" "$dir2" "$bindpoint"' EXIT
 
 sed "s#/tmp#$dir2#" "$here/tmpcleaner.conf" > "$conf2"
 touch "$dir2/extracted.txt"
@@ -417,7 +426,7 @@ run_log=$(TMPCLEANER_CONF=$conf2 sh "$here/tmpcleaner" 2>&1 >/dev/null)
 # The three-way config upgrade that decides whether a reinstall keeps or replaces
 # an admin's exclusions.
 confdir=$(mktemp -d /tmp/tmpcleaner-test.XXXXXX)
-trap 'kill $pids 2>/dev/null || :; rm -rf "$dir" "$conf" "$dir2" "$conf2" "$confdir" "$bindpoint"' EXIT
+trap 'kill $pids 2>/dev/null || :; rm -rf "$dir" "$cfg" "$dir2" "$confdir" "$bindpoint"' EXIT
 
 make -s -C "$here" install-conf CONFDIR="$confdir" >/dev/null
 cmp -s "$confdir/tmpcleaner.conf" "$here/tmpcleaner.conf" || {
