@@ -57,6 +57,18 @@ until [ -n "$(find /proc/[0-9]*/cwd -maxdepth 0 -lname "$dir/workdir" 2>/dev/nul
 done
 old "$dir/sleep"
 
+fail=0
+preview=$(TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --dry-run 2>&1)
+echo "$preview" | grep -q 'Would remove.*old\.txt' || {
+	echo "FAIL: preview should announce removal of old.txt"
+	fail=1
+}
+[ -e "$dir/old.txt" ] || {
+	echo "FAIL: old.txt should still exist"
+	fail=1
+}
+[ "$fail" = 0 ] || exit 1
+
 TMPCLEANER_CONF=$conf sh "$here/tmpcleaner"
 
 fail=0
