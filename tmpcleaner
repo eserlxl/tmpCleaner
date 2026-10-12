@@ -276,7 +276,7 @@ in_use() {
 		# name before it; each name is resolved as the process holding the
 		# socket sees it, and only a real socket on /tmp is kept, so a forged
 		# record can keep no other file.
-		function sockets(pid, file, line, n, k, inode, name, holder_pid, saved) {
+		function sockets(pid, file, line, n, k, inode, name, holder_pid, args, queued, saved) {
 			file = "/proc/" pid "/net/unix"
 			saved = RS
 			RS = "\n"
@@ -295,8 +295,14 @@ in_use() {
 				holder_pid = (inode[k] in holder) ? holder[inode[k]] : pid
 				# A name with . or .. is left to the kernel to resolve.
 				if (name[k] !~ /\/\.\.?(\/|$)/ && where(holder_pid, name[k]) == "") continue
-				socket(holder_pid, name[k])
+				args = args " " quote("/proc/" holder_pid "/root" name[k])
+				if (++queued == 200) {
+					verify(args)
+					args = ""
+					queued = 0
+				}
 			}
+			if (queued) verify(args)
 		}
 		# A shell word for s: single quotes, with each quote as '\''.
 		function quote(s, parts, n, i, word) {
@@ -305,17 +311,16 @@ in_use() {
 			for (i = 2; i <= n; i++) word = word "\047\\\047\047" parts[i]
 			return word "\047"
 		}
-		# Keep name, as pid resolves it, if it is a socket on /tmp. The name is
-		# untrusted, so it is single-quoted for the shell.
-		function socket(pid, name, cmd, line, saved) {
-			cmd = "stat -Lc \"%d %i %F\" -- " quote("/proc/" pid "/root" name) " 2>/dev/null"
+		# Keep the sockets on the /tmp filesystem among the quoted paths in
+		# args (one find for many: a process per name would cost seconds).
+		function verify(args, cmd, line, saved) {
+			cmd = "find -L" args " -maxdepth 0 -printf \"%D %i %y\\0\" 2>/dev/null"
 			saved = RS
-			RS = "\n"
-			line = ""
-			cmd | getline line
+			RS = "\0"
+			while ((cmd | getline line) > 0)
+				if (split(line, id, " ") == 3 && id[1] == tmpdev && id[3] == "s") want(id[2])
 			close(cmd)
 			RS = saved
-			if (split(line, id, " ") == 3 && id[1] == tmpdev && id[3] == "socket") want(id[2])
 		}
 		NR % 2 { link = $0; split(link, parts, "/"); pid = parts[3]; next }
 		parts[5] == "net" { if (!($0 in netns)) netns[$0] = pid; next }
