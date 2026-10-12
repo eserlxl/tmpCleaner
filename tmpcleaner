@@ -197,22 +197,42 @@ in_use() {
 			path = (root[table, n] == "/" ? "" : root[table, n]) suffix(target, point[table, n])
 			return path == "" ? "/" : path
 		}
-		function handle(pid, target, ns, r, path) {
+		# Our path of the root directory of pid, searched by inode on /tmp.
+		function locate(pid, cmd, line, saved) {
+			saved = RS
+			RS = "\n"
+			cmd = "stat -Lc %i /proc/" pid "/root 2>/dev/null"
+			cmd | getline line
+			close(cmd)
+			# Callers read maps with RS set to a newline; find prints NUL-ended.
+			RS = "\0"
+			if (line ~ /^[0-9]+$/) {
+				cmd = "find /tmp -xdev -type d -inum " line " -print0 -quit 2>/dev/null"
+				line = ""
+				cmd | getline line
+				close(cmd)
+			} else line = ""
+			RS = saved
+			return line
+		}
+		function handle(pid, target, ns, r, rel, path) {
 			if (substr(target, 1, 1) != "/" || device == "") return
 			# Links are relative to the namespace root, but a chrooted process
 			# lists only the mounts under its root, relative to it: rebase onto
-			# the root, and with no matching mount assume an unshared copy of
-			# ours (a wrong guess only keeps an extra file).
+			# the root, then assume an unshared copy of our table, then find
+			# the root directory by inode (a wrong guess only keeps a file).
 			ns = namespace[pid]
 			if (ns == "") path = translate(pid, target)
 			else if (ns == namespace["self"]) path = translate("self", target)
 			else {
 				r = rootlink[pid]
-				if (r != "" && under(target, r)) {
-					r = suffix(target, r)
-					path = translate(pid, r == "" ? "/" : r)
-				}
+				rel = (r != "" && under(target, r)) ? suffix(target, r) : "-"
+				if (rel != "-") path = translate(pid, rel == "" ? "/" : rel)
 				if (path == "") path = translate("self", target)
+				if (path == "" && rel != "-" && r != "/") {
+					if (!(pid in located)) located[pid] = locate(pid)
+					if (located[pid] != "") path = translate("self", located[pid] rel)
+				}
 			}
 			if (path == "") return
 			if (!under(path, tmp_root)) return
