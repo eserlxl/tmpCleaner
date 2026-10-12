@@ -55,6 +55,32 @@ old "$star" "$glob" "$bs" "$newline" "$carriage" "$tabbed" "$quote" "$dir/weirdX
 # one is an executable started from the directory, one memory-maps a file.
 cp /usr/bin/sleep "$dir"
 "$dir/sleep" 60 & pids="$pids $!"
+# A socket listening in another network namespace, which systemd-tmpfiles
+# cannot see, is still reached through its path.
+sock_running=0
+if command -v python3 >/dev/null && unshare -rn true 2>/dev/null; then
+	unshare -rn python3 -c 'import socket, sys, time
+s = socket.socket(socket.AF_UNIX)
+s.bind(sys.argv[1])
+s.listen()
+time.sleep(60)' "$dir/sock" &
+	pids="$pids $!"
+	waited=0
+	until [ -S "$dir/sock" ]; do
+		if [ "$waited" -ge 100 ]; then
+			echo "FAIL: timed out waiting for the socket"
+			exit 1
+		fi
+		waited=$((waited + 1))
+		sleep 0.1
+	done
+	# touch -h sets the times without opening the socket.
+	touch -h -d '7 hours ago' "$dir/sock"
+	sock_running=1
+else
+	echo "SKIP: socket protection (python3 or unshare -rn is unavailable)"
+fi
+
 # A name holding an invalid UTF-8 byte and a space, held open: under a UTF-8
 # locale the escaping must still quote all of it (the run below uses one).
 utf8="$dir/u$(printf '\377') x"
@@ -448,6 +474,9 @@ kept "*"; kept "we[i]rd?"; kept "back\\slash*"; kept "new${nl}line"
 kept "c${cr}d"; kept "t${tab}b"; kept "q\"uote"
 kept new.txt; kept krb5cc_1000; kept .X11-unix/X0; kept .X0-lock; kept systemd-private-abc/tmp/f
 kept "open a%b.txt"; kept workdir/f; kept sleep; kept libm.so.6; kept "${utf8#"$dir"/}"
+if [ "$sock_running" = 1 ]; then
+	kept sock
+fi
 if [ "$jail_running" = 1 ]; then
 	kept jail/data/state; kept alias/jail/data/state
 fi

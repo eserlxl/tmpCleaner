@@ -37,7 +37,8 @@ Never deleted:
   `/tmp/.X0-lock`, ...)
 - systemd `PrivateTmp` dirs of running services (`/tmp/systemd-private-*`)
 - Kerberos ticket caches (`/tmp/krb5cc_*`)
-- Unix sockets that are still in use (listed in `/proc/net/unix`)
+- Unix sockets that are still in use (listed in `/proc/net/unix` of any
+  network namespace)
 - Anything on a different mount below `/tmp`; symlinks are never followed
 
 Only `/tmp` is touched; `/var/tmp` keeps the distribution's defaults.

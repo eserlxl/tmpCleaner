@@ -125,7 +125,7 @@ control_escapes=$(
 in_use() {
 	# The builtin printf expands the globs without exec, so thousands of
 	# processes never exceed ARG_MAX; xargs runs find in order on batches.
-	printf '%s\0' /proc/self/ns/mnt /proc/[0-9]*/ns/mnt /proc/[0-9]*/root /proc/[0-9]*/exe /proc/[0-9]*/cwd /proc/[0-9]*/fd |
+	printf '%s\0' /proc/self/ns/mnt /proc/[0-9]*/ns/mnt /proc/[0-9]*/ns/net /proc/[0-9]*/root /proc/[0-9]*/exe /proc/[0-9]*/cwd /proc/[0-9]*/fd |
 		xargs -0 sh -c 'exec find "$@" -maxdepth 1 -type l -printf "%p\0%l\0" 2>/dev/null' sh |
 		LC_ALL=C awk '
 		function decode(path) {
@@ -264,7 +264,20 @@ in_use() {
 			RS = saved
 		}
 		# Root links come before the other links of a process, which need them.
+		# systemd-tmpfiles keeps only the sockets of its own network namespace;
+		# a socket bound in another one is reached through /tmp all the same.
+		# A crafted socket name can forge a line, which only keeps a file.
+		function sockets(pid, file, line, saved) {
+			file = "/proc/" pid "/net/unix"
+			saved = RS
+			RS = "\n"
+			while ((getline line < file) > 0)
+				if (sub(/^ *[^ ]+ +[^ ]+ +[^ ]+ +[^ ]+ +[^ ]+ +[^ ]+ +[^ ]+ /, "", line)) emit(line)
+			close(file)
+			RS = saved
+		}
 		NR % 2 { link = $0; split(link, parts, "/"); pid = parts[3]; next }
+		parts[5] == "net" { if (!($0 in netns)) { netns[$0] = 1; sockets(pid) } next }
 		parts[4] == "ns" { namespace[pid] = $0; next }
 		parts[4] == "root" { rootlink[pid] = $0; mapped(pid) }
 		{ handle(pid, $0, link) }
