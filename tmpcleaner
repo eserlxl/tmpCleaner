@@ -233,11 +233,12 @@ rules() {
 		# cannot be split into fields safely, so such a rule is left as is.
 		AGE=$TMPCLEANER_AGE LC_ALL=C awk '
 		$1 != "d" { print; next }
-		$2 ~ /^"/ && $2 !~ /"$/ { print "tmpcleaner: age override skipped for: " $0 > "/dev/stderr"; print; next }
+		$2 ~ /^["\047]/ && $2 !~ /["\047]$/ { print "tmpcleaner: age override skipped for: " $0 > "/dev/stderr"; print; next }
 		{
 			for (i = NF + 1; i <= 5; i++) $i = "-"
 			prefix = ""
-			if (NF >= 6 && match($6, /^[abcmABCM]+:/)) prefix = substr($6, 1, RLENGTH)
+			# Keep "~" (spares the immediate entries of a directory) and age-by letters.
+			if (NF >= 6 && match($6, /^~?([abcmABCM]+:)?/)) prefix = substr($6, 1, RLENGTH)
 			$6 = prefix ENVIRON["AGE"]
 			print
 		}' "$conf"
