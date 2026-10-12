@@ -43,6 +43,7 @@ old "$star" "$glob" "$bs" "$newline" "$carriage" "$tabbed" "$quote" "$dir/weirdX
 # one is an executable started from the directory, one memory-maps a file.
 cp /usr/bin/sleep "$dir"
 "$dir/sleep" 60 & pids="$pids $!"
+# shellcheck disable=SC2217 # sleep only holds these files open for the in-use scan
 sleep 60 < "$dir/open a%b.txt" 3<"$star" 4<"$glob" 5<"$bs" 6<"$newline" 7<"$carriage" 8<"$tabbed" 9<"$quote" & pids="$pids $!"
 (cd "$dir/workdir" && exec sleep 60) & pids="$pids $!"
 libm=$(ldconfig -p | awk '/libm\.so\.6/ { print $NF; exit }')
