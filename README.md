@@ -44,7 +44,7 @@ Only `/tmp` is touched; `/var/tmp` keeps the distribution's defaults.
 
 ## Requirements
 
-Linux with systemd (`systemd-tmpfiles`: systemd >= 249 for the service, >= 256 for `--dry-run` previews).
+Linux with systemd (`systemd-tmpfiles`: systemd >= 249 for the service, >= 256 for `--dry-run` previews and `--check`).
 
 ## Install
 
@@ -79,6 +79,14 @@ that file existed gets a `.new` once.
 
 Later previews: `sudo tmpcleaner --dry-run`. Show the config and generated
 in-use exclusions without deleting anything: `sudo tmpcleaner --print-rules`.
+
+Check one path without deleting anything: `sudo tmpcleaner --check /tmp/my-job/file`.
+The path must exist and be absolute and under `/tmp`. It prints
+`would be removed: PATH` (exit 0) or `kept: PATH` (exit 1), using the same
+age, pressure and in-use rules as a real run. Invalid paths or missing arguments
+produce a message and exit 2. This is a snapshot; directory results have the
+same preview limitation described above.
+
 Status and logs:
 
 ```sh

@@ -17,6 +17,8 @@ in use by running processes.
 Options:
   -h, --help       Show this help message and exit
   --print-rules    Print generated tmpfiles rules and exit
+  --check PATH     Report whether an existing absolute /tmp path would be removed
+                   Exit 0 if removed, 1 if kept, 2 for an invalid path or usage
 
 Other arguments (such as --dry-run) are passed to systemd-tmpfiles.
 
@@ -31,6 +33,23 @@ EOF
 		exit 0
 		;;
 esac
+
+check=
+if [ "${1:-}" = --check ]; then
+	[ "$#" -eq 2 ] || { echo "tmpcleaner: --check requires one absolute path under /tmp" >&2; exit 2; }
+	case "$2" in
+		/tmp/*) ;;
+		*) echo "tmpcleaner: --check requires an absolute path under /tmp" >&2; exit 2 ;;
+	esac
+	check=$(realpath -e -s -- "$2" 2>/dev/null) || {
+		echo "tmpcleaner: --check path does not exist: $2" >&2
+		exit 2
+	}
+	case "$check" in
+		/tmp/*) ;;
+		*) echo "tmpcleaner: --check path must be under /tmp: $2" >&2; exit 2 ;;
+	esac
+fi
 
 conf=${TMPCLEANER_CONF:-/etc/tmpcleaner/tmpcleaner.conf}
 [ -r "$conf" ] || { echo "tmpcleaner: cannot read $conf" >&2; exit 1; }
@@ -199,6 +218,22 @@ rules() {
 if [ "${1:-}" = --print-rules ]; then
 	rules
 	exit 0
+fi
+
+if [ -n "$check" ]; then
+	# 73: an unprivileged check cannot open root-only directories; the rest is valid.
+	status=0
+	preview=$(rules | systemd-tmpfiles --clean --dry-run - 2>&1) || status=$?
+	if [ "$status" -ne 0 ] && [ "$status" -ne 73 ]; then
+		printf '%s\n' "$preview" >&2
+		exit "$status"
+	fi
+	if printf '%s\n' "$preview" | grep -Fxq -e "Would remove \"$check\"" -e "Would remove directory \"$check\""; then
+		printf 'would be removed: %s\n' "$2"
+		exit 0
+	fi
+	printf 'kept: %s\n' "$2"
+	exit 1
 fi
 
 for arg do

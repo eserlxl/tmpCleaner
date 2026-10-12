@@ -203,6 +203,37 @@ echo "$preview" | grep -q 'Would remove.*old\.txt' || {
 }
 [ "$fail" = 0 ] || exit 1
 
+for name in old.txt 'open a%b.txt' new.txt; do
+	status=0
+	check_out=$(TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --check "$dir/$name") || status=$?
+	if [ "$name" = old.txt ]; then
+		expected="would be removed: $dir/$name"
+		expected_status=0
+	else
+		expected="kept: $dir/$name"
+		expected_status=1
+	fi
+	if [ "$status" -ne "$expected_status" ] || [ "$check_out" != "$expected" ] || [ ! -e "$dir/$name" ]; then
+		echo "FAIL: --check should report $name without deleting it"
+		fail=1
+	fi
+done
+for path in '' old.txt / /tmp "$dir/missing" "$dir/../.."; do
+	status=0
+	check_out=$(TMPCLEANER_CONF=$dir/missing.conf sh "$here/tmpcleaner" --check "$path" 2>&1) || status=$?
+	if [ "$status" -ne 2 ] || [ -z "$check_out" ]; then
+		echo "FAIL: --check should reject invalid path: $path before checking config"
+		fail=1
+	fi
+done
+status=0
+check_out=$(TMPCLEANER_CONF=$dir/missing.conf sh "$here/tmpcleaner" --check 2>&1) || status=$?
+if [ "$status" -ne 2 ] || [ -z "$check_out" ]; then
+	echo "FAIL: --check should reject a missing path before checking config"
+	fail=1
+fi
+[ "$fail" = 0 ] || exit 1
+
 run_log=$(TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" 2>&1 >/dev/null)
 
 fail=0
@@ -235,6 +266,10 @@ if ! TMPCLEANER_CONF=$dir/missing.conf sh "$here/tmpcleaner" -h >/dev/null; then
 fi
 printf '%s\n' "$help_out" | grep -Fq -- '--print-rules' || {
 	echo "FAIL: help should mention --print-rules"
+	fail=1
+}
+printf '%s\n' "$help_out" | grep -Fq -- '--check PATH' || {
+	echo "FAIL: help should mention --check PATH"
 	fail=1
 }
 printf '%s\n' "$help_out" | grep -Fq 'TMPCLEANER_AGE' || {
