@@ -17,11 +17,11 @@ control_escapes=$(
 	printf 's/\\d127/\\\\x7f/g\n'
 )
 
-# Targets of every process's cwd and open fds. One find, not a readlink per fd:
+# Targets of every process's exe, cwd and open fds. One find, not a readlink per fd:
 # a busy desktop has tens of thousands of fds. "/tmp/?*" leaves out /tmp itself,
 # which must never become an exclusion or nothing would be cleaned.
 in_use() {
-	find /proc/[0-9]*/cwd /proc/[0-9]*/fd -maxdepth 1 -lname '/tmp/?*' -printf '%l\0' 2>/dev/null
+	find /proc/[0-9]*/exe /proc/[0-9]*/cwd /proc/[0-9]*/fd -maxdepth 1 -lname '/tmp/?*' -printf '%l\0' 2>/dev/null
 }
 
 {
