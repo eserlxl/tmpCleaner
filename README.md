@@ -40,8 +40,9 @@ Never deleted:
 - Kerberos ticket caches (`/tmp/krb5cc_*`)
 - Unix sockets that are still in use (listed in `/proc/net/unix` of any
   network namespace). Not recognized: a socket bound by a relative name in
-  another network namespace, and one whose own name forges a line of that
-  table.
+  another network namespace, one whose own name forges a line of that table,
+  and one whose name no process can reach any more (bound, then chrooted
+  away, by the last process of a private mount namespace).
 - Anything on a different mount below `/tmp`; symlinks are never followed
 
 Only `/tmp` is touched; `/var/tmp` keeps the distribution's defaults.
