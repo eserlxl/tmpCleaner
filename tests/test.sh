@@ -19,9 +19,9 @@ old() { touch -d '7 hours ago' "$@"; }
 mkdir -p "$dir/emptydir" "$dir/freshdir" "$dir/olddir" "$dir/.X11-unix" "$dir/systemd-private-abc/tmp" "$dir/workdir"
 touch "$dir/old.txt" "$dir/new.txt" "$dir/olddir/f" "$dir/.X11-unix/X0" \
       "$dir/.X0-lock" "$dir/systemd-private-abc/tmp/f" "$dir/open a%b.txt" \
-      "$dir/workdir/f"
+      "$dir/workdir/f" "$dir/krb5cc_1000"
 old "$dir/old.txt" "$dir/olddir/f" "$dir/.X11-unix/X0" "$dir/.X0-lock" \
-    "$dir/systemd-private-abc/tmp/f" "$dir/open a%b.txt" "$dir/workdir/f"
+    "$dir/systemd-private-abc/tmp/f" "$dir/open a%b.txt" "$dir/workdir/f" "$dir/krb5cc_1000"
 old "$dir/olddir" "$dir/.X11-unix" "$dir/systemd-private-abc/tmp" \
     "$dir/systemd-private-abc" "$dir/workdir"
 
@@ -130,7 +130,7 @@ gone old.txt; gone olddir; gone weirdX; gone emptydir
 kept freshdir
 kept "*"; kept "we[i]rd?"; kept "back\\slash*"; kept "new${nl}line"
 kept "c${cr}d"; kept "t${tab}b"; kept "q\"uote"
-kept new.txt; kept .X11-unix/X0; kept .X0-lock; kept systemd-private-abc/tmp/f
+kept new.txt; kept krb5cc_1000; kept .X11-unix/X0; kept .X0-lock; kept systemd-private-abc/tmp/f
 kept "open a%b.txt"; kept workdir/f; kept sleep; kept libm.so.6
 
 # A second run tests that the shipped age rule keeps freshly extracted files

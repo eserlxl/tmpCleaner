@@ -34,6 +34,7 @@ Never deleted:
 - X11/ICE socket dirs and X lock files (`/tmp/.X11-unix`, `/tmp/.ICE-unix`,
   `/tmp/.X0-lock`, ...)
 - systemd `PrivateTmp` dirs of running services (`/tmp/systemd-private-*`)
+- Kerberos ticket caches (`/tmp/krb5cc_*`)
 - Unix sockets that are still in use (listed in `/proc/net/unix`)
 - Anything on a different mount below `/tmp`; symlinks are never followed
 
