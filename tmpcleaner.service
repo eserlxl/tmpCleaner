@@ -1,0 +1,14 @@
+[Unit]
+Description=Delete /tmp entries older than 6 hours
+Documentation=https://github.com/eserlxl/tmpCleaner man:tmpfiles.d(5)
+
+[Service]
+Type=oneshot
+ExecStart=systemd-tmpfiles --clean /etc/tmpcleaner/tmpcleaner.conf
+# No PrivateTmp: the job must see the real /tmp.
+ProtectSystem=strict
+ReadWritePaths=/tmp
+ProtectHome=read-only
+NoNewPrivileges=yes
+Nice=19
+IOSchedulingClass=idle
