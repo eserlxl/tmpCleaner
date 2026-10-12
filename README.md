@@ -80,6 +80,24 @@ journalctl -u tmpcleaner.service
 
 Change the interval with `sudo systemctl edit tmpcleaner.timer`.
 
+### See what was deleted
+
+By default, `systemd-tmpfiles` logs removals only at debug level, so
+`journalctl -u tmpcleaner.service` shows just warnings. To log every removal to
+the journal, add an opt-in drop-in with `sudo systemctl edit tmpcleaner.service`:
+
+```ini
+[Service]
+Environment=SYSTEMD_LOG_LEVEL=debug
+LogFilterPatterns=^Removing
+LogFilterPatterns=[Ff]ail|[Ee]rror
+```
+
+Allow patterns in `LogFilterPatterns` are extended regular expressions and are
+OR-ed together. Note that `LogFilterPatterns` needs systemd >= 253 (older
+versions would log all debug output) and that a first run on a busy `/tmp` logs
+thousands of lines.
+
 ## Uninstall
 
 ```sh
