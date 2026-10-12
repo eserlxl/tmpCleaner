@@ -69,10 +69,67 @@ control_escapes=$(
 )
 
 # Targets of every process's exe, cwd, root, open fds and memory-mapped files. One find, not a readlink per fd:
-# a busy desktop has tens of thousands of fds. "/tmp/?*" leaves out /tmp itself,
-# which must never become an exclusion or nothing would be cleaned.
+# a busy desktop has tens of thousands of fds. Translate bind-mount aliases
+# using each process's mount table, but never exclude /tmp itself.
 in_use() {
-	find /proc/[0-9]*/exe /proc/[0-9]*/cwd /proc/[0-9]*/root /proc/[0-9]*/fd /proc/[0-9]*/map_files -maxdepth 1 -lname '/tmp/?*' -printf '%l\0' 2>/dev/null
+	find /proc/[0-9]*/exe /proc/[0-9]*/cwd /proc/[0-9]*/root /proc/[0-9]*/fd /proc/[0-9]*/map_files -maxdepth 1 -type l -printf '%p\0%l\0' 2>/dev/null |
+		LC_ALL=C awk '
+		function decode(path) {
+			gsub(/\\040/, " ", path)
+			gsub(/\\011/, "\t", path)
+			gsub(/\\012/, "\n", path)
+			gsub(/\\134/, sprintf("%c", 92), path)
+			return path
+		}
+		function under(path, dir) {
+			return dir == "/" || path == dir || index(path, dir "/") == 1
+		}
+		function suffix(path, dir) {
+			return dir == "/" ? path : substr(path, length(dir) + 1)
+		}
+		function mounts(pid, file, line, fields, n) {
+			if (pid in count) return
+			count[pid] = 0
+			file = "/proc/" pid "/mountinfo"
+			RS = "\n"
+			while ((getline line < file) > 0) {
+				split(line, fields)
+				if (fields[3] != device) continue
+				n = ++count[pid]
+				root[pid, n] = decode(fields[4])
+				point[pid, n] = decode(fields[5])
+			}
+			close(file)
+			RS = "\0"
+		}
+		BEGIN {
+			while ((getline line < "/proc/self/mountinfo") > 0) {
+				split(line, fields)
+				mountpoint = decode(fields[5])
+				if (under("/tmp", mountpoint) && length(mountpoint) > longest) {
+					longest = length(mountpoint)
+					device = fields[3]
+					tmp_root = decode(fields[4])
+					tmp_root = (tmp_root == "/" ? "" : tmp_root) suffix("/tmp", mountpoint)
+					if (tmp_root == "") tmp_root = "/"
+				}
+			}
+			close("/proc/self/mountinfo")
+			RS = "\0"
+		}
+		NR % 2 { split($0, parts, "/"); pid = parts[3]; next }
+		{
+			if (index($0, "/tmp/") == 1) printf "%s%c", $0, 0
+			if (substr($0, 1, 1) != "/" || device == "") next
+			mounts(pid)
+			for (n = 1; n <= count[pid]; n++) {
+				if (!under($0, point[pid, n])) continue
+				path = (root[pid, n] == "/" ? "" : root[pid, n]) suffix($0, point[pid, n])
+				if (!under(path, tmp_root)) continue
+				path = "/tmp" suffix(path, tmp_root)
+				if (path != "/tmp") printf "%s%c", path, 0
+			}
+		}'
 }
 
 rules() {

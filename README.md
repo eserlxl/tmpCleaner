@@ -28,7 +28,8 @@ Never deleted:
 - Executables of running processes, files a running process holds open,
   memory-mapped files such as loaded libraries, and everything inside a
   directory a running process works in (its current directory) or uses as its
-  root directory (chrooted or containerized processes). The in-use list is
+  root directory (chrooted or containerized processes), including files and
+  directories reached through bind mounts. The in-use list is
   taken from `/proc` just before each run (a snapshot before cleaning),
   so files opened during a run are not covered and long-lived work belongs in
   the exclusion list.

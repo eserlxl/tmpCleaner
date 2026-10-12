@@ -9,7 +9,8 @@ here=$(cd "$(dirname "$0")/.." && pwd)
 dir=$(mktemp -d /tmp/tmpcleaner-test.XXXXXX)
 conf=$dir.conf
 pids=
-trap 'kill $pids 2>/dev/null; rm -rf "$dir" "$conf"' EXIT
+bindpoint=
+trap 'kill $pids 2>/dev/null; rm -rf "$dir" "$conf" "$bindpoint"' EXIT
 
 awk '$1 == "d" { gsub(/[bcBC]/, "", $6) } { print }' "$here/tmpcleaner.conf" |
 	sed "s#/tmp#$dir#" > "$conf"
@@ -93,6 +94,40 @@ if unshare -r true 2>/dev/null; then
 	rootfs_running=1
 else
 	echo "SKIP: rootfs protection (unshare -r is not permitted or unavailable)"
+fi
+
+# The same files reached through a bind mount outside /tmp stay protected.
+bind_running=0
+if unshare -rm true 2>/dev/null; then
+	bindpoint=$(mktemp -d '/var/tmp/tmpcleaner-test\040.XXXXXX')
+	mkdir -p "$dir/work/cwd"
+	cp "$dir/sleep" "$dir/libm.so.6" "$dir/work"
+	touch "$dir/work/f" "$dir/work/unused" "$dir/work/cwd/f"
+	# shellcheck disable=SC2016 # $1 and $2 are expanded by the inner sh
+	unshare -rm sh -ec '
+		mount --bind "$1/work" "$2"
+		cd "$2/cwd"
+		LD_PRELOAD="$2/libm.so.6" exec "$2/sleep" 60 < "$2/f"
+	' sh "$dir" "$bindpoint" &
+	bind_pid=$!
+	pids="$pids $bind_pid"
+	waited=0
+	until [ "$(readlink "/proc/$bind_pid/fd/0" 2>/dev/null)" = "$bindpoint/f" ] && \
+	      [ "$(readlink "/proc/$bind_pid/cwd" 2>/dev/null)" = "$bindpoint/cwd" ] && \
+	      [ "$(readlink "/proc/$bind_pid/exe" 2>/dev/null)" = "$bindpoint/sleep" ] && \
+	      readlink /proc/"$bind_pid"/map_files/* 2>/dev/null | grep -Fxq "$bindpoint/libm.so.6"; do
+		if [ "$waited" -ge 100 ]; then
+			echo "FAIL: timed out waiting for bind-mounted process"
+			exit 1
+		fi
+		waited=$((waited + 1))
+		sleep 0.1
+	done
+	old "$dir/work/f" "$dir/work/unused" "$dir/work/cwd/f" \
+	    "$dir/work/sleep" "$dir/work/libm.so.6" "$dir/work/cwd" "$dir/work"
+	bind_running=1
+else
+	echo "SKIP: bind-mount protection (unshare -rm is not permitted or unavailable)"
 fi
 
 fail=0
@@ -196,12 +231,16 @@ kept "open a%b.txt"; kept workdir/f; kept sleep; kept libm.so.6
 if [ "$rootfs_running" = 1 ]; then
 	kept rootfs/data/state
 fi
+if [ "$bind_running" = 1 ]; then
+	kept work; kept work/f; kept work/cwd/f; kept work/sleep; kept work/libm.so.6
+	gone work/unused
+fi
 
 # A second run tests that the shipped age rule keeps freshly extracted files
 # (birth and ctime stay current even when atime and mtime are backdated).
 dir2=$(mktemp -d /tmp/tmpcleaner-test.XXXXXX)
 conf2=$dir2.conf
-trap 'kill $pids 2>/dev/null; rm -rf "$dir" "$conf" "$dir2" "$conf2"' EXIT
+trap 'kill $pids 2>/dev/null; rm -rf "$dir" "$conf" "$dir2" "$conf2" "$bindpoint"' EXIT
 
 sed "s#/tmp#$dir2#" "$here/tmpcleaner.conf" > "$conf2"
 touch "$dir2/extracted.txt"
@@ -214,7 +253,7 @@ TMPCLEANER_CONF=$conf2 sh "$here/tmpcleaner"
 # The three-way config upgrade that decides whether a reinstall keeps or replaces
 # an admin's exclusions.
 confdir=$(mktemp -d /tmp/tmpcleaner-test.XXXXXX)
-trap 'kill $pids 2>/dev/null; rm -rf "$dir" "$conf" "$dir2" "$conf2" "$confdir"' EXIT
+trap 'kill $pids 2>/dev/null; rm -rf "$dir" "$conf" "$dir2" "$conf2" "$confdir" "$bindpoint"' EXIT
 
 make -s -C "$here" install-conf CONFDIR="$confdir" >/dev/null
 cmp -s "$confdir/tmpcleaner.conf" "$here/tmpcleaner.conf" || {
