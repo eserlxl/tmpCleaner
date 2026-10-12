@@ -63,6 +63,17 @@ old "$dir/sleep"
 old "$dir/libm.so.6"
 
 fail=0
+rules=$(TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --print-rules)
+printf '%s\n' "$rules" | grep -Fxq "x \"$dir/open a%%b.txt\"" || {
+	echo "FAIL: printed rules should exclude the held file"
+	fail=1
+}
+[ -e "$dir/old.txt" ] || {
+	echo "FAIL: printing rules should keep old.txt"
+	fail=1
+}
+[ "$fail" = 0 ] || exit 1
+
 preview=$(TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --dry-run 2>&1)
 echo "$preview" | grep -q 'Would remove.*old\.txt' || {
 	echo "FAIL: preview should announce removal of old.txt"

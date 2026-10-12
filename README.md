@@ -72,7 +72,9 @@ Reinstalling keeps the installed config (`/etc/tmpcleaner/tmpcleaner.conf`).
 When it has been edited and differs from shipped defaults, the new defaults
 land in `/etc/tmpcleaner/tmpcleaner.conf.new` to merge.
 
-Later previews: `sudo tmpcleaner --dry-run`. Status and logs:
+Later previews: `sudo tmpcleaner --dry-run`. Show the config and generated
+in-use exclusions without deleting anything: `sudo tmpcleaner --print-rules`.
+Status and logs:
 
 ```sh
 systemctl list-timers tmpcleaner.timer

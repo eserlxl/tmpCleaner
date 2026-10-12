@@ -24,7 +24,7 @@ in_use() {
 	find /proc/[0-9]*/exe /proc/[0-9]*/cwd /proc/[0-9]*/fd /proc/[0-9]*/map_files -maxdepth 1 -lname '/tmp/?*' -printf '%l\0' 2>/dev/null
 }
 
-{
+rules() {
 	cat "$conf"
 	echo
 	# File names are untrusted (any user can hold a file open), so each must
@@ -35,4 +35,11 @@ in_use() {
 	in_use | sort -zu |
 		sed -z -e '/[[*?]/s/[][*?\\]/\\&/g' -e 's/[\\"]/\\&/g' \
 			-e "$control_escapes" -e 's/%/%%/g' -e 's/.*/x "&"/' | tr '\0' '\n'
-} | systemd-tmpfiles --clean "$@" -
+}
+
+if [ "${1:-}" = --print-rules ]; then
+	rules
+	exit 0
+fi
+
+rules | systemd-tmpfiles --clean "$@" -
