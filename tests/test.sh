@@ -12,8 +12,9 @@ cfg=$(mktemp -d)
 conf=$cfg/conf
 pids=
 bindpoint=
+detachpoint=
 sockalias=
-trap 'kill $pids 2>/dev/null || :; rm -rf "$dir" "$cfg" "$bindpoint" "$sockalias"' EXIT
+trap 'kill $pids 2>/dev/null || :; rm -rf "$dir" "$cfg" "$bindpoint" "$detachpoint" "$sockalias"' EXIT
 
 awk '$1 == "d" { gsub(/[bcBC]/, "", $6) } { print }' "$here/tmpcleaner.conf" |
 	sed "s#/tmp#$dir#" > "$conf"
@@ -128,6 +129,44 @@ else
 	echo "SKIP: socket protection (python3 or unshare -rmn is unavailable)"
 fi
 
+# A socket bound before chroot still has its name outside the new root. Its
+# mount namespace is private; a child that dropped the socket stays unconfined.
+chrootsock_running=0
+if command -v python3 >/dev/null && unshare -rmn true 2>/dev/null; then
+	mkdir "$dir/sockjail"
+	unshare -rmn python3 -c '
+import os, socket, sys, time
+sock = socket.socket(socket.AF_UNIX)
+sock.bind(sys.argv[1])
+sock.listen()
+parent = os.getpid()
+if os.fork() == 0:
+    sock.close()
+    while os.getppid() == parent:
+        time.sleep(0.1)
+    sys.exit()
+os.chroot(sys.argv[2])
+os.chdir("/")
+time.sleep(60)
+' "$dir/chrootsock" "$dir/sockjail" &
+	chrootsock_pid=$!
+	pids="$pids $chrootsock_pid"
+	waited=0
+	until [ -S "$dir/chrootsock" ] && \
+	      [ "$(readlink "/proc/$chrootsock_pid/root" 2>/dev/null)" = "$dir/sockjail" ]; do
+		if [ "$waited" -ge 100 ]; then
+			echo "FAIL: timed out waiting for the chrooted socket holder"
+			exit 1
+		fi
+		waited=$((waited + 1))
+		sleep 0.1
+	done
+	old "$dir/chrootsock"
+	chrootsock_running=1
+else
+	echo "SKIP: chrooted socket protection (python3 or unshare -rmn is unavailable)"
+fi
+
 # A name holding an invalid UTF-8 byte and a space, held open: under a UTF-8
 # locale the escaping must still quote all of it (the run below uses one).
 utf8="$dir/u$(printf '\377') x"
@@ -222,6 +261,38 @@ if unshare -rm true 2>/dev/null; then
 	bind_running=1
 else
 	echo "SKIP: bind-mount protection (unshare -rm is not permitted or unavailable)"
+fi
+
+# An open fd survives a lazy unmount, but its alias leaves the mount table.
+detached_running=0
+if unshare -rm true 2>/dev/null; then
+	detachpoint=$(mktemp -d '/var/tmp/tmpcleaner-test\040.XXXXXX')
+	mkdir "$dir/detached"
+	touch "$dir/detached/f"
+	# shellcheck disable=SC2016 # arguments are expanded by the inner sh
+	unshare -rm sh -ec '
+		mount --bind "$1/detached" "$2"
+		exec 0< "$2/f"
+		umount -l "$2"
+		touch "$3/detached"
+		exec sleep 60
+	' sh "$dir" "$detachpoint" "$cfg" &
+	detached_pid=$!
+	pids="$pids $detached_pid"
+	waited=0
+	until [ -e "$cfg/detached" ] && \
+	      [ "$(stat -Lc '%d %i' "/proc/$detached_pid/fd/0" 2>/dev/null)" = "$(stat -c '%d %i' "$dir/detached/f")" ]; do
+		if [ "$waited" -ge 100 ]; then
+			echo "FAIL: timed out waiting for the lazily unmounted fd"
+			exit 1
+		fi
+		waited=$((waited + 1))
+		sleep 0.1
+	done
+	old "$dir/detached/f"
+	detached_running=1
+else
+	echo "SKIP: lazy-unmount protection (unshare -rm is not permitted or unavailable)"
 fi
 
 # A process chrooted onto a bind mount of a /tmp tree, alone in its namespace,
@@ -524,6 +595,12 @@ kept "open a%b.txt"; kept workdir/f; kept sleep; kept libm.so.6; kept "${utf8#"$
 if [ "$sock_running" = 1 ]; then
 	kept sock; kept "${nlsock#"$dir"/}"; kept sockdir/s; kept dotsock; gone victim/f
 fi
+if [ "$chrootsock_running" = 1 ]; then
+	kept chrootsock
+fi
+if [ "$detached_running" = 1 ]; then
+	kept detached/f
+fi
 if [ "$jail_running" = 1 ]; then
 	kept jail/data/state; kept alias/jail/data/state
 fi
@@ -589,7 +666,7 @@ rm -rf "$dir3" "$cfg/conf3"
 # (birth and ctime stay current even when atime and mtime are backdated).
 dir2=$(mktemp -d /tmp/tmpcleaner-test.XXXXXX)
 conf2=$cfg/conf2
-trap 'kill $pids 2>/dev/null || :; rm -rf "$dir" "$cfg" "$dir2" "$bindpoint" "$sockalias"' EXIT
+trap 'kill $pids 2>/dev/null || :; rm -rf "$dir" "$cfg" "$dir2" "$bindpoint" "$detachpoint" "$sockalias"' EXIT
 
 sed "s#/tmp#$dir2#" "$here/tmpcleaner.conf" > "$conf2"
 touch "$dir2/extracted.txt"
@@ -606,7 +683,7 @@ run_log=$(TMPCLEANER_CONF=$conf2 sh "$here/tmpcleaner" 2>&1 >/dev/null)
 # The three-way config upgrade that decides whether a reinstall keeps or replaces
 # an admin's exclusions.
 confdir=$(mktemp -d /tmp/tmpcleaner-test.XXXXXX)
-trap 'kill $pids 2>/dev/null || :; rm -rf "$dir" "$cfg" "$dir2" "$confdir" "$bindpoint" "$sockalias"' EXIT
+trap 'kill $pids 2>/dev/null || :; rm -rf "$dir" "$cfg" "$dir2" "$confdir" "$bindpoint" "$detachpoint" "$sockalias"' EXIT
 
 make -s -C "$here" install-conf CONFDIR="$confdir" >/dev/null
 cmp -s "$confdir/tmpcleaner.conf" "$here/tmpcleaner.conf" || {

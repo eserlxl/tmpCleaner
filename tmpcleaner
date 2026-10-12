@@ -119,108 +119,22 @@ control_escapes=$(
 # Without /proc no in-use file could be protected.
 [ -e /proc/self/mountinfo ] || { echo "tmpcleaner: /proc is not available" >&2; exit 1; }
 
-# Targets of every process's exe, cwd, root and open fds, plus its memory-mapped files. One find, not a readlink per fd:
-# a busy desktop has tens of thousands of fds. Translate bind-mount aliases
-# using the mount table matching the target, but never exclude /tmp itself.
+# Match targets by device and inode: link texts can outlive their bind mounts.
 in_use() {
+	tmpdev=$(stat -c %d /tmp)
+	devhex=$(printf '%02x:%02x' "$(((tmpdev >> 8) & 0xfff))" "$(((tmpdev & 0xff) | ((tmpdev >> 12) & 0xfff00)))")
 	# The builtin printf expands the globs without exec, so thousands of
 	# processes never exceed ARG_MAX; xargs runs find in order on batches.
-	printf '%s\0' /proc/self/ns/mnt /proc/[0-9]*/ns/mnt /proc/[0-9]*/root /proc/[0-9]*/ns/net /proc/[0-9]*/exe /proc/[0-9]*/cwd /proc/[0-9]*/fd |
-		xargs -0 sh -c 'exec find "$@" -maxdepth 1 -type l -printf "%p\0%l\0" 2>/dev/null' sh |
-		LC_ALL=C awk '
-		function decode(path) {
-			gsub(/\\040/, " ", path)
-			gsub(/\\011/, "\t", path)
-			gsub(/\\012/, "\n", path)
-			gsub(/\\134/, sprintf("%c", 92), path)
-			return path
-		}
-		function under(path, dir) {
-			return dir == "/" || path == dir || index(path, dir "/") == 1
-		}
-		function suffix(path, dir) {
-			return dir == "/" ? path : substr(path, length(dir) + 1)
-		}
-		function containing(pid, path, n, best, longest) {
-			for (n = 1; n <= count[pid]; n++) {
-				if (under(path, point[pid, n]) && length(point[pid, n]) >= longest) {
-					longest = length(point[pid, n])
-					best = n
-				}
-			}
-			return best
-		}
-		function near(pid, path, k) {
-			for (k = 1; k <= ntmp[pid]; k++) if (under(path, point[pid, tmpidx[pid, k]])) return 1
-			return 0
-		}
-		function mounts(pid, file, line, fields, n, saved) {
-			if (pid in count) return
-			count[pid] = 0
-			file = "/proc/" pid "/mountinfo"
-			saved = RS
-			RS = "\n"
-			while ((getline line < file) > 0) {
-				split(line, fields)
-				n = ++count[pid]
-				dev[pid, n] = fields[3]
-				root[pid, n] = decode(fields[4])
-				point[pid, n] = decode(fields[5])
-				if (point[pid, n] == "/") full[pid] = 1
-				if (dev[pid, n] == device) tmpidx[pid, ++ntmp[pid]] = n
-			}
-			close(file)
-			RS = saved
-		}
+	{
+		printf '%s\0' /proc/self/ns/mnt /proc/[0-9]*/ns/mnt /proc/[0-9]*/root /proc/[0-9]*/ns/net |
+			LC_ALL=C xargs -0 sh -c 'exec find "$@" -maxdepth 0 -type l -printf "%p\0%l\0" 2>/dev/null' sh || :
+		printf 'inodes\0'
+		# One stat per target; a socket fd stats as type s with the socket inode.
+		printf '%s\0' /proc/[0-9]*/root /proc/[0-9]*/exe /proc/[0-9]*/cwd /proc/[0-9]*/fd/* |
+			LC_ALL=C xargs -0 sh -c 'exec find -L "$@" -maxdepth 0 -printf "%D %i %y %p\0" 2>/dev/null' sh
+	} | LC_ALL=C awk -v tmpdev="$tmpdev" -v devhex="$devhex" '
 		BEGIN {
-			mounts("self")
-			n = containing("self", "/tmp")
-			device = dev["self", n]
-			tmp_root = root["self", n]
-			tmp_root = (tmp_root == "/" ? "" : tmp_root) suffix("/tmp", point["self", n])
-			if (tmp_root == "") tmp_root = "/"
-			# The device was unknown while "self" was read; list its /tmp-device mounts now.
-			for (n = 1; n <= count["self"]; n++)
-				if (dev["self", n] == device) tmpidx["self", ++ntmp["self"]] = n
-			# maps shows device numbers in hex; files on /tmp all carry this one.
-			split(device, mm, ":")
-			devhex = sprintf("%02x:%02x", mm[1], mm[2])
-			cmd = "stat -Lc %d /tmp"
-			cmd | getline tmpdev
-			close(cmd)
-			# find prints NUL-terminated path/target pairs.
 			RS = "\0"
-		}
-		# The path of target within the /tmp filesystem, "" when it lies outside
-		# /tmp (which may share its filesystem with other trees), or "?" when
-		# the table cannot see its mount: a chrooted process lists only the
-		# mounts under its root.
-		function translate(table, target, n, path) {
-			mounts(table)
-			# Cheap pre-check: most targets lie on no mount of the /tmp filesystem.
-			if (full[table] && !near(table, target)) return ""
-			n = containing(table, target)
-			if (n == "") return "?"
-			if (dev[table, n] != device) return ""
-			path = (root[table, n] == "/" ? "" : root[table, n]) suffix(target, point[table, n])
-			if (path == "") path = "/"
-			return under(path, tmp_root) ? path : ""
-		}
-		# A file on the /tmp filesystem whose mount is out of sight is looked
-		# up by inode at the end.
-		function unseen(link, inode, cmd, line, saved) {
-			if (inode == "" && link == "") return
-			if (inode == "") {
-				saved = RS
-				RS = "\n"
-				cmd = "stat -Lc \"%d %i\" " link " 2>/dev/null"
-				cmd | getline line
-				close(cmd)
-				RS = saved
-				if (split(line, id, " ") != 2 || id[1] != tmpdev) return
-				inode = id[2]
-			}
-			want(inode)
 		}
 		function want(inode) {
 			if (inode ~ /^[0-9]+$/ && !(inode in wanted)) {
@@ -234,25 +148,9 @@ in_use() {
 			if (path ~ /(^|\/)\.\.?($|\/)/) return
 			if (index(path, "/tmp/") == 1 && length(path) > 5) printf "%s%c", path, 0
 		}
-		# Links are relative to the namespace root; a chrooted process lists
-		# its mounts relative to its root, so rebase onto it.
-		function where(pid, target, ns, r) {
-			ns = namespace[pid]
-			if (ns == "") return translate(pid, target)
-			if (ns == namespace["self"]) return translate("self", target)
-			if (rootlink[pid] == "" || !under(target, rootlink[pid])) return "?"
-			r = suffix(target, rootlink[pid])
-			return translate(pid, r == "" ? "/" : r)
-		}
-		function handle(pid, target, link, inode, path) {
-			if (substr(target, 1, 1) != "/" || device == "") return
-			path = where(pid, target)
-			if (path == "?") unseen(link, inode)
-			else if (path != "") emit("/tmp" suffix(path, tmp_root))
-		}
 		# Memory-mapped files come from the maps text: listing map_files makes the
 		# kernel build an entry per mapping (tens of MB across all processes).
-		function mapped(pid, file, line, path, seen, saved) {
+		function mapped(pid, file, line, saved) {
 			file = "/proc/" pid "/maps"
 			saved = RS
 			RS = "\n"
@@ -260,25 +158,18 @@ in_use() {
 				# Cheap pre-check, then the device field itself: a name may hold the text.
 				if (!index(line, " " devhex " ")) continue
 				split(line, fields, " ")
-				if (fields[4] != devhex) continue
-				if (!sub(/^[^ ]+ +[^ ]+ +[^ ]+ +[^ ]+ +[^ ]+ +/, "", line)) continue
-				if (substr(line, 1, 1) != "/" || line in seen) continue
-				seen[line] = 1
-				path = line
-				gsub(/\\012/, "\n", path)
-				handle(pid, path, "", fields[5])
+				if (fields[4] == devhex) want(fields[5])
 			}
 			close(file)
 			RS = saved
 		}
-		# Root links come before the other links of a process, which need them.
 		# systemd-tmpfiles keeps only the sockets of its own network namespace;
 		# a socket bound in another one is reached through /tmp all the same.
 		# Names are printed raw, so a line that starts no record continues the
 		# name before it; each name is resolved as every process holding the
 		# socket sees it (one per mount namespace and root), and only a real
 		# socket on /tmp is kept, so a forged record can keep no other file.
-		function sockets(pid, file, line, n, k, inode, name, who, count, h, args, queued, saved) {
+		function sockets(pid, file, line, n, k, inode, name, who, count, h, args, queued, saved, ns, path) {
 			file = "/proc/" pid "/net/unix"
 			saved = RS
 			RS = "\n"
@@ -297,7 +188,18 @@ in_use() {
 				count = split((inode[k] in holders) ? holders[inode[k]] : pid, who, " ")
 				for (h = 1; h <= count; h++) {
 					args = args " " quote("/proc/" who[h] "/root" name[k])
-					if (++queued == 200) {
+					queued++
+					# A socket may have been bound before its holder chrooted.
+					ns = namespace[who[h]]
+					path = ""
+					if (ns == namespace["self"]) path = name[k]
+					else if (ns in unconfined) path = "/proc/" unconfined[ns] "/root" name[k]
+					if (path != "" && !((inode[k], ns) in unviewed)) {
+						unviewed[inode[k], ns] = 1
+						args = args " " quote(path)
+						queued++
+					}
+					if (queued >= 200) {
 						verify(args)
 						args = ""
 						queued = 0
@@ -324,20 +226,29 @@ in_use() {
 			close(cmd)
 			RS = saved
 		}
-		NR % 2 { link = $0; split(link, parts, "/"); pid = parts[3]; next }
-		parts[5] == "net" { if (!($0 in netns)) netns[$0] = pid; next }
-		parts[4] == "ns" { namespace[pid] = $0; next }
-		parts[4] == "root" { rootlink[pid] = $0; mapped(pid) }
-		$0 ~ /^socket:\[[0-9]+\]$/ {
-			inode = substr($0, 9, length($0) - 9)
-			view = namespace[pid] SUBSEP rootlink[pid]
-			if (!((inode, view) in viewed)) {
-				viewed[inode, view] = 1
-				holders[inode] = holders[inode] " " pid
+		NR % 2 && $0 == "inodes" { inodes = 1; next }
+		inodes {
+			if (split($0, id, " ") != 4) next
+			if (id[1] == tmpdev) want(id[2])
+			else if (id[3] == "s" && split(id[4], parts, "/") == 5 && parts[4] == "fd") {
+				pid = parts[3]
+				view = namespace[pid] SUBSEP rootlink[pid]
+				if (!((id[2], view) in viewed)) {
+					viewed[id[2], view] = 1
+					holders[id[2]] = holders[id[2]] " " pid
+				}
 			}
 			next
 		}
-		{ handle(pid, $0, link) }
+		NR % 2 { split($0, parts, "/"); pid = parts[3]; next }
+		parts[5] == "net" { if (!($0 in netns)) netns[$0] = pid; next }
+		parts[4] == "ns" { namespace[pid] = $0; next }
+		parts[4] == "root" {
+			rootlink[pid] = $0
+			if ($0 == "/") unconfined[namespace[pid]] = pid
+			mapped(pid)
+			next
+		}
 		# One walk of /tmp finds every file looked up by inode; a hard link
 		# or bind alias only keeps another name of a file in use.
 		END {
