@@ -7,6 +7,15 @@ set -eu
 conf=${TMPCLEANER_CONF:-/etc/tmpcleaner/tmpcleaner.conf}
 [ -r "$conf" ] || { echo "tmpcleaner: cannot read $conf" >&2; exit 1; }
 
+control_escapes=$(
+	control=1
+	while [ "$control" -le 31 ]; do
+		printf 's/\\d%03d/\\\\x%02x/g\n' "$control" "$control"
+		control=$((control + 1))
+	done
+	printf 's/\\d127/\\\\x7f/g\n'
+)
+
 # Targets of every process's cwd and open fds. One find, not a readlink per fd:
 # a busy desktop has tens of thousands of fds. "/tmp/?*" leaves out /tmp itself,
 # which must never become an exclusion or nothing would be cleaned.
@@ -21,8 +30,8 @@ in_use() {
 	# match only itself. NUL-separated, so a newline in a name cannot start a
 	# new rule. tmpfiles treats a path with * ? [ as a glob: there, escape the
 	# glob characters, or a file named "*" would exclude all of /tmp. Then
-	# C-escape \ " and newline for the quoted field and double % (specifier).
+	# C-escape \ " and all control bytes for the quoted field and double % (specifier).
 	in_use | sort -zu |
 		sed -z -e '/[[*?]/s/[][*?\\]/\\&/g' -e 's/[\\"]/\\&/g' \
-			-e 's/\n/\\n/g' -e 's/%/%%/g' -e 's/.*/x "&"/' | tr '\0' '\n'
+			-e "$control_escapes" -e 's/%/%%/g' -e 's/.*/x "&"/' | tr '\0' '\n'
 } | systemd-tmpfiles --clean "$@" -

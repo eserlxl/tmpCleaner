@@ -32,12 +32,14 @@ touch -a "$dir/emptydir"
 # exclude old.txt, and "we[i]rd?" must not exclude weirdX.
 nl='
 '
+cr=$(printf '\r') tab=$(printf '\t')
 star="$dir/*" glob="$dir/we[i]rd?" bs="$dir/back\\slash*" newline="$dir/new${nl}line"
-touch "$star" "$glob" "$bs" "$newline" "$dir/weirdX"
-old "$star" "$glob" "$bs" "$newline" "$dir/weirdX"
+carriage="$dir/c${cr}d" tabbed="$dir/t${tab}b"
+touch "$star" "$glob" "$bs" "$newline" "$carriage" "$tabbed" "$dir/weirdX"
+old "$star" "$glob" "$bs" "$newline" "$carriage" "$tabbed" "$dir/weirdX"
 
 # Long-running jobs: one holds files open, one works inside a directory.
-sleep 60 < "$dir/open a%b.txt" 3<"$star" 4<"$glob" 5<"$bs" 6<"$newline" & pids="$pids $!"
+sleep 60 < "$dir/open a%b.txt" 3<"$star" 4<"$glob" 5<"$bs" 6<"$newline" 7<"$carriage" 8<"$tabbed" & pids="$pids $!"
 (cd "$dir/workdir" && exec sleep 60) & pids="$pids $!"
 until [ -n "$(find /proc/[0-9]*/cwd -maxdepth 0 -lname "$dir/workdir" 2>/dev/null)" ]; do
 	sleep 0.1
@@ -55,6 +57,7 @@ kept() { [ -e "$dir/$1" ] || { echo "FAIL: $1 should be kept"; fail=1; }; }
 gone old.txt; gone olddir; gone weirdX; gone emptydir
 kept freshdir
 kept "*"; kept "we[i]rd?"; kept "back\\slash*"; kept "new${nl}line"
+kept "c${cr}d"; kept "t${tab}b"
 kept new.txt; kept .X11-unix/X0; kept .X0-lock; kept systemd-private-abc/tmp/f
 kept "open a%b.txt"; kept workdir/f
 [ "$fail" = 0 ] && echo "PASS"
