@@ -60,5 +60,20 @@ kept "*"; kept "we[i]rd?"; kept "back\\slash*"; kept "new${nl}line"
 kept "c${cr}d"; kept "t${tab}b"
 kept new.txt; kept .X11-unix/X0; kept .X0-lock; kept systemd-private-abc/tmp/f
 kept "open a%b.txt"; kept workdir/f
+
+# A second run tests that the shipped age rule keeps freshly extracted files
+# (birth and ctime stay current even when atime and mtime are backdated).
+dir2=$(mktemp -d /tmp/tmpcleaner-test.XXXXXX)
+conf2=$dir2.conf
+trap 'kill $pids 2>/dev/null; rm -rf "$dir" "$conf" "$dir2" "$conf2"' EXIT
+
+sed "s#/tmp#$dir2#" "$here/tmpcleaner.conf" > "$conf2"
+touch "$dir2/extracted.txt"
+touch -d '7 hours ago' "$dir2/extracted.txt"
+
+TMPCLEANER_CONF=$conf2 sh "$here/tmpcleaner"
+
+[ -e "$dir2/extracted.txt" ] || { echo "FAIL: extracted.txt should be kept"; fail=1; }
+
 [ "$fail" = 0 ] && echo "PASS"
 exit "$fail"
