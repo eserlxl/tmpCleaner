@@ -34,15 +34,15 @@ nl='
 '
 cr=$(printf '\r') tab=$(printf '\t')
 star="$dir/*" glob="$dir/we[i]rd?" bs="$dir/back\\slash*" newline="$dir/new${nl}line"
-carriage="$dir/c${cr}d" tabbed="$dir/t${tab}b"
-touch "$star" "$glob" "$bs" "$newline" "$carriage" "$tabbed" "$dir/weirdX"
-old "$star" "$glob" "$bs" "$newline" "$carriage" "$tabbed" "$dir/weirdX"
+carriage="$dir/c${cr}d" tabbed="$dir/t${tab}b" quote="$dir/q\"uote"
+touch "$star" "$glob" "$bs" "$newline" "$carriage" "$tabbed" "$quote" "$dir/weirdX"
+old "$star" "$glob" "$bs" "$newline" "$carriage" "$tabbed" "$quote" "$dir/weirdX"
 
 # Long-running jobs: one holds files open, one works inside a directory,
 # one is an executable started from the directory, one memory-maps a file.
 cp /usr/bin/sleep "$dir"
 "$dir/sleep" 60 & pids="$pids $!"
-sleep 60 < "$dir/open a%b.txt" 3<"$star" 4<"$glob" 5<"$bs" 6<"$newline" 7<"$carriage" 8<"$tabbed" & pids="$pids $!"
+sleep 60 < "$dir/open a%b.txt" 3<"$star" 4<"$glob" 5<"$bs" 6<"$newline" 7<"$carriage" 8<"$tabbed" 9<"$quote" & pids="$pids $!"
 (cd "$dir/workdir" && exec sleep 60) & pids="$pids $!"
 libm=$(ldconfig -p | awk '/libm\.so\.6/ { print $NF; exit }')
 cp "$libm" "$dir"
@@ -86,7 +86,7 @@ kept() { [ -e "$dir/$1" ] || { echo "FAIL: $1 should be kept"; fail=1; }; }
 gone old.txt; gone olddir; gone weirdX; gone emptydir
 kept freshdir
 kept "*"; kept "we[i]rd?"; kept "back\\slash*"; kept "new${nl}line"
-kept "c${cr}d"; kept "t${tab}b"
+kept "c${cr}d"; kept "t${tab}b"; kept "q\"uote"
 kept new.txt; kept .X11-unix/X0; kept .X0-lock; kept systemd-private-abc/tmp/f
 kept "open a%b.txt"; kept workdir/f; kept sleep; kept libm.so.6
 
