@@ -4,7 +4,7 @@
 # cannot be backdated, so the test drops b/B/c/C from the age-by field and
 # keeps the rest as configured.
 set -eu
-unset TMPCLEANER_AGE
+unset TMPCLEANER_AGE TMPCLEANER_FULL_PERCENT TMPCLEANER_FULL_AGE
 here=$(cd "$(dirname "$0")/.." && pwd)
 dir=$(mktemp -d /tmp/tmpcleaner-test.XXXXXX)
 conf=$dir.conf
@@ -74,6 +74,28 @@ if TMPCLEANER_AGE='1h; x' TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --print-ru
 	fail=1
 fi
 rules=$(TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --print-rules)
+pressure_rules=$(TMPCLEANER_FULL_PERCENT=1 TMPCLEANER_FULL_AGE=30m TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --print-rules)
+printf '%s\n' "$pressure_rules" | grep -Eq "^d $dir - - - amM:30m$" || {
+	echo "FAIL: pressure mode should preserve age-by letters and set 30m"
+	fail=1
+}
+if TMPCLEANER_FULL_PERCENT=101 TMPCLEANER_FULL_AGE=30m TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --print-rules; then
+	echo "FAIL: invalid pressure threshold should fail"
+	fail=1
+fi
+if TMPCLEANER_FULL_PERCENT=1 TMPCLEANER_FULL_AGE='1h; x' TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --print-rules; then
+	echo "FAIL: invalid pressure age should fail"
+	fail=1
+fi
+configured_age=$(printf '%s\n' "$rules" | grep '^d ')
+percent_only=$(TMPCLEANER_FULL_PERCENT=1 TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --print-rules)
+age_only=$(TMPCLEANER_FULL_AGE=30m TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --print-rules)
+for partial_rules in "$percent_only" "$age_only"; do
+	[ "$(printf '%s\n' "$partial_rules" | grep '^d ')" = "$configured_age" ] || {
+		echo "FAIL: pressure mode needs both variables to change the age"
+		fail=1
+	}
+done
 printf '%s\n' "$rules" | grep -Fxq "x \"$dir/open a%%b.txt\"" || {
 	echo "FAIL: printed rules should exclude the held file"
 	fail=1

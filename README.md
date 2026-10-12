@@ -104,6 +104,30 @@ Preview a one-off override without editing the config:
 sudo env TMPCLEANER_AGE=12h tmpcleaner --dry-run
 ```
 
+### Use a shorter age when /tmp is nearly full
+
+Pressure mode is off by default. Set both `TMPCLEANER_FULL_PERCENT` (an integer
+from 1 to 100) and `TMPCLEANER_FULL_AGE` (the same format as `TMPCLEANER_AGE`)
+to enable it. With either variable unset, the usual age applies. When both are
+set, invalid values stop the run before cleaning.
+
+Run `sudo systemctl edit tmpcleaner.service` and add, for example:
+
+```ini
+[Service]
+Environment=TMPCLEANER_FULL_PERCENT=90
+Environment=TMPCLEANER_FULL_AGE=30m
+```
+
+Each run reads `/tmp` usage with `df --output=pcent /tmp`. At or above the
+threshold, it overrides every `d` rule's duration, including `TMPCLEANER_AGE`,
+and reports `tmpcleaner: /tmp is N% full, using age X` on stderr. Below the
+threshold, the configured age or `TMPCLEANER_AGE` applies.
+
+**The shorter age applies to every unprotected file**, so recent temporary
+work can be deleted sooner. In-use protection and configured exclusions
+still apply.
+
 ### See what was deleted
 
 By default, `systemd-tmpfiles` logs removals only at debug level, so
