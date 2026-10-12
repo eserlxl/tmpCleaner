@@ -3,18 +3,24 @@
 Deletes entries under `/tmp` that are older than 6 hours. Runs as a systemd
 timer: 5 minutes after boot, then every 15 minutes.
 
-There is no custom daemon code: the work is done by `systemd-tmpfiles --clean`
-with its own rule file (`tmpcleaner.conf`), so the deletion logic is the same
-battle-tested code your distribution already uses for `/tmp`.
+The deletion itself is done by `systemd-tmpfiles --clean` with its own rule
+file (`tmpcleaner.conf`), the same code your distribution already uses for
+`/tmp`. A small wrapper (`tmpcleaner`) adds one thing it lacks: protection for
+files that running programs still use.
 
 ## What gets deleted
 
 An entry is removed only when its access, birth and modification times (plus
 status-change time for files) are **all** older than 6 hours. So a file that
-was recently written, read or extracted survives.
+was recently written or extracted survives. Reading alone is a weak signal:
+with the usual `relatime` mount option the access time moves at most once a
+day.
 
 Never deleted:
 
+- Files a running process holds open, and everything inside a directory a
+  running process works in (its current directory). These are collected from
+  `/proc` right before each run.
 - X11/ICE socket dirs and X lock files (`/tmp/.X11-unix`, `/tmp/.ICE-unix`,
   `/tmp/.X0-lock`, ...)
 - systemd `PrivateTmp` dirs of running services (`/tmp/systemd-private-*`)
@@ -29,26 +35,37 @@ Linux with systemd (`systemd-tmpfiles`, age-by syntax: systemd >= 250).
 
 ## Install
 
-```sh
-sudo make install     # installs units + config, enables the timer
-```
-
-Preview what the next run would delete, without deleting:
+**Preview first.** On a machine that keeps work in `/tmp` (build trees,
+snapshots, long-lived tool sessions), the first run can remove a lot. This
+lists what would go, without deleting:
 
 ```sh
-sudo systemd-tmpfiles --clean --dry-run /etc/tmpcleaner/tmpcleaner.conf
+sudo TMPCLEANER_CONF=./tmpcleaner.conf sh ./tmpcleaner --dry-run
 ```
 
-Status and logs:
+Anything that must survive even while no program uses it goes into the
+exclusion list in `tmpcleaner.conf` (format: `man tmpfiles.d`); the age is
+set there too:
+
+```
+x /tmp/my-long-job-*
+```
+
+Then install; this copies the config to `/etc/tmpcleaner/tmpcleaner.conf`,
+the wrapper to `/usr/local/bin/tmpcleaner`, and enables the timer:
+
+```sh
+sudo make install
+```
+
+Later previews: `sudo tmpcleaner --dry-run`. Status and logs:
 
 ```sh
 systemctl list-timers tmpcleaner.timer
 journalctl -u tmpcleaner.service
 ```
 
-Change the age or exclusions in `/etc/tmpcleaner/tmpcleaner.conf`
-(format: `man tmpfiles.d`). Change the interval with
-`sudo systemctl edit tmpcleaner.timer`.
+Change the interval with `sudo systemctl edit tmpcleaner.timer`.
 
 ## Uninstall
 
@@ -62,7 +79,8 @@ sudo make uninstall
 make test
 ```
 
-Runs the rules against a scratch directory (no root needed).
+Runs the rules against a scratch directory (no root needed), including a file
+held open and a directory used by a background process.
 
 ## License
 

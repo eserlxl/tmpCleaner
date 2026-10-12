@@ -1,0 +1,21 @@
+#!/bin/sh
+# Runs the /tmp age rules, but first excludes every /tmp path a running process
+# holds open or uses as its working directory: systemd-tmpfiles only looks at
+# timestamps, so a long-running job could otherwise lose files under its feet.
+# Extra arguments (e.g. --dry-run) go to systemd-tmpfiles.
+set -eu
+conf=${TMPCLEANER_CONF:-/etc/tmpcleaner/tmpcleaner.conf}
+
+# Targets of every process's cwd and open fds. One find, not a readlink per fd:
+# a busy desktop has tens of thousands of fds. "/tmp/?*" leaves out /tmp itself,
+# which must never become an exclusion or nothing would be cleaned.
+in_use() {
+	find /proc/[0-9]*/cwd /proc/[0-9]*/fd -maxdepth 1 -lname '/tmp/?*' -printf '%l\n' 2>/dev/null
+}
+
+{
+	cat "$conf"
+	# Quote the path, escape \ and ", and double % (a tmpfiles specifier).
+	in_use | sort -u |
+		sed -e 's/[\\"]/\\&/g' -e 's/%/%%/g' -e 's/.*/x "&"/'
+} | systemd-tmpfiles --clean "$@" -
