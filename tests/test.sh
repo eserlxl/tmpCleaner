@@ -55,6 +55,13 @@ old "$star" "$glob" "$bs" "$newline" "$carriage" "$tabbed" "$quote" "$dir/weirdX
 # one is an executable started from the directory, one memory-maps a file.
 cp /usr/bin/sleep "$dir"
 "$dir/sleep" 60 & pids="$pids $!"
+# A name holding an invalid UTF-8 byte and a space, held open: under a UTF-8
+# locale the escaping must still quote all of it (the run below uses one).
+utf8="$dir/u$(printf '\377') x"
+touch "$utf8"
+old "$utf8"
+# shellcheck disable=SC2217 # sleep only holds these files open for the in-use scan
+sleep 60 < "$utf8" & pids="$pids $!"
 # shellcheck disable=SC2217 # sleep only holds these files open for the in-use scan
 sleep 60 < "$dir/open a%b.txt" 3<"$star" 4<"$glob" 5<"$bs" 6<"$newline" 7<"$carriage" 8<"$tabbed" 9<"$quote" & pids="$pids $!"
 (cd "$dir/workdir" && exec sleep 60) & pids="$pids $!"
@@ -64,6 +71,7 @@ LD_PRELOAD="$dir/libm.so.6" sleep 60 & pids="$pids $!"
 waited=0
 until [ -n "$(find /proc/[0-9]*/cwd -maxdepth 0 -lname "$dir/workdir" 2>/dev/null)" ] && \
       [ -n "$(find /proc/[0-9]*/fd -maxdepth 1 -lname "$dir/open a%b.txt" 2>/dev/null)" ] && \
+      [ -n "$(find /proc/[0-9]*/fd -maxdepth 1 -lname "$utf8" 2>/dev/null)" ] && \
       [ -n "$(find /proc/[0-9]*/exe -maxdepth 0 -lname "$dir/sleep" 2>/dev/null)" ] && \
       [ -n "$(find /proc/[0-9]*/map_files -maxdepth 1 -lname "$dir/libm.so.6" 2>/dev/null)" ]; do
 	if [ "$waited" -ge 100 ]; then
@@ -272,7 +280,7 @@ if [ "$status" -ne 2 ] || [ -z "$check_out" ]; then
 fi
 [ "$fail" = 0 ] || exit 1
 
-run_log=$(TMPCLEANER_LIST=1 TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" 2>&1 >/dev/null)
+run_log=$(env -u LC_ALL LANG=C.UTF-8 TMPCLEANER_LIST=1 TMPCLEANER_CONF="$conf" sh "$here/tmpcleaner" 2>&1 >/dev/null)
 
 fail=0
 if ! { [ "$(printf '%s\n' "$run_log" | grep -c '^tmpcleaner: removed [0-9]')" = 1 ] &&
@@ -347,7 +355,7 @@ kept freshdir
 kept "*"; kept "we[i]rd?"; kept "back\\slash*"; kept "new${nl}line"
 kept "c${cr}d"; kept "t${tab}b"; kept "q\"uote"
 kept new.txt; kept krb5cc_1000; kept .X11-unix/X0; kept .X0-lock; kept systemd-private-abc/tmp/f
-kept "open a%b.txt"; kept workdir/f; kept sleep; kept libm.so.6
+kept "open a%b.txt"; kept workdir/f; kept sleep; kept libm.so.6; kept "${utf8#"$dir"/}"
 if [ "$rootfs_running" = 1 ]; then
 	kept rootfs/data/state
 fi

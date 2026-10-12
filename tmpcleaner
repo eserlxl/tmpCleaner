@@ -214,7 +214,7 @@ in_use() {
 rules() {
 	if [ "${TMPCLEANER_AGE+x}" ]; then
 		# Replace the duration of the age field, keeping any age-by letters.
-		sed -E "/^d[[:space:]]/s/[[:space:]]+([abcmABCM]+:)?[^[:space:]]*[[:space:]]*\$/ \\1$TMPCLEANER_AGE/" "$conf"
+		LC_ALL=C sed -E "/^[[:space:]]*d[[:space:]]/s/[[:space:]]+([abcmABCM]+:)?[^[:space:]]*[[:space:]]*\$/ \\1$TMPCLEANER_AGE/" "$conf"
 	else
 		cat "$conf"
 	fi
@@ -224,8 +224,10 @@ rules() {
 	# new rule. tmpfiles treats a path with * ? [ as a glob: there, escape the
 	# glob characters, or a file named "*" would exclude all of /tmp. Then
 	# C-escape \ " and all control bytes for the quoted field and double % (specifier).
-	in_use | sort -zu |
-		sed -z -e '/[[*?]/s/[][*?\\]/\\&/g' -e 's/[\\"]/\\&/g' \
+	# LC_ALL=C: names are bytes, not text. In a UTF-8 locale "." skips invalid
+	# bytes, so a name holding one would leave its rule half quoted.
+	in_use | LC_ALL=C sort -zu |
+		LC_ALL=C sed -z -e '/[[*?]/s/[][*?\\]/\\&/g' -e 's/[\\"]/\\&/g' \
 			-e "$control_escapes" -e 's/%/%%/g' -e 's/.*/x "&"/' | tr '\0' '\n'
 }
 
@@ -297,7 +299,11 @@ trap 'rm -rf "$scratch"' EXIT
 	echo
 } > "$scratch/rules"
 # Snapshot only the trees the d rules clean (normally just /tmp).
-awk '$1 == "d" { root = $2; if (root ~ /^".*"$/) root = substr(root, 2, length(root) - 2); print root }' \
+LC_ALL=C awk '$1 == "d" {
+	# A quoted root may hold spaces, so take everything between its quotes.
+	if ($2 ~ /^"/ && match($0, /"[^"]*"/)) print substr($0, RSTART + 1, RLENGTH - 2)
+	else print $2
+}' \
 	"$scratch/rules" > "$scratch/roots"
 snapshot() {
 	while IFS= read -r root; do
