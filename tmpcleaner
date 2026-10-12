@@ -220,6 +220,9 @@ in_use() {
 				if (split(line, id, " ") != 2 || id[1] != tmpdev) return
 				inode = id[2]
 			}
+			want(inode)
+		}
+		function want(inode) {
 			if (inode ~ /^[0-9]+$/ && !(inode in wanted)) {
 				wanted[inode] = 1
 				nwanted++
@@ -233,15 +236,17 @@ in_use() {
 		}
 		# Links are relative to the namespace root; a chrooted process lists
 		# its mounts relative to its root, so rebase onto it.
-		function handle(pid, target, link, inode, ns, r, path) {
-			if (substr(target, 1, 1) != "/" || device == "") return
+		function where(pid, target, ns, r) {
 			ns = namespace[pid]
-			if (ns == "") path = translate(pid, target)
-			else if (ns == namespace["self"]) path = translate("self", target)
-			else if (rootlink[pid] != "" && under(target, rootlink[pid])) {
-				r = suffix(target, rootlink[pid])
-				path = translate(pid, r == "" ? "/" : r)
-			} else path = "?"
+			if (ns == "") return translate(pid, target)
+			if (ns == namespace["self"]) return translate("self", target)
+			if (rootlink[pid] == "" || !under(target, rootlink[pid])) return "?"
+			r = suffix(target, rootlink[pid])
+			return translate(pid, r == "" ? "/" : r)
+		}
+		function handle(pid, target, link, inode, path) {
+			if (substr(target, 1, 1) != "/" || device == "") return
+			path = where(pid, target)
 			if (path == "?") unseen(link, inode)
 			else if (path != "") emit("/tmp" suffix(path, tmp_root))
 		}
@@ -267,31 +272,65 @@ in_use() {
 		# Root links come before the other links of a process, which need them.
 		# systemd-tmpfiles keeps only the sockets of its own network namespace;
 		# a socket bound in another one is reached through /tmp all the same.
-		# Names are printed raw: a line that starts no record continues the
-		# name before it, and a forged record only keeps a file.
-		function sockets(pid, file, line, name, saved) {
+		# Names are printed raw, so a line that starts no record continues the
+		# name before it; each name is resolved as the process holding the
+		# socket sees it, and only a real socket on /tmp is kept, so a forged
+		# record can keep no other file.
+		function sockets(pid, file, line, n, k, inode, name, holder_pid, saved) {
 			file = "/proc/" pid "/net/unix"
 			saved = RS
 			RS = "\n"
 			getline line < file
 			while ((getline line < file) > 0) {
 				if (line ~ /^ *[0-9a-fA-F]+: /) {
-					if (name != "") handle(pid, name)
-					name = sub(/^ *[^ ]+ +[^ ]+ +[^ ]+ +[^ ]+ +[^ ]+ +[^ ]+ +[^ ]+ /, "", line) ? line : ""
-				} else if (name != "") name = name "\n" line
+					split(line, fields, " ")
+					inode[++n] = fields[7]
+					name[n] = sub(/^ *[^ ]+ +[^ ]+ +[^ ]+ +[^ ]+ +[^ ]+ +[^ ]+ +[^ ]+ /, "", line) ? line : ""
+				} else if (n) name[n] = name[n] "\n" line
 			}
-			if (name != "") handle(pid, name)
 			close(file)
 			RS = saved
+			for (k = 1; k <= n; k++) {
+				if (substr(name[k], 1, 1) != "/") continue
+				holder_pid = (inode[k] in holder) ? holder[inode[k]] : pid
+				# A name with . or .. is left to the kernel to resolve.
+				if (name[k] !~ /\/\.\.?(\/|$)/ && where(holder_pid, name[k]) == "") continue
+				socket(holder_pid, name[k])
+			}
+		}
+		# A shell word for s: single quotes, with each quote as '\''.
+		function quote(s, parts, n, i, word) {
+			n = split(s, parts, "\047")
+			word = "\047" parts[1]
+			for (i = 2; i <= n; i++) word = word "\047\\\047\047" parts[i]
+			return word "\047"
+		}
+		# Keep name, as pid resolves it, if it is a socket on /tmp. The name is
+		# untrusted, so it is single-quoted for the shell.
+		function socket(pid, name, cmd, line, saved) {
+			cmd = "stat -Lc \"%d %i %F\" -- " quote("/proc/" pid "/root" name) " 2>/dev/null"
+			saved = RS
+			RS = "\n"
+			line = ""
+			cmd | getline line
+			close(cmd)
+			RS = saved
+			if (split(line, id, " ") == 3 && id[1] == tmpdev && id[3] == "socket") want(id[2])
 		}
 		NR % 2 { link = $0; split(link, parts, "/"); pid = parts[3]; next }
-		parts[5] == "net" { if (!($0 in netns)) { netns[$0] = 1; sockets(pid) } next }
+		parts[5] == "net" { if (!($0 in netns)) netns[$0] = pid; next }
 		parts[4] == "ns" { namespace[pid] = $0; next }
 		parts[4] == "root" { rootlink[pid] = $0; mapped(pid) }
+		$0 ~ /^socket:\[[0-9]+\]$/ {
+			inode = substr($0, 9, length($0) - 9)
+			if (!(inode in holder)) holder[inode] = pid
+			next
+		}
 		{ handle(pid, $0, link) }
 		# One walk of /tmp finds every file looked up by inode; a hard link
 		# or bind alias only keeps another name of a file in use.
 		END {
+			for (ns in netns) sockets(netns[ns])
 			if (!nwanted) exit
 			cmd = "find /tmp -xdev -printf \"%i %p\\0\" 2>/dev/null"
 			while ((cmd | getline line) > 0) {

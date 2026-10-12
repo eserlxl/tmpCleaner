@@ -58,26 +58,50 @@ cp /usr/bin/sleep "$dir"
 "$dir/sleep" 60 & pids="$pids $!"
 # Sockets listening in another network namespace, which systemd-tmpfiles
 # cannot see, are still reached through their paths: one with a newline in
-# its name, and one bound through a bind mount outside /tmp.
+# its name, one bound through ".." and one through a bind mount outside /tmp
+# that only the binding process sees (another process of the namespace runs
+# in our mount namespace). A name that forges a record for a regular file
+# must not keep that file.
 sock_running=0
 nlsock="$dir/sock
 nl"
+forged="$dir/f
+0: 2 0 10000 1 1 1 $dir/victim"
+# shellcheck disable=SC2016 # expanded by the inner sh
+binder='mount --bind "$1/sockdir" "$2"
+exec python3 "$3" "$1/sock" "$4" "$5" "$2/s" "/var/..$1/dotsock"'
 if command -v python3 >/dev/null && unshare -rmn true 2>/dev/null; then
 	sockalias=$(mktemp -d /var/tmp/tmpcleaner-sock.XXXXXX)
-	mkdir "$dir/sockdir"
-	# shellcheck disable=SC2016 # $1 to $4 are expanded by the inner sh
-	unshare -rmn sh -ec '
-		mount --bind "$1/sockdir" "$2"
-		exec python3 -c "import socket, sys, time
-socks = [socket.socket(socket.AF_UNIX) for path in sys.argv[1:]]
-for sock, path in zip(socks, sys.argv[1:]):
+	# The forged line holds slashes, so the forging name needs real directories.
+	mkdir -p "$dir/sockdir" "${forged%/*}"
+	# A directory: its type is one word, like "socket", in stat's output.
+	mkdir "$dir/victim"
+	touch "$dir/victim/f"
+	old "$dir/victim/f"
+	cat > "$cfg/listen.py" <<'PY'
+import socket, sys, time
+socks = []
+for path in sys.argv[1:]:
+    sock = socket.socket(socket.AF_UNIX)
     sock.bind(path)
     sock.listen()
-time.sleep(60)" "$1/sock" "$3" "$2/s"
-	' sh "$dir" "$sockalias" "$nlsock" &
+    socks.append(sock)
+time.sleep(60)
+PY
+	# The namespace's first process stays in our mount namespace; only the
+	# binder, started after it, sees the bind mount.
+	# shellcheck disable=SC2016 # the positional parameters are expanded by the inner sh
+	unshare -rn sh -ec '
+		binder=$1
+		shift
+		unshare -m sh -ec "$binder" sh "$@" &
+		child=$!
+		trap "kill $child" TERM
+		wait
+	' sh "$binder" "$dir" "$sockalias" "$cfg/listen.py" "$nlsock" "$forged" &
 	pids="$pids $!"
 	waited=0
-	until [ -S "$dir/sock" ] && [ -S "$nlsock" ] && [ -S "$dir/sockdir/s" ]; do
+	until [ -S "$dir/sock" ] && [ -S "$nlsock" ] && [ -S "$forged" ] && [ -S "$dir/sockdir/s" ] && [ -S "$dir/dotsock" ]; do
 		if [ "$waited" -ge 100 ]; then
 			echo "FAIL: timed out waiting for the socket"
 			exit 1
@@ -86,7 +110,8 @@ time.sleep(60)" "$1/sock" "$3" "$2/s"
 		sleep 0.1
 	done
 	# touch -h sets the times without opening the socket.
-	touch -h -d '7 hours ago' "$dir/sock" "$nlsock" "$dir/sockdir/s"
+	# The forging socket stays fresh: its own name is cut at the forged line.
+	touch -h -d '7 hours ago' "$dir/sock" "$nlsock" "$dir/sockdir/s" "$dir/dotsock"
 	sock_running=1
 else
 	echo "SKIP: socket protection (python3 or unshare -rmn is unavailable)"
@@ -413,13 +438,13 @@ run_log=$(env -u LC_ALL LANG=C.UTF-8 TMPCLEANER_LIST=1 TMPCLEANER_CONF="$conf" s
 
 fail=0
 if ! { [ "$(printf '%s\n' "$run_log" | grep -c '^tmpcleaner: removed [0-9]')" = 1 ] &&
-	printf '%s\n' "$run_log" | grep -Fxq "tmpcleaner: removed $((5 + bind_running)) files and 2 directories"; }; then
+	printf '%s\n' "$run_log" | grep -Fxq "tmpcleaner: removed $((5 + bind_running + sock_running)) files and 2 directories"; }; then
 	echo "FAIL: real run should log one summary with the expected removal counts"
 	fail=1
 fi
 if ! { [ "$(printf '%s\n' "$run_log" | grep -Fxc "tmpcleaner: removed: $dir/old.txt")" = 1 ] &&
 	[ "$(printf '%s\n' "$run_log" | grep -Fxc "tmpcleaner: removed: $dir/old\x0a<0>forged")" = 1 ] &&
-	[ "$(printf '%s\n' "$run_log" | grep -c '^tmpcleaner: removed: ')" = "$((5 + bind_running))" ] &&
+	[ "$(printf '%s\n' "$run_log" | grep -c '^tmpcleaner: removed: ')" = "$((5 + bind_running + sock_running))" ] &&
 	[ "$(printf '%s\n' "$run_log" | grep -c '^tmpcleaner: removed directory: ')" = 2 ]; }; then
 	echo "FAIL: listing should log every removed path once with newlines escaped"
 	fail=1
@@ -486,7 +511,7 @@ kept "c${cr}d"; kept "t${tab}b"; kept "q\"uote"
 kept new.txt; kept krb5cc_1000; kept .X11-unix/X0; kept .X0-lock; kept systemd-private-abc/tmp/f
 kept "open a%b.txt"; kept workdir/f; kept sleep; kept libm.so.6; kept "${utf8#"$dir"/}"
 if [ "$sock_running" = 1 ]; then
-	kept sock; kept "${nlsock#"$dir"/}"; kept sockdir/s
+	kept sock; kept "${nlsock#"$dir"/}"; kept sockdir/s; kept dotsock; gone victim/f
 fi
 if [ "$jail_running" = 1 ]; then
 	kept jail/data/state; kept alias/jail/data/state
