@@ -63,6 +63,37 @@ done
 old "$dir/sleep"
 old "$dir/libm.so.6"
 
+# A process confined to a root under /tmp protects files outside its cwd.
+rootfs_running=0
+if unshare -r true 2>/dev/null; then
+	mkdir -p "$dir/rootfs/bin" "$dir/rootfs/data"
+	cp /usr/bin/sleep /usr/bin/env "$dir/rootfs/bin"
+	ldd /usr/bin/sleep /usr/bin/env |
+		awk '$2 == "=>" && $3 ~ /^\// { print $3 } $1 ~ /^\// && $1 !~ /:$/ { print $1 }' |
+		sort -u | while IFS= read -r lib; do
+			mkdir -p "$dir/rootfs$(dirname "$lib")"
+			cp "$lib" "$dir/rootfs$lib"
+		done
+	touch "$dir/rootfs/data/state"
+	old "$dir/rootfs/data/state"
+	unshare -r chroot "$dir/rootfs" /bin/env -C /bin /bin/sleep 60 &
+	rootfs_pid=$!
+	pids="$pids $rootfs_pid"
+	waited=0
+	until [ "$(readlink "/proc/$rootfs_pid/root" 2>/dev/null)" = "$dir/rootfs" ] && \
+	      [ "$(readlink "/proc/$rootfs_pid/cwd" 2>/dev/null)" = "$dir/rootfs/bin" ]; do
+		if [ "$waited" -ge 100 ]; then
+			echo "FAIL: timed out waiting for chrooted process"
+			exit 1
+		fi
+		waited=$((waited + 1))
+		sleep 0.1
+	done
+	rootfs_running=1
+else
+	echo "SKIP: rootfs protection (unshare -r is not permitted or unavailable)"
+fi
+
 fail=0
 age_rules=$(TMPCLEANER_AGE=8h TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --print-rules)
 printf '%s\n' "$age_rules" | grep -Eq "^d $dir - - - amM:8h$" || {
@@ -148,6 +179,9 @@ kept "*"; kept "we[i]rd?"; kept "back\\slash*"; kept "new${nl}line"
 kept "c${cr}d"; kept "t${tab}b"; kept "q\"uote"
 kept new.txt; kept krb5cc_1000; kept .X11-unix/X0; kept .X0-lock; kept systemd-private-abc/tmp/f
 kept "open a%b.txt"; kept workdir/f; kept sleep; kept libm.so.6
+if [ "$rootfs_running" = 1 ]; then
+	kept rootfs/data/state
+fi
 
 # A second run tests that the shipped age rule keeps freshly extracted files
 # (birth and ctime stay current even when atime and mtime are backdated).

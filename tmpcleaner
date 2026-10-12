@@ -1,7 +1,7 @@
 #!/bin/sh
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Runs the /tmp age rules, but first excludes every /tmp path a running process
-# holds open or uses as its working directory: systemd-tmpfiles only looks at
+# holds open or uses as its working or root directory: systemd-tmpfiles only looks at
 # timestamps, so a long-running job could otherwise lose files under its feet.
 # Extra arguments (e.g. --dry-run) go to systemd-tmpfiles.
 set -eu
@@ -67,11 +67,11 @@ control_escapes=$(
 	printf 's/\\d127/\\\\x7f/g\n'
 )
 
-# Targets of every process's exe, cwd, open fds and memory-mapped files. One find, not a readlink per fd:
+# Targets of every process's exe, cwd, root, open fds and memory-mapped files. One find, not a readlink per fd:
 # a busy desktop has tens of thousands of fds. "/tmp/?*" leaves out /tmp itself,
 # which must never become an exclusion or nothing would be cleaned.
 in_use() {
-	find /proc/[0-9]*/exe /proc/[0-9]*/cwd /proc/[0-9]*/fd /proc/[0-9]*/map_files -maxdepth 1 -lname '/tmp/?*' -printf '%l\0' 2>/dev/null
+	find /proc/[0-9]*/exe /proc/[0-9]*/cwd /proc/[0-9]*/root /proc/[0-9]*/fd /proc/[0-9]*/map_files -maxdepth 1 -lname '/tmp/?*' -printf '%l\0' 2>/dev/null
 }
 
 rules() {
