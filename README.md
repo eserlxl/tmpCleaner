@@ -25,11 +25,12 @@ that a directory will still hold a kept file, so a real run may remove fewer.
 
 Never deleted:
 
-- Executables of running processes, files a running process holds open, and
-  everything inside a directory a running process works in (its current
-  directory). The in-use list is taken from `/proc` just before each run
-  (a snapshot before cleaning), so files opened during a run are not covered
-  and long-lived work belongs in the exclusion list.
+- Executables of running processes, files a running process holds open,
+  memory-mapped files such as loaded libraries, and everything inside a
+  directory a running process works in (its current directory). The in-use
+  list is taken from `/proc` just before each run (a snapshot before cleaning),
+  so files opened during a run are not covered and long-lived work belongs in
+  the exclusion list.
 - X11/ICE socket dirs and X lock files (`/tmp/.X11-unix`, `/tmp/.ICE-unix`,
   `/tmp/.X0-lock`, ...)
 - systemd `PrivateTmp` dirs of running services (`/tmp/systemd-private-*`)

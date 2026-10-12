@@ -39,15 +39,19 @@ touch "$star" "$glob" "$bs" "$newline" "$carriage" "$tabbed" "$dir/weirdX"
 old "$star" "$glob" "$bs" "$newline" "$carriage" "$tabbed" "$dir/weirdX"
 
 # Long-running jobs: one holds files open, one works inside a directory,
-# one is an executable started from the directory.
+# one is an executable started from the directory, one memory-maps a file.
 cp /usr/bin/sleep "$dir"
 "$dir/sleep" 60 & pids="$pids $!"
 sleep 60 < "$dir/open a%b.txt" 3<"$star" 4<"$glob" 5<"$bs" 6<"$newline" 7<"$carriage" 8<"$tabbed" & pids="$pids $!"
 (cd "$dir/workdir" && exec sleep 60) & pids="$pids $!"
+libm=$(ldconfig -p | awk '/libm\.so\.6/ { print $NF; exit }')
+cp "$libm" "$dir"
+LD_PRELOAD="$dir/libm.so.6" sleep 60 & pids="$pids $!"
 waited=0
 until [ -n "$(find /proc/[0-9]*/cwd -maxdepth 0 -lname "$dir/workdir" 2>/dev/null)" ] && \
       [ -n "$(find /proc/[0-9]*/fd -maxdepth 1 -lname "$dir/open a%b.txt" 2>/dev/null)" ] && \
-      [ -n "$(find /proc/[0-9]*/exe -maxdepth 0 -lname "$dir/sleep" 2>/dev/null)" ]; do
+      [ -n "$(find /proc/[0-9]*/exe -maxdepth 0 -lname "$dir/sleep" 2>/dev/null)" ] && \
+      [ -n "$(find /proc/[0-9]*/map_files -maxdepth 1 -lname "$dir/libm.so.6" 2>/dev/null)" ]; do
 	if [ "$waited" -ge 100 ]; then
 		echo "FAIL: timed out waiting for background jobs"
 		exit 1
@@ -56,6 +60,7 @@ until [ -n "$(find /proc/[0-9]*/cwd -maxdepth 0 -lname "$dir/workdir" 2>/dev/nul
 	sleep 0.1
 done
 old "$dir/sleep"
+old "$dir/libm.so.6"
 
 fail=0
 preview=$(TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --dry-run 2>&1)
@@ -83,7 +88,7 @@ kept freshdir
 kept "*"; kept "we[i]rd?"; kept "back\\slash*"; kept "new${nl}line"
 kept "c${cr}d"; kept "t${tab}b"
 kept new.txt; kept .X11-unix/X0; kept .X0-lock; kept systemd-private-abc/tmp/f
-kept "open a%b.txt"; kept workdir/f; kept sleep
+kept "open a%b.txt"; kept workdir/f; kept sleep; kept libm.so.6
 
 # A second run tests that the shipped age rule keeps freshly extracted files
 # (birth and ctime stay current even when atime and mtime are backdated).
