@@ -83,6 +83,27 @@ journalctl -u tmpcleaner.service
 
 Change the interval with `sudo systemctl edit tmpcleaner.timer`.
 
+### Override the age
+
+Set `TMPCLEANER_AGE` to override the duration on every `d` rule while keeping
+its age-by letters and the config unchanged. Use a non-negative integer with
+an optional unit: `us`, `ms`, `s`, `m`, `min`, `h`, `d`, or `w` (seconds when
+omitted). An empty or invalid value stops the run before cleaning; when unset,
+the configured ages apply.
+
+For the service, run `sudo systemctl edit tmpcleaner.service` and add:
+
+```ini
+[Service]
+Environment=TMPCLEANER_AGE=12h
+```
+
+Preview a one-off override without editing the config:
+
+```sh
+sudo env TMPCLEANER_AGE=12h tmpcleaner --dry-run
+```
+
 ### See what was deleted
 
 By default, `systemd-tmpfiles` logs removals only at debug level, so

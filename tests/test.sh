@@ -4,6 +4,7 @@
 # cannot be backdated, so the test drops b/B/c/C from the age-by field and
 # keeps the rest as configured.
 set -eu
+unset TMPCLEANER_AGE
 here=$(cd "$(dirname "$0")/.." && pwd)
 dir=$(mktemp -d /tmp/tmpcleaner-test.XXXXXX)
 conf=$dir.conf
@@ -63,6 +64,15 @@ old "$dir/sleep"
 old "$dir/libm.so.6"
 
 fail=0
+age_rules=$(TMPCLEANER_AGE=8h TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --print-rules)
+printf '%s\n' "$age_rules" | grep -Eq "^d $dir - - - amM:8h$" || {
+	echo "FAIL: age override should preserve age-by letters and set 8h"
+	fail=1
+}
+if TMPCLEANER_AGE='1h; x' TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --print-rules; then
+	echo "FAIL: invalid age override should fail"
+	fail=1
+fi
 rules=$(TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --print-rules)
 printf '%s\n' "$rules" | grep -Fxq "x \"$dir/open a%%b.txt\"" || {
 	echo "FAIL: printed rules should exclude the held file"

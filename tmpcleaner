@@ -7,6 +7,12 @@
 set -eu
 conf=${TMPCLEANER_CONF:-/etc/tmpcleaner/tmpcleaner.conf}
 [ -r "$conf" ] || { echo "tmpcleaner: cannot read $conf" >&2; exit 1; }
+if [ "${TMPCLEANER_AGE+x}" ]; then
+	printf '%s\0' "$TMPCLEANER_AGE" | LC_ALL=C grep -zEq '^[0-9]+(us|ms|s|m|min|h|d|w)?$' || {
+		echo "tmpcleaner: invalid TMPCLEANER_AGE: $TMPCLEANER_AGE" >&2
+		exit 1
+	}
+fi
 
 control_escapes=$(
 	control=1
@@ -25,7 +31,12 @@ in_use() {
 }
 
 rules() {
-	cat "$conf"
+	if [ "${TMPCLEANER_AGE+x}" ]; then
+		# Replace the duration of the age field, keeping any age-by letters.
+		sed -E "/^d /s/ ([abcmABCM]+:)?[^ ]*\$/ \\1$TMPCLEANER_AGE/" "$conf"
+	else
+		cat "$conf"
+	fi
 	echo
 	# File names are untrusted (any user can hold a file open), so each must
 	# match only itself. NUL-separated, so a newline in a name cannot start a
