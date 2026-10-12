@@ -69,7 +69,7 @@ forged="$dir/f
 0: 2 0 10000 1 1 1 $dir/victim"
 # shellcheck disable=SC2016 # expanded by the inner sh
 binder='mount --bind "$1/sockdir" "$2"
-exec python3 "$3" "$1/sock" "$4" "$5" "$2/s" "/var/..$1/dotsock"'
+MOUNTPOINT=$2 MARKER=$6 exec python3 "$3" "$1/sock" "$4" "$5" "$2/s" "/var/..$1/dotsock"'
 if command -v python3 >/dev/null && unshare -rmn true 2>/dev/null; then
 	sockalias=$(mktemp -d /var/tmp/tmpcleaner-sock.XXXXXX)
 	# The forged line holds slashes, so the forging name needs real directories.
@@ -78,14 +78,25 @@ if command -v python3 >/dev/null && unshare -rmn true 2>/dev/null; then
 	mkdir "$dir/victim"
 	touch "$dir/victim/f"
 	old "$dir/victim/f"
+	# After binding, the process forks: the child keeps the sockets where the
+	# bind mount is, while the parent, scanned first, leaves for a mount
+	# namespace without it.
 	cat > "$cfg/listen.py" <<'PY'
-import socket, sys, time
+import os, socket, subprocess, sys, time
 socks = []
 for path in sys.argv[1:]:
     sock = socket.socket(socket.AF_UNIX)
     sock.bind(path)
     sock.listen()
     socks.append(sock)
+parent = os.getpid()
+if os.fork() == 0:
+    while os.getppid() == parent:
+        time.sleep(0.1)
+    sys.exit()
+os.unshare(os.CLONE_NEWNS)
+subprocess.run(["umount", os.environ["MOUNTPOINT"]], check=True)
+open(os.environ["MARKER"], "w").close()
 time.sleep(60)
 PY
 	# The namespace's first process stays in our mount namespace; only the
@@ -98,10 +109,10 @@ PY
 		child=$!
 		trap "kill $child" TERM
 		wait
-	' sh "$binder" "$dir" "$sockalias" "$cfg/listen.py" "$nlsock" "$forged" &
+	' sh "$binder" "$dir" "$sockalias" "$cfg/listen.py" "$nlsock" "$forged" "$cfg/split" &
 	pids="$pids $!"
 	waited=0
-	until [ -S "$dir/sock" ] && [ -S "$nlsock" ] && [ -S "$forged" ] && [ -S "$dir/sockdir/s" ] && [ -S "$dir/dotsock" ]; do
+	until [ -e "$cfg/split" ] && [ -S "$dir/sock" ] && [ -S "$nlsock" ] && [ -S "$forged" ] && [ -S "$dir/sockdir/s" ] && [ -S "$dir/dotsock" ]; do
 		if [ "$waited" -ge 100 ]; then
 			echo "FAIL: timed out waiting for the socket"
 			exit 1
@@ -561,9 +572,10 @@ if [ "$bind_running" = 1 ]; then
 	done
 fi
 
-# The run keeps its own scratch files even when they sit in the cleaned tree.
+# The run keeps its own scratch files even when they sit in the cleaned tree
+# (given as a single-quoted path, which the counts must read too).
 dir3=$(mktemp -d /tmp/tmpcleaner-test.XXXXXX)
-printf 'd %s - - - amM:0\n' "$dir3" > "$cfg/conf3"
+printf "d '%s' - - - amM:0\\n" "$dir3" > "$cfg/conf3"
 touch "$dir3/f"
 status=0
 scratch_log=$(TMPDIR=$dir3 TMPCLEANER_AGE=0 TMPCLEANER_CONF=$cfg/conf3 sh "$here/tmpcleaner" 2>&1) || status=$?
