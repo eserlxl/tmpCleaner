@@ -151,6 +151,32 @@ else
 	echo "SKIP: bind-mount protection (unshare -rm is not permitted or unavailable)"
 fi
 
+# A process chrooted onto a bind mount of a /tmp tree, alone in its namespace,
+# lists only that mount, relative to its root.
+jail_running=0
+if [ "$rootfs_running" = 1 ] && [ "$bind_running" = 1 ]; then
+	cp -a "$dir/rootfs" "$dir/jail"
+	old "$dir/jail/data/state"
+	mkdir "$bindpoint/jail"
+	# shellcheck disable=SC2016 # $1 and $2 are expanded by the inner sh
+	unshare -rm sh -ec '
+		mount --bind "$1/jail" "$2"
+		exec chroot "$2" /bin/env -C /bin /bin/sleep 60
+	' sh "$dir" "$bindpoint/jail" &
+	jail_pid=$!
+	pids="$pids $jail_pid"
+	waited=0
+	until [ "$(readlink "/proc/$jail_pid/root" 2>/dev/null)" = "$bindpoint/jail" ]; do
+		if [ "$waited" -ge 100 ]; then
+			echo "FAIL: timed out waiting for the bind-mounted chroot"
+			exit 1
+		fi
+		waited=$((waited + 1))
+		sleep 0.1
+	done
+	jail_running=1
+fi
+
 fail=0
 age_rules=$(TMPCLEANER_AGE=8h TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --print-rules)
 printf '%s\n' "$age_rules" | grep -Eq "^d $dir - - - amM:8h$" || {
@@ -375,6 +401,9 @@ kept "*"; kept "we[i]rd?"; kept "back\\slash*"; kept "new${nl}line"
 kept "c${cr}d"; kept "t${tab}b"; kept "q\"uote"
 kept new.txt; kept krb5cc_1000; kept .X11-unix/X0; kept .X0-lock; kept systemd-private-abc/tmp/f
 kept "open a%b.txt"; kept workdir/f; kept sleep; kept libm.so.6; kept "${utf8#"$dir"/}"
+if [ "$jail_running" = 1 ]; then
+	kept jail/data/state
+fi
 if [ "$rootfs_running" = 1 ]; then
 	kept rootfs/data/state
 fi
