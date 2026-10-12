@@ -49,6 +49,7 @@ Only `/tmp` is touched; `/var/tmp` keeps the distribution's defaults.
 ## Requirements
 
 Linux with systemd (`systemd-tmpfiles`: systemd >= 249 for the service, >= 256 for `--dry-run` previews and `--check`).
+GNU coreutils >= 8.32 and GNU findutils.
 
 ## Install
 

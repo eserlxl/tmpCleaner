@@ -129,9 +129,11 @@ in_use() {
 		printf '%s\0' /proc/self/ns/mnt /proc/[0-9]*/ns/mnt /proc/[0-9]*/root /proc/[0-9]*/ns/net |
 			LC_ALL=C xargs -0 sh -c 'exec find "$@" -maxdepth 0 -type l -printf "%p\0%l\0" 2>/dev/null' sh || :
 		printf 'inodes\0'
-		# One stat per target; a socket fd stats as type s with the socket inode.
+		# One stat per target; a socket fd stats as a socket with the socket
+		# inode. Cached attributes only: an fd on a hung network filesystem must
+		# not stall the run.
 		printf '%s\0' /proc/[0-9]*/root /proc/[0-9]*/exe /proc/[0-9]*/cwd /proc/[0-9]*/fd/* |
-			LC_ALL=C xargs -0 sh -c 'exec find -L "$@" -maxdepth 0 -printf "%D %i %y %p\0" 2>/dev/null' sh
+			LC_ALL=C xargs -0 sh -c 'exec stat -L --cached=always --printf "%d %i %n %F\0" -- "$@" 2>/dev/null' sh
 	} | LC_ALL=C awk -v tmpdev="$tmpdev" -v devhex="$devhex" '
 		BEGIN {
 			RS = "\0"
@@ -216,21 +218,21 @@ in_use() {
 			return word "\047"
 		}
 		# Keep the sockets on the /tmp filesystem among the quoted paths in
-		# args (one find for many: a process per name would cost seconds).
+		# args (one stat for many: a process per name would cost seconds).
 		function verify(args, cmd, line, saved) {
-			cmd = "find -L" args " -maxdepth 0 -printf \"%D %i %y\\0\" 2>/dev/null"
+			cmd = "stat -L --cached=always --printf \"%d %i %F\\0\" --" args " 2>/dev/null"
 			saved = RS
 			RS = "\0"
 			while ((cmd | getline line) > 0)
-				if (split(line, id, " ") == 3 && id[1] == tmpdev && id[3] == "s") want(id[2])
+				if (split(line, id, " ") == 3 && id[1] == tmpdev && id[3] == "socket") want(id[2])
 			close(cmd)
 			RS = saved
 		}
 		NR % 2 && $0 == "inodes" { inodes = 1; next }
 		inodes {
-			if (split($0, id, " ") != 4) next
+			if (split($0, id, " ") < 4) next
 			if (id[1] == tmpdev) want(id[2])
-			else if (id[3] == "s" && split(id[4], parts, "/") == 5 && parts[4] == "fd") {
+			else if ($0 ~ / socket$/ && split(id[3], parts, "/") == 5 && parts[4] == "fd") {
 				pid = parts[3]
 				view = namespace[pid] SUBSEP rootlink[pid]
 				if (!((id[2], view) in viewed)) {
