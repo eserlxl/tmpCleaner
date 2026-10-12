@@ -175,19 +175,20 @@ if [ "$rootfs_running" = 1 ] && [ "$bind_running" = 1 ]; then
 		sleep 0.1
 	done
 	jail_running=1
-	# Chrooted below a bind mount of its parent, it lists no mount at all.
-	mkdir "$dir/alias" "$bindpoint/alias"
+	# Chrooted below a bind mount of its parent, it lists no mount at all; the
+	# mount point lies in /tmp, where our own table would name the wrong tree.
+	mkdir "$dir/alias" "$dir/aliasview"
 	cp -a "$dir/rootfs" "$dir/alias/jail"
 	old "$dir/alias/jail/data/state"
 	# shellcheck disable=SC2016 # $1 and $2 are expanded by the inner sh
 	unshare -rm sh -ec '
 		mount --bind "$1/alias" "$2"
 		exec chroot "$2/jail" /bin/env -C /bin /bin/sleep 60
-	' sh "$dir" "$bindpoint/alias" &
+	' sh "$dir" "$dir/aliasview" &
 	alias_pid=$!
 	pids="$pids $alias_pid"
 	waited=0
-	until [ "$(readlink "/proc/$alias_pid/root" 2>/dev/null)" = "$bindpoint/alias/jail" ]; do
+	until [ "$(readlink "/proc/$alias_pid/root" 2>/dev/null)" = "$dir/aliasview/jail" ]; do
 		if [ "$waited" -ge 100 ]; then
 			echo "FAIL: timed out waiting for the chroot below a bind mount"
 			exit 1

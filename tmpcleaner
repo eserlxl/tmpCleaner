@@ -199,17 +199,21 @@ in_use() {
 			if (path == "") path = "/"
 			return under(path, tmp_root) ? path : ""
 		}
-		# Our path of the root directory of pid, searched by inode on /tmp.
-		function locate(pid, cmd, line, saved) {
+		# Our path of the root directory of pid, searched by inode on /tmp
+		# when it lies on the /tmp filesystem.
+		function locate(pid, cmd, line, tmp, saved) {
 			saved = RS
 			RS = "\n"
-			cmd = "stat -Lc %i /proc/" pid "/root 2>/dev/null"
+			cmd = "stat -Lc %d:%i /proc/" pid "/root /tmp 2>/dev/null"
 			cmd | getline line
+			cmd | getline tmp
 			close(cmd)
 			# Callers read maps with RS set to a newline; find prints NUL-ended.
 			RS = "\0"
-			if (line ~ /^[0-9]+$/) {
-				cmd = "find /tmp -xdev -type d -inum " line " -print0 -quit 2>/dev/null"
+			split(line, id, ":")
+			split(tmp, tmpid, ":")
+			if (line ~ /^[0-9]+:[0-9]+$/ && id[1] == tmpid[1]) {
+				cmd = "find /tmp -xdev -type d -inum " id[2] " -print0 -quit 2>/dev/null"
 				line = ""
 				cmd | getline line
 				close(cmd)
@@ -221,8 +225,9 @@ in_use() {
 			if (substr(target, 1, 1) != "/" || device == "") return
 			# Links are relative to the namespace root, but a chrooted process
 			# lists only the mounts under its root, relative to it: rebase onto
-			# the root, then assume an unshared copy of our table, then find
-			# the root directory by inode (a wrong guess only keeps a file).
+			# the root, then find the root directory on /tmp by inode, and only
+			# then assume an unshared copy of our table (a wrong guess there
+			# only keeps a file).
 			ns = namespace[pid]
 			if (ns == "") path = translate(pid, target)
 			else if (ns == namespace["self"]) path = translate("self", target)
@@ -230,11 +235,11 @@ in_use() {
 				r = rootlink[pid]
 				rel = (r != "" && under(target, r)) ? suffix(target, r) : "-"
 				if (rel != "-") path = translate(pid, rel == "" ? "/" : rel)
-				if (path == "") path = translate("self", target)
 				if (path == "" && rel != "-" && r != "/") {
 					if (!(pid in located)) located[pid] = locate(pid)
 					if (located[pid] != "") path = translate("self", located[pid] rel)
 				}
+				if (path == "") path = translate("self", target)
 			}
 			if (path == "") return
 			path = "/tmp" suffix(path, tmp_root)
