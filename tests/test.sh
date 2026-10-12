@@ -179,7 +179,8 @@ if [ "$rootfs_running" = 1 ] && [ "$bind_running" = 1 ]; then
 	# mount point lies in /tmp, where our own table would name the wrong tree.
 	mkdir "$dir/alias" "$dir/aliasview"
 	cp -a "$dir/rootfs" "$dir/alias/jail"
-	old "$dir/alias/jail/data/state"
+	# Copying read the original: age it again, or its check proves nothing.
+	old "$dir/alias/jail/data/state" "$dir/rootfs/data/state"
 	# shellcheck disable=SC2016 # $1 and $2 are expanded by the inner sh
 	unshare -rm sh -ec '
 		mount --bind "$1/alias" "$2"

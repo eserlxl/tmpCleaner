@@ -166,6 +166,7 @@ in_use() {
 				dev[pid, n] = fields[3]
 				root[pid, n] = decode(fields[4])
 				point[pid, n] = decode(fields[5])
+				if (point[pid, n] == "/") full[pid] = 1
 				if (dev[pid, n] == device) tmpidx[pid, ++ntmp[pid]] = n
 			}
 			close(file)
@@ -184,69 +185,64 @@ in_use() {
 			# maps shows device numbers in hex; files on /tmp all carry this one.
 			split(device, mm, ":")
 			devhex = sprintf("%02x:%02x", mm[1], mm[2])
+			cmd = "stat -Lc %d /tmp"
+			cmd | getline tmpdev
+			close(cmd)
 			# find prints NUL-terminated path/target pairs.
 			RS = "\0"
 		}
-		# The path of target within the /tmp filesystem, or "" when it lies
-		# outside /tmp (which may share its filesystem with other trees).
+		# The path of target within the /tmp filesystem, "" when it lies outside
+		# /tmp (which may share its filesystem with other trees), or "?" when
+		# the table cannot see its mount: a chrooted process lists only the
+		# mounts under its root.
 		function translate(table, target, n, path) {
 			mounts(table)
 			# Cheap pre-check: most targets lie on no mount of the /tmp filesystem.
-			if (!near(table, target)) return ""
+			if (full[table] && !near(table, target)) return ""
 			n = containing(table, target)
+			if (n == "") return "?"
 			if (dev[table, n] != device) return ""
 			path = (root[table, n] == "/" ? "" : root[table, n]) suffix(target, point[table, n])
 			if (path == "") path = "/"
 			return under(path, tmp_root) ? path : ""
 		}
-		# Our path of the root directory of pid, searched by inode on /tmp
-		# when it lies on the /tmp filesystem.
-		function locate(pid, cmd, line, tmp, saved) {
-			saved = RS
-			RS = "\n"
-			cmd = "stat -Lc %d:%i /proc/" pid "/root /tmp 2>/dev/null"
-			cmd | getline line
-			cmd | getline tmp
-			close(cmd)
-			# Callers read maps with RS set to a newline; find prints NUL-ended.
-			RS = "\0"
-			split(line, id, ":")
-			split(tmp, tmpid, ":")
-			if (line ~ /^[0-9]+:[0-9]+$/ && id[1] == tmpid[1]) {
-				cmd = "find /tmp -xdev -type d -inum " id[2] " -print0 -quit 2>/dev/null"
-				line = ""
+		# A file on the /tmp filesystem whose mount is out of sight is looked
+		# up by inode at the end.
+		function unseen(link, inode, cmd, line, saved) {
+			if (inode == "") {
+				saved = RS
+				RS = "\n"
+				cmd = "stat -Lc \"%d %i\" " link " 2>/dev/null"
 				cmd | getline line
 				close(cmd)
-			} else line = ""
-			RS = saved
-			return line
-		}
-		function handle(pid, target, ns, r, rel, path) {
-			if (substr(target, 1, 1) != "/" || device == "") return
-			# Links are relative to the namespace root, but a chrooted process
-			# lists only the mounts under its root, relative to it: rebase onto
-			# the root, then find the root directory on /tmp by inode, and only
-			# then assume an unshared copy of our table (a wrong guess there
-			# only keeps a file).
-			ns = namespace[pid]
-			if (ns == "") path = translate(pid, target)
-			else if (ns == namespace["self"]) path = translate("self", target)
-			else {
-				r = rootlink[pid]
-				rel = (r != "" && under(target, r)) ? suffix(target, r) : "-"
-				if (rel != "-") path = translate(pid, rel == "" ? "/" : rel)
-				if (path == "" && rel != "-" && r != "/") {
-					if (!(pid in located)) located[pid] = locate(pid)
-					if (located[pid] != "") path = translate("self", located[pid] rel)
-				}
-				if (path == "") path = translate("self", target)
+				RS = saved
+				if (split(line, id, " ") != 2 || id[1] != tmpdev) return
+				inode = id[2]
 			}
-			if (path == "") return
-			path = "/tmp" suffix(path, tmp_root)
+			if (inode ~ /^[0-9]+$/ && !(inode in wanted)) {
+				wanted[inode] = 1
+				nwanted++
+			}
+		}
+		function emit(path) {
 			gsub(/\/+/, "/", path)
 			sub(/\/$/, "", path)
 			if (path ~ /(^|\/)\.\.?($|\/)/) return
 			if (index(path, "/tmp/") == 1 && length(path) > 5) printf "%s%c", path, 0
+		}
+		# Links are relative to the namespace root; a chrooted process lists
+		# its mounts relative to its root, so rebase onto it.
+		function handle(pid, target, link, inode, ns, r, path) {
+			if (substr(target, 1, 1) != "/" || device == "") return
+			ns = namespace[pid]
+			if (ns == "") path = translate(pid, target)
+			else if (ns == namespace["self"]) path = translate("self", target)
+			else if (rootlink[pid] != "" && under(target, rootlink[pid])) {
+				r = suffix(target, rootlink[pid])
+				path = translate(pid, r == "" ? "/" : r)
+			} else path = "?"
+			if (path == "?") unseen(link, inode)
+			else if (path != "") emit("/tmp" suffix(path, tmp_root))
 		}
 		# Memory-mapped files come from the maps text: listing map_files makes the
 		# kernel build an entry per mapping (tens of MB across all processes).
@@ -256,21 +252,33 @@ in_use() {
 			RS = "\n"
 			while ((getline line < file) > 0) {
 				if (!index(line, " " devhex " ")) continue
+				split(line, fields, " ")
 				if (!sub(/^[^ ]+ +[^ ]+ +[^ ]+ +[^ ]+ +[^ ]+ +/, "", line)) continue
 				if (substr(line, 1, 1) != "/" || line in seen) continue
 				seen[line] = 1
 				path = line
 				gsub(/\\012/, "\n", path)
-				handle(pid, path)
+				handle(pid, path, "", fields[5])
 			}
 			close(file)
 			RS = saved
 		}
 		# Root links come before the other links of a process, which need them.
-		NR % 2 { split($0, parts, "/"); pid = parts[3]; next }
+		NR % 2 { link = $0; split(link, parts, "/"); pid = parts[3]; next }
 		parts[4] == "ns" { namespace[pid] = $0; next }
 		parts[4] == "root" { rootlink[pid] = $0; mapped(pid) }
-		{ handle(pid, $0) }'
+		{ handle(pid, $0, link) }
+		# One walk of /tmp finds every file looked up by inode; a hard link
+		# or bind alias only keeps another name of a file in use.
+		END {
+			if (!nwanted) exit
+			cmd = "find /tmp -xdev -printf \"%i %p\\0\" 2>/dev/null"
+			while ((cmd | getline line) > 0) {
+				n = index(line, " ")
+				if (substr(line, 1, n - 1) in wanted) emit(substr(line, n + 1))
+			}
+			close(cmd)
+		}'
 }
 
 rules() {
