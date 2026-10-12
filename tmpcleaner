@@ -291,10 +291,14 @@ scratch=$(mktemp -d)
 trap 'rm -rf "$scratch"' EXIT
 {
 	rules
-	printf 'x %s\n' "$scratch"
+	# Quoted, with \ " escaped and % doubled (a tmpfiles specifier), like the
+	# generated exclusions, whatever TMPDIR holds.
+	printf '%s' "$scratch" | sed -e 's/[\\"]/\\&/g' -e 's/%/%%/g' -e 's/.*/x "&"/'
+	echo
 } > "$scratch/rules"
 # Snapshot only the trees the d rules clean (normally just /tmp).
-awk '$1 == "d" { print $2 }' "$scratch/rules" > "$scratch/roots"
+awk '$1 == "d" { root = $2; if (root ~ /^".*"$/) root = substr(root, 2, length(root) - 2); print root }' \
+	"$scratch/rules" > "$scratch/roots"
 snapshot() {
 	while IFS= read -r root; do
 		find "$root" -xdev -mindepth 1 -path "$scratch" -prune -o -printf '%y %p\0' 2>/dev/null || :
