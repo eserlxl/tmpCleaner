@@ -70,9 +70,11 @@ the wrapper to `/usr/local/bin/tmpcleaner`, and enables the timer:
 sudo make install
 ```
 
-Reinstalling keeps the installed config (`/etc/tmpcleaner/tmpcleaner.conf`).
-When it has been edited and differs from shipped defaults, the new defaults
-land in `/etc/tmpcleaner/tmpcleaner.conf.new` to merge.
+Reinstalling upgrades an unedited config (`/etc/tmpcleaner/tmpcleaner.conf`)
+to the new defaults. An edited config is kept, and the new defaults land in
+`/etc/tmpcleaner/tmpcleaner.conf.new` to merge. The last shipped defaults are
+kept in `tmpcleaner.conf.default` to tell the two apart; an install made before
+that file existed gets a `.new` once.
 
 Later previews: `sudo tmpcleaner --dry-run`. Show the config and generated
 in-use exclusions without deleting anything: `sudo tmpcleaner --print-rules`.
