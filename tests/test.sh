@@ -178,6 +178,12 @@ if [ "$rootfs_running" = 1 ] && [ "$bind_running" = 1 ]; then
 fi
 
 fail=0
+# Without /proc nothing in use could be protected, so the run must refuse.
+if [ "$bind_running" = 1 ] &&
+	unshare -rm sh -c 'mount -t tmpfs tmpfs /proc && TMPCLEANER_CONF=$1 sh "$2" --print-rules' sh "$conf" "$here/tmpcleaner" >/dev/null 2>&1; then
+	echo "FAIL: a run without /proc should fail"
+	fail=1
+fi
 # With TMPDIR elsewhere (as the service sets it) a full /tmp still gets cleaned.
 if [ "$bind_running" = 1 ]; then
 	status=0

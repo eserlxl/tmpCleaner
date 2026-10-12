@@ -116,11 +116,17 @@ control_escapes=$(
 	printf 's/\\d127/\\\\x7f/g\n'
 )
 
+# Without /proc no in-use file could be protected.
+[ -e /proc/self/mountinfo ] || { echo "tmpcleaner: /proc is not available" >&2; exit 1; }
+
 # Targets of every process's exe, cwd, root and open fds, plus its memory-mapped files. One find, not a readlink per fd:
 # a busy desktop has tens of thousands of fds. Translate bind-mount aliases
 # using the mount table matching the target, but never exclude /tmp itself.
 in_use() {
-	find /proc/self/ns/mnt /proc/[0-9]*/ns/mnt /proc/[0-9]*/root /proc/[0-9]*/exe /proc/[0-9]*/cwd /proc/[0-9]*/fd -maxdepth 1 -type l -printf '%p\0%l\0' 2>/dev/null |
+	# The builtin printf expands the globs without exec, so thousands of
+	# processes never exceed ARG_MAX; xargs runs find in order on batches.
+	printf '%s\0' /proc/self/ns/mnt /proc/[0-9]*/ns/mnt /proc/[0-9]*/root /proc/[0-9]*/exe /proc/[0-9]*/cwd /proc/[0-9]*/fd |
+		xargs -0 sh -c 'exec find "$@" -maxdepth 1 -type l -printf "%p\0%l\0" 2>/dev/null' sh |
 		LC_ALL=C awk '
 		function decode(path) {
 			gsub(/\\040/, " ", path)
