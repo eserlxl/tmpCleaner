@@ -36,6 +36,8 @@ EOF
 		;;
 esac
 
+nl='
+'
 check=
 if [ "${1:-}" = --check ]; then
 	[ "$#" -eq 2 ] || { echo "tmpcleaner: --check requires one absolute path under /tmp" >&2; exit 2; }
@@ -43,10 +45,16 @@ if [ "${1:-}" = --check ]; then
 		/tmp/*) ;;
 		*) echo "tmpcleaner: --check requires an absolute path under /tmp" >&2; exit 2 ;;
 	esac
-	check=$(realpath -e -s -- "$2" 2>/dev/null) || {
+	# The sentinel keeps trailing newlines that command substitution would strip.
+	check=$(realpath -e -s -- "$2" 2>/dev/null && printf x) || {
 		echo "tmpcleaner: --check path does not exist: $2" >&2
 		exit 2
 	}
+	check=${check%x}
+	check=${check%"$nl"}
+	case "$check" in
+		*"$nl"*) echo "tmpcleaner: --check cannot match a path that contains a newline" >&2; exit 2 ;;
+	esac
 	case "$check" in
 		/tmp/*) ;;
 		*) echo "tmpcleaner: --check path must be under /tmp: $2" >&2; exit 2 ;;
@@ -234,7 +242,21 @@ if [ -n "$check" ]; then
 		printf '%s\n' "$preview" >&2
 		exit "$status"
 	fi
-	if printf '%s\n' "$preview" | grep -Fxq -e "Would remove \"$check\"" -e "Would remove directory \"$check\""; then
+	# A directory goes only if everything beneath it goes too: the preview
+	# announces old directories even when a kept entry will block the rmdir.
+	entries=0
+	[ -d "$check" ] && [ ! -L "$check" ] && entries=$(find "$check" -mindepth 1 -printf . 2>/dev/null | wc -c)
+	if printf '%s\n' "$preview" | CHECK=$check ENTRIES=$entries LC_ALL=C awk '
+		BEGIN {
+			path = ENVIRON["CHECK"]
+			file = "Would remove \"" path "\""
+			directory = "Would remove directory \"" path "\""
+		}
+		$0 == file { found_file = 1 }
+		$0 == directory { found_directory = 1 }
+		/"$/ && (index($0, "Would remove \"" path "/") == 1 || index($0, "Would remove directory \"" path "/") == 1) { inside++ }
+		END { exit !(found_file || (found_directory && inside == ENVIRON["ENTRIES"])) }
+		'; then
 		printf 'would be removed: %s\n' "$2"
 		exit 0
 	fi
@@ -254,11 +276,17 @@ done
 # a file name holding a newline cannot forge a separate, differently levelled
 # entry. A candidate counts once it is gone after the run ("Would remove
 # directory" is printed for directories that still hold kept files).
-rulefile=$(mktemp)
-files=$(mktemp)
-directories=$(mktemp)
-trap 'rm -f "$rulefile" "$files" "$directories"' EXIT
-rules > "$rulefile"
+# Private scratch space (mode 0700, random name), excluded from the cleanup so
+# neither another user nor the run itself can touch the files written there.
+scratch=$(mktemp -d)
+trap 'rm -rf "$scratch"' EXIT
+rulefile=$scratch/rules
+files=$scratch/files
+directories=$scratch/directories
+{
+	rules
+	printf 'x %s\n' "$scratch"
+} > "$rulefile"
 systemd-tmpfiles --clean --dry-run - < "$rulefile" 2>&1 |
 	LC_ALL=C awk -v files="$files" -v directories="$directories" '
 	# Only whole one-line messages count. A name holding a newline is split

@@ -28,6 +28,10 @@ old "$dir/olddir" "$dir/.X11-unix" "$dir/systemd-private-abc/tmp" \
 
 # An old empty dir that was just listed goes; a just-created empty one stays.
 touch -m -d '7 hours ago' "$dir/emptydir"
+# An old directory still holding a fresh file: announced by the preview, but kept.
+mkdir "$dir/mixed"
+touch "$dir/mixed/fresh"
+touch -m -d '7 hours ago' "$dir/mixed"
 touch -a "$dir/emptydir"
 
 # Open files with hostile names must protect only themselves: "*" must not
@@ -238,7 +242,13 @@ for name in old.txt 'open a%b.txt' new.txt; do
 		fail=1
 	fi
 done
-for path in '' old.txt / /tmp "$dir/missing" "$dir/../.."; do
+status=0
+check_out=$(TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --check "$dir/mixed") || status=$?
+if [ "$status" -ne 1 ] || [ "$check_out" != "kept: $dir/mixed" ]; then
+	echo "FAIL: --check should keep an old directory that still holds a fresh file"
+	fail=1
+fi
+for path in '' old.txt / /tmp "$dir/missing" "$dir/../.." "$newline"; do
 	status=0
 	check_out=$(TMPCLEANER_CONF=$dir/missing.conf sh "$here/tmpcleaner" --check "$path" 2>&1) || status=$?
 	if [ "$status" -ne 2 ] || [ -z "$check_out" ]; then
@@ -322,6 +332,7 @@ printf '%s\n' "$help_out" | grep -Fq 'TMPCLEANER_LIST' || {
 gone() { [ ! -e "$dir/$1" ] || { echo "FAIL: $1 should be deleted"; fail=1; }; }
 kept() { [ -e "$dir/$1" ] || { echo "FAIL: $1 should be kept"; fail=1; }; }
 gone old.txt; gone olddir; gone weirdX; gone emptydir
+kept mixed/fresh
 gone "old${nl}<0>forged"
 kept freshdir
 kept "*"; kept "we[i]rd?"; kept "back\\slash*"; kept "new${nl}line"
@@ -372,6 +383,18 @@ if [ "$bind_running" = 1 ]; then
 		wait "$alias_pid" 2>/dev/null || :
 	done
 fi
+
+# The run keeps its own scratch files even when they sit in the cleaned tree.
+dir3=$(mktemp -d /tmp/tmpcleaner-test.XXXXXX)
+printf 'd %s - - - amM:0\n' "$dir3" > "$dir3.conf"
+touch "$dir3/f"
+status=0
+scratch_log=$(TMPDIR=$dir3 TMPCLEANER_AGE=0 TMPCLEANER_CONF=$dir3.conf sh "$here/tmpcleaner" 2>&1) || status=$?
+if [ "$status" -ne 0 ] || ! printf '%s\n' "$scratch_log" | grep -q '^tmpcleaner: removed [0-9]'; then
+	echo "FAIL: the run must not remove its own scratch files"
+	fail=1
+fi
+rm -rf "$dir3" "$dir3.conf"
 
 # A second run tests that the shipped age rule keeps freshly extracted files
 # (birth and ctime stay current even when atime and mtime are backdated).
