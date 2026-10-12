@@ -178,6 +178,24 @@ if [ "$rootfs_running" = 1 ] && [ "$bind_running" = 1 ]; then
 fi
 
 fail=0
+# With TMPDIR elsewhere (as the service sets it) a full /tmp still gets cleaned.
+if [ "$bind_running" = 1 ]; then
+	status=0
+	# shellcheck disable=SC2016 # $1 is expanded by the inner sh
+	TMPDIR=$bindpoint unshare -rm sh -c '
+		mount -t tmpfs -o size=64k,nr_inodes=16 tmpfs /tmp
+		touch /tmp/stale
+		touch -d "7 hours ago" /tmp/stale
+		i=0
+		while touch "/tmp/f$i" 2>/dev/null; do i=$((i + 1)); done
+		printf "d /tmp - - - amM:6h\n" > "$TMPDIR/full.conf"
+		TMPCLEANER_CONF=$TMPDIR/full.conf sh "$1" 2>/dev/null && [ ! -e /tmp/stale ]
+	' sh "$here/tmpcleaner" || status=$?
+	if [ "$status" -ne 0 ]; then
+		echo "FAIL: a full /tmp should still be cleaned when TMPDIR lies elsewhere"
+		fail=1
+	fi
+fi
 age_rules=$(TMPCLEANER_AGE=8h TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --print-rules)
 printf '%s\n' "$age_rules" | grep -Eq "^d $dir - - - amM:8h$" || {
 	echo "FAIL: age override should preserve age-by letters and set 8h"

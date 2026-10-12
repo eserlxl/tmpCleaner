@@ -10,6 +10,9 @@ TimeoutStartSec=10min
 # No PrivateTmp: the job must see the real /tmp.
 ProtectSystem=strict
 ReadWritePaths=/tmp
+# Scratch files live outside /tmp, so a full /tmp still gets cleaned.
+RuntimeDirectory=tmpcleaner
+Environment=TMPDIR=/run/tmpcleaner
 ProtectHome=read-only
 NoNewPrivileges=yes
 Nice=19
