@@ -38,7 +38,9 @@ Never deleted:
 - systemd `PrivateTmp` dirs of running services (`/tmp/systemd-private-*`)
 - Kerberos ticket caches (`/tmp/krb5cc_*`)
 - Unix sockets that are still in use (listed in `/proc/net/unix` of any
-  network namespace)
+  network namespace). Not recognized: a socket bound by a relative name in
+  another network namespace, and one whose own name forges a line of that
+  table.
 - Anything on a different mount below `/tmp`; symlinks are never followed
 
 Only `/tmp` is touched; `/var/tmp` keeps the distribution's defaults.
@@ -177,7 +179,8 @@ Set `TMPCLEANER_AGE` to override the duration on every `d` rule (e.g. `6h`, `30m
 its age-by letters and the config unchanged. Use a non-negative integer with
 an optional unit: `us`, `ms`, `s`, `m`, `min`, `h`, `d`, or `w` (seconds when
 omitted). An empty or invalid value stops the run before cleaning; when unset,
-the configured ages apply.
+the configured ages apply. A rule whose quoted path holds spaces keeps its
+configured age, with a warning.
 
 For the service, run `sudo systemctl edit tmpcleaner.service` and add:
 
