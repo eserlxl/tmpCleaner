@@ -120,7 +120,7 @@ control_escapes=$(
 # a busy desktop has tens of thousands of fds. Translate bind-mount aliases
 # using the mount table matching the target, but never exclude /tmp itself.
 in_use() {
-	find /proc/self/ns/mnt /proc/[0-9]*/ns/mnt /proc/[0-9]*/exe /proc/[0-9]*/cwd /proc/[0-9]*/root /proc/[0-9]*/fd -maxdepth 1 -type l -printf '%p\0%l\0' 2>/dev/null |
+	find /proc/self/ns/mnt /proc/[0-9]*/ns/mnt /proc/[0-9]*/root /proc/[0-9]*/exe /proc/[0-9]*/cwd /proc/[0-9]*/fd -maxdepth 1 -type l -printf '%p\0%l\0' 2>/dev/null |
 		LC_ALL=C awk '
 		function decode(path) {
 			gsub(/\\040/, " ", path)
@@ -181,9 +181,16 @@ in_use() {
 			# find prints NUL-terminated path/target pairs.
 			RS = "\0"
 		}
-		function handle(pid, target, table, n, path) {
+		function handle(pid, target, ns, table, n, path) {
 			if (substr(target, 1, 1) != "/" || device == "") return
-			table = (namespace[pid] != "" && namespace[pid] == namespace["self"] ? "self" : pid)
+			# Links are relative to the namespace root, but a chrooted process
+			# lists only the mounts under its root, so read the table of an
+			# unconfined process in that namespace. With none, assume an
+			# unshared copy of ours: a wrong guess only keeps an extra file.
+			ns = namespace[pid]
+			if (ns == "") table = pid
+			else if (ns == namespace["self"]) table = "self"
+			else table = (ns in unconfined ? unconfined[ns] : "self")
 			mounts(table)
 			# Cheap pre-check: most targets lie on no mount of the /tmp filesystem.
 			if (!near(table, target)) return
@@ -215,15 +222,22 @@ in_use() {
 			close(file)
 			RS = saved
 		}
+		# Root links come before the others, so every namespace has its
+		# unconfined process before any link is translated.
+		function flush(p) {
+			if (flushed++) return
+			for (p in rootlink) handle(p, rootlink[p])
+			for (p in namespace) if (p != "self") mapped(p)
+		}
 		NR % 2 { split($0, parts, "/"); pid = parts[3]; next }
-		{
-			if (parts[4] == "ns") {
-				namespace[pid] = $0
-				if (pid != "self") mapped(pid)
-				next
-			}
-			handle(pid, $0)
-		}'
+		parts[4] == "ns" { namespace[pid] = $0; next }
+		parts[4] == "root" {
+			rootlink[pid] = $0
+			if ($0 == "/" && !(namespace[pid] in unconfined)) unconfined[namespace[pid]] = pid
+			next
+		}
+		{ flush(); handle(pid, $0) }
+		END { flush() }'
 }
 
 rules() {

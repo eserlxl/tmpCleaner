@@ -86,7 +86,7 @@ old "$dir/libm.so.6"
 
 # A process confined to a root under /tmp protects files outside its cwd.
 rootfs_running=0
-if unshare -r true 2>/dev/null; then
+if unshare -rm true 2>/dev/null; then
 	mkdir -p "$dir/rootfs/bin" "$dir/rootfs/data"
 	cp /usr/bin/sleep /usr/bin/env "$dir/rootfs/bin"
 	ldd /usr/bin/sleep /usr/bin/env |
@@ -97,7 +97,7 @@ if unshare -r true 2>/dev/null; then
 		done
 	touch "$dir/rootfs/data/state"
 	old "$dir/rootfs/data/state"
-	unshare -r chroot "$dir/rootfs" /bin/env -C /bin /bin/sleep 60 &
+	unshare -rm chroot "$dir/rootfs" /bin/env -C /bin /bin/sleep 60 &
 	rootfs_pid=$!
 	pids="$pids $rootfs_pid"
 	waited=0
