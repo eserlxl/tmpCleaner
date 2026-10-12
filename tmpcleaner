@@ -201,4 +201,53 @@ if [ "${1:-}" = --print-rules ]; then
 	exit 0
 fi
 
-rules | systemd-tmpfiles --clean "$@" -
+for arg do
+	if [ "$arg" = --dry-run ]; then
+		rules | systemd-tmpfiles --clean "$@" -
+		exit $?
+	fi
+done
+
+# Count what the run removes. "Removing directory" is logged before rmdir, which
+# fails silently on a directory that still holds kept files, so attempted
+# directories are listed and only those gone afterwards are counted.
+# Keep the <N> level prefix only when stderr really is the journal stream.
+journal=
+[ -n "${JOURNAL_STREAM:-}" ] &&
+	[ "$JOURNAL_STREAM" = "$(stat -L -c '%d:%i' /proc/self/fd/2 2>/dev/null)" ] && journal=1
+attempted=$(mktemp)
+removed_files=$(mktemp)
+trap 'rm -f "$attempted" "$removed_files"' EXIT
+
+# Keep stdout on fd 3 and the tmpfiles exit status on fd 4, outside the log pipe.
+{
+	status=$(
+		exec 4>&1
+		{
+			rules | SYSTEMD_LOG_LEVEL=debug SYSTEMD_LOG_TARGET=console-prefixed \
+				systemd-tmpfiles --clean "$@" - 2>&1 1>&3 && rc=0 || rc=$?
+			printf '%s\n' "$rc" >&4
+		} | LC_ALL=C awk -v journal="$journal" -v attempted="$attempted" -v removed_files="$removed_files" '
+		{
+			if (!match($0, /^<[0-9]+>/) || substr($0, 2, RLENGTH - 2) % 8 <= 6) {
+				# journald turns the <N> prefix into the entry level; a terminal shows it raw.
+				print (journal ? $0 : substr($0, RLENGTH + 1))
+				next
+			}
+			message = substr($0, RLENGTH + 1)
+			if (message ~ /^Removing "/) files++
+			else if (message ~ /^Removing directory "/) {
+				path = substr(message, 21)
+				sub(/"$/, "", path)
+				printf "%s%c", path, 0 > attempted
+			}
+		}
+		END { print files + 0 > removed_files }
+		' >&2
+	)
+} 3>&1
+total=$(tr -cd '\000' < "$attempted" | wc -c)
+# shellcheck disable=SC2185 # the start points come from the -files0-from list
+left=$(find -files0-from "$attempted" -maxdepth 0 -printf . 2>/dev/null | wc -c)
+echo "tmpcleaner: removed $(cat "$removed_files") files and $((total - left)) directories" >&2
+exit "$status"

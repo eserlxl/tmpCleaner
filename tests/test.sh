@@ -203,9 +203,24 @@ echo "$preview" | grep -q 'Would remove.*old\.txt' || {
 }
 [ "$fail" = 0 ] || exit 1
 
-TMPCLEANER_CONF=$conf sh "$here/tmpcleaner"
+run_log=$(TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" 2>&1 >/dev/null)
 
 fail=0
+if ! { [ "$(printf '%s\n' "$run_log" | grep -c '^tmpcleaner: removed ')" = 1 ] &&
+	printf '%s\n' "$run_log" | grep -Fxq "tmpcleaner: removed $((3 + bind_running)) files and 2 directories"; }; then
+	echo "FAIL: real run should log one summary with the expected removal counts"
+	fail=1
+fi
+if printf '%s\n' "$run_log" | grep -q 'Removing'; then
+	echo "FAIL: removal debug lines should not leak into the log"
+	fail=1
+fi
+printf 'd relative-path - - - 1h\n' > "$dir.bad.conf"
+if TMPCLEANER_CONF=$dir.bad.conf sh "$here/tmpcleaner" 2>/dev/null; then
+	echo "FAIL: a systemd-tmpfiles error should make tmpcleaner fail"
+	fail=1
+fi
+rm -f "$dir.bad.conf"
 if TMPCLEANER_CONF=$dir/missing.conf sh "$here/tmpcleaner"; then
 	echo "FAIL: missing config should fail"
 	fail=1

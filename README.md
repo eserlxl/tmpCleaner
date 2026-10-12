@@ -86,6 +86,15 @@ systemctl list-timers tmpcleaner.timer
 journalctl -u tmpcleaner.service
 ```
 
+Each real run logs one summary, including runs that remove nothing:
+
+```text
+tmpcleaner: removed 3 files and 2 directories
+```
+
+Warnings keep their journal severity; individual removal debug messages are
+suppressed. Previews and `--print-rules` keep their usual output.
+
 Change the interval with `sudo systemctl edit tmpcleaner.timer`. A run that
 takes longer than ten minutes is stopped and logged as failed; the next timer
 run starts normally.
@@ -134,24 +143,6 @@ threshold, the configured age or `TMPCLEANER_AGE` applies.
 **The shorter age applies to every unprotected file**, so recent temporary
 work can be deleted sooner. In-use protection and configured exclusions
 still apply.
-
-### See what was deleted
-
-By default, `systemd-tmpfiles` logs removals only at debug level, so
-`journalctl -u tmpcleaner.service` shows just warnings. To log every removal to
-the journal, add an opt-in drop-in with `sudo systemctl edit tmpcleaner.service`:
-
-```ini
-[Service]
-Environment=SYSTEMD_LOG_LEVEL=debug
-LogFilterPatterns=^Removing
-LogFilterPatterns=[Ff]ail|[Ee]rror
-```
-
-Allow patterns in `LogFilterPatterns` are extended regular expressions and are
-OR-ed together. Note that `LogFilterPatterns` needs systemd >= 253 (older
-versions would log all debug output) and that a first run on a busy `/tmp` logs
-thousands of lines.
 
 ## Uninstall
 
