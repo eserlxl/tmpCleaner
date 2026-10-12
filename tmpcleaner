@@ -10,12 +10,17 @@ conf=${TMPCLEANER_CONF:-/etc/tmpcleaner/tmpcleaner.conf}
 # a busy desktop has tens of thousands of fds. "/tmp/?*" leaves out /tmp itself,
 # which must never become an exclusion or nothing would be cleaned.
 in_use() {
-	find /proc/[0-9]*/cwd /proc/[0-9]*/fd -maxdepth 1 -lname '/tmp/?*' -printf '%l\n' 2>/dev/null
+	find /proc/[0-9]*/cwd /proc/[0-9]*/fd -maxdepth 1 -lname '/tmp/?*' -printf '%l\0' 2>/dev/null
 }
 
 {
 	cat "$conf"
-	# Quote the path, escape \ and ", and double % (a tmpfiles specifier).
-	in_use | sort -u |
-		sed -e 's/[\\"]/\\&/g' -e 's/%/%%/g' -e 's/.*/x "&"/'
+	# File names are untrusted (any user can hold a file open), so each must
+	# match only itself. NUL-separated, so a newline in a name cannot start a
+	# new rule. tmpfiles treats a path with * ? [ as a glob: there, escape the
+	# glob characters, or a file named "*" would exclude all of /tmp. Then
+	# C-escape \ " and newline for the quoted field and double % (specifier).
+	in_use | sort -zu |
+		sed -z -e '/[[*?]/s/[][*?\\]/\\&/g' -e 's/[\\"]/\\&/g' \
+			-e 's/\n/\\n/g' -e 's/%/%%/g' -e 's/.*/x "&"/' | tr '\0' '\n'
 } | systemd-tmpfiles --clean "$@" -
