@@ -10,11 +10,18 @@ files that running programs still use.
 
 ## What gets deleted
 
-An entry is removed only when its access, birth and modification times (plus
-status-change time for files) are **all** older than 6 hours. So a file that
-was recently written or extracted survives. Reading alone is a weak signal:
-with the usual `relatime` mount option the access time moves at most once a
-day.
+A file is removed only when its access, birth, status-change and modification
+times are **all** older than 6 hours. So a file that was recently written or
+extracted survives. Reading alone is a weak signal: with the usual `relatime`
+mount option the access time moves at most once a day.
+
+A directory is removed when it is empty (after its old contents are gone) and
+its birth and modification times are older than 6 hours. Its access time is
+ignored, because merely listing a directory (`ls`, a `--dry-run` preview)
+renews it. A directory created less than 6 hours ago stays even when empty.
+
+Previews print directories as `Would remove directory`; a preview cannot know
+that a directory will still hold a kept file, so a real run may remove fewer.
 
 Never deleted:
 

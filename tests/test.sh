@@ -1,7 +1,8 @@
 #!/bin/sh
 # Runs tmpcleaner with tmpcleaner.conf retargeted from /tmp to a scratch dir
 # under /tmp (in-use detection only looks at /tmp paths). Birth and ctime
-# cannot be backdated, so the test ages by mtime only (age-by "mM").
+# cannot be backdated, so the test drops b/B/c/C from the age-by field and
+# keeps the rest as configured.
 set -eu
 here=$(cd "$(dirname "$0")/.." && pwd)
 dir=$(mktemp -d /tmp/tmpcleaner-test.XXXXXX)
@@ -9,10 +10,11 @@ conf=$dir.conf
 pids=
 trap 'kill $pids 2>/dev/null; rm -rf "$dir" "$conf"' EXIT
 
-sed -e "s#/tmp#$dir#" -e 's# 6h$# mM:6h#' "$here/tmpcleaner.conf" > "$conf"
+awk '$1 == "d" { gsub(/[bcBC]/, "", $6) } { print }' "$here/tmpcleaner.conf" |
+	sed "s#/tmp#$dir#" > "$conf"
 
 old() { touch -d '7 hours ago' "$@"; }
-mkdir -p "$dir/olddir" "$dir/.X11-unix" "$dir/systemd-private-abc/tmp" "$dir/workdir"
+mkdir -p "$dir/emptydir" "$dir/freshdir" "$dir/olddir" "$dir/.X11-unix" "$dir/systemd-private-abc/tmp" "$dir/workdir"
 touch "$dir/old.txt" "$dir/new.txt" "$dir/olddir/f" "$dir/.X11-unix/X0" \
       "$dir/.X0-lock" "$dir/systemd-private-abc/tmp/f" "$dir/open a%b.txt" \
       "$dir/workdir/f"
@@ -20,6 +22,10 @@ old "$dir/old.txt" "$dir/olddir/f" "$dir/.X11-unix/X0" "$dir/.X0-lock" \
     "$dir/systemd-private-abc/tmp/f" "$dir/open a%b.txt" "$dir/workdir/f"
 old "$dir/olddir" "$dir/.X11-unix" "$dir/systemd-private-abc/tmp" \
     "$dir/systemd-private-abc" "$dir/workdir"
+
+# An old empty dir that was just listed goes; a just-created empty one stays.
+touch -m -d '7 hours ago' "$dir/emptydir"
+touch -a "$dir/emptydir"
 
 # Open files with hostile names must protect only themselves: "*" must not
 # exclude old.txt, and "we[i]rd?" must not exclude weirdX.
@@ -41,7 +47,8 @@ TMPCLEANER_CONF=$conf sh "$here/tmpcleaner"
 fail=0
 gone() { [ ! -e "$dir/$1" ] || { echo "FAIL: $1 should be deleted"; fail=1; }; }
 kept() { [ -e "$dir/$1" ] || { echo "FAIL: $1 should be kept"; fail=1; }; }
-gone old.txt; gone olddir; gone weirdX
+gone old.txt; gone olddir; gone weirdX; gone emptydir
+kept freshdir
 kept "*"; kept "we[i]rd?"; kept "back\\slash*"; kept "new${nl}line"
 kept new.txt; kept .X11-unix/X0; kept .X0-lock; kept systemd-private-abc/tmp/f
 kept "open a%b.txt"; kept workdir/f
