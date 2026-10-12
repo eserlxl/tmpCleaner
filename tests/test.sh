@@ -4,7 +4,7 @@
 # cannot be backdated, so the test drops b/B/c/C from the age-by field and
 # keeps the rest as configured.
 set -eu
-unset TMPCLEANER_AGE TMPCLEANER_FULL_PERCENT TMPCLEANER_FULL_AGE
+unset TMPCLEANER_AGE TMPCLEANER_FULL_PERCENT TMPCLEANER_FULL_AGE TMPCLEANER_LIST
 here=$(cd "$(dirname "$0")/.." && pwd)
 dir=$(mktemp -d /tmp/tmpcleaner-test.XXXXXX)
 conf=$dir.conf
@@ -37,8 +37,13 @@ nl='
 cr=$(printf '\r') tab=$(printf '\t')
 star="$dir/*" glob="$dir/we[i]rd?" bs="$dir/back\\slash*" newline="$dir/new${nl}line"
 carriage="$dir/c${cr}d" tabbed="$dir/t${tab}b" quote="$dir/q\"uote"
-touch "$star" "$glob" "$bs" "$newline" "$carriage" "$tabbed" "$quote" "$dir/weirdX"
-old "$star" "$glob" "$bs" "$newline" "$carriage" "$tabbed" "$quote" "$dir/weirdX"
+forged="$dir/old${nl}<0>forged"
+# Directory names that make the preview print a fake line for "$dir/ghost",
+# a path that never exists (a name cannot hold "/", so the chain spells it).
+ghostly="$dir/q\"${nl}Would remove \"$dir/ghost"
+mkdir -p "${ghostly%/*}"
+touch "$star" "$glob" "$bs" "$newline" "$carriage" "$tabbed" "$quote" "$dir/weirdX" "$forged" "$ghostly"
+old "$star" "$glob" "$bs" "$newline" "$carriage" "$tabbed" "$quote" "$dir/weirdX" "$forged" "$ghostly"
 
 # Long-running jobs: one holds files open, one works inside a directory,
 # one is an executable started from the directory, one memory-maps a file.
@@ -152,6 +157,21 @@ if TMPCLEANER_AGE='1h; x' TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --print-ru
 	fail=1
 fi
 rules=$(TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --print-rules)
+for list in 0 2 yes "1${nl}"; do
+	status=0
+	TMPCLEANER_LIST="$list" TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --print-rules >/dev/null 2>&1 || status=$?
+	if [ "$status" -ne 1 ]; then
+		echo "FAIL: invalid TMPCLEANER_LIST should exit 1"
+		fail=1
+	fi
+done
+empty_list_rules=$(TMPCLEANER_LIST='' TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --print-rules)
+# Generated exclusions follow whatever other processes on the host hold open,
+# so compare only the configured rules.
+[ "$(printf '%s\n' "$empty_list_rules" | grep -v '^x "')" = "$(printf '%s\n' "$rules" | grep -v '^x "')" ] || {
+	echo "FAIL: empty TMPCLEANER_LIST should leave rules unchanged"
+	fail=1
+}
 if printf '%s\n' "$rules" | grep -Eq '^x "/tmp/*"$'; then
 	echo "FAIL: generated rules must not exclude /tmp itself"
 	fail=1
@@ -234,12 +254,31 @@ if [ "$status" -ne 2 ] || [ -z "$check_out" ]; then
 fi
 [ "$fail" = 0 ] || exit 1
 
-run_log=$(TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" 2>&1 >/dev/null)
+run_log=$(TMPCLEANER_LIST=1 TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" 2>&1 >/dev/null)
 
 fail=0
-if ! { [ "$(printf '%s\n' "$run_log" | grep -c '^tmpcleaner: removed ')" = 1 ] &&
+if ! { [ "$(printf '%s\n' "$run_log" | grep -c '^tmpcleaner: removed [0-9]')" = 1 ] &&
 	printf '%s\n' "$run_log" | grep -Fxq "tmpcleaner: removed $((3 + bind_running)) files and 2 directories"; }; then
 	echo "FAIL: real run should log one summary with the expected removal counts"
+	fail=1
+fi
+if ! { [ "$(printf '%s\n' "$run_log" | grep -Fxc "tmpcleaner: removed: $dir/old.txt")" = 1 ] &&
+	[ "$(printf '%s\n' "$run_log" | grep -c '^tmpcleaner: removed: ')" = "$((3 + bind_running))" ] &&
+	[ "$(printf '%s\n' "$run_log" | grep -c '^tmpcleaner: removed directory: ')" = 2 ]; }; then
+	echo "FAIL: listing should log every removed path once with newlines escaped"
+	fail=1
+fi
+if printf '%s\n' "$run_log" | grep -Fxq "tmpcleaner: removed: $dir/open a%b.txt" ||
+	printf '%s\n' "$run_log" | grep -Fxq "tmpcleaner: removed directory: $dir/workdir"; then
+	echo "FAIL: listing should not log held files or kept directories as removed"
+	fail=1
+fi
+if printf '%s\n' "$run_log" | grep -Fq "removed: $dir/ghost"; then
+	echo "FAIL: a crafted name must not list a path that never existed"
+	fail=1
+fi
+if printf '%s\n' "$run_log" | grep -q '^<'; then
+	echo "FAIL: a filename must not forge a journal line"
 	fail=1
 fi
 if printf '%s\n' "$run_log" | grep -q 'Removing'; then
@@ -276,9 +315,14 @@ printf '%s\n' "$help_out" | grep -Fq 'TMPCLEANER_AGE' || {
 	echo "FAIL: help should mention TMPCLEANER_AGE"
 	fail=1
 }
+printf '%s\n' "$help_out" | grep -Fq 'TMPCLEANER_LIST' || {
+	echo "FAIL: help should mention TMPCLEANER_LIST"
+	fail=1
+}
 gone() { [ ! -e "$dir/$1" ] || { echo "FAIL: $1 should be deleted"; fail=1; }; }
 kept() { [ -e "$dir/$1" ] || { echo "FAIL: $1 should be kept"; fail=1; }; }
 gone old.txt; gone olddir; gone weirdX; gone emptydir
+gone "old${nl}<0>forged"
 kept freshdir
 kept "*"; kept "we[i]rd?"; kept "back\\slash*"; kept "new${nl}line"
 kept "c${cr}d"; kept "t${tab}b"; kept "q\"uote"
@@ -339,7 +383,11 @@ sed "s#/tmp#$dir2#" "$here/tmpcleaner.conf" > "$conf2"
 touch "$dir2/extracted.txt"
 touch -d '7 hours ago' "$dir2/extracted.txt"
 
-TMPCLEANER_CONF=$conf2 sh "$here/tmpcleaner"
+run_log=$(TMPCLEANER_CONF=$conf2 sh "$here/tmpcleaner" 2>&1 >/dev/null)
+[ "$run_log" = 'tmpcleaner: removed 0 files and 0 directories' ] || {
+	echo "FAIL: an unset TMPCLEANER_LIST should log only the usual summary"
+	fail=1
+}
 
 [ -e "$dir2/extracted.txt" ] || { echo "FAIL: extracted.txt should be kept"; fail=1; }
 

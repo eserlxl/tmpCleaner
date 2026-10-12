@@ -153,6 +153,23 @@ threshold, the configured age or `TMPCLEANER_AGE` applies.
 work can be deleted sooner. In-use protection and configured exclusions
 still apply.
 
+### List removed paths
+
+Set `TMPCLEANER_LIST=1` to log each preview candidate that no longer exists
+after a real cleanup, in addition to the summary. Files are logged as
+`tmpcleaner: removed: PATH` and directories as
+`tmpcleaner: removed directory: PATH`. Control bytes and backslashes in each
+path use `\xHH` escapes so a filename cannot start a new journal line.
+Unset or empty leaves the usual output unchanged; any other value stops
+the run before cleaning.
+
+For the service, run `sudo systemctl edit tmpcleaner.service` and add:
+
+```ini
+[Service]
+Environment=TMPCLEANER_LIST=1
+```
+
 ## Uninstall
 
 ```sh

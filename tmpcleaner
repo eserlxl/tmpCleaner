@@ -29,6 +29,8 @@ Environment variables:
   TMPCLEANER_FULL_PERCENT   Threshold percentage of /tmp usage (1-100)
   TMPCLEANER_FULL_AGE       Age duration to use when /tmp usage meets or
                             exceeds TMPCLEANER_FULL_PERCENT
+  TMPCLEANER_LIST           Set to 1 to list removed paths with control bytes
+                            and backslashes escaped (default: off)
 EOF
 		exit 0
 		;;
@@ -53,6 +55,10 @@ fi
 
 conf=${TMPCLEANER_CONF:-/etc/tmpcleaner/tmpcleaner.conf}
 [ -r "$conf" ] || { echo "tmpcleaner: cannot read $conf" >&2; exit 1; }
+case "${TMPCLEANER_LIST:-}" in
+	''|1) ;;
+	*) echo "tmpcleaner: invalid TMPCLEANER_LIST (expected 1 or empty)" >&2; exit 1 ;;
+esac
 # Check the user's own value before pressure mode may replace it.
 if [ "${TMPCLEANER_AGE+x}" ]; then
 	printf '%s\0' "$TMPCLEANER_AGE" | LC_ALL=C grep -zEq '^[0-9]+(us|ms|s|m|min|h|d|w)?$' || {
@@ -255,16 +261,56 @@ trap 'rm -f "$rulefile" "$files" "$directories"' EXIT
 rules > "$rulefile"
 systemd-tmpfiles --clean --dry-run - < "$rulefile" 2>&1 |
 	LC_ALL=C awk -v files="$files" -v directories="$directories" '
-	/^Would remove directory "/ { path = substr($0, 25); sub(/"$/, "", path); printf "%s%c", path, 0 > directories; next }
-	/^Would remove "/ { path = substr($0, 15); sub(/"$/, "", path); printf "%s%c", path, 0 > files }
+	# Only whole one-line messages count. A name holding a newline is split
+	# across lines and cannot be told apart from a forged line, so its parts
+	# are skipped rather than stitched back together.
+	/^Would remove (directory )?".*"$/ {
+		directory = ($0 ~ /^Would remove directory "/)
+		path = substr($0, directory ? 25 : 15)
+		sub(/"$/, "", path)
+		printf "%s%c", path, 0 > (directory ? directories : files)
+	}
 	' || :
+# Preview names are parsed from text, and a crafted name can fake a candidate
+# line. Keep only candidates that exist now, so a listed path always existed
+# before the run and was gone after it.
+for list in "$files" "$directories"; do
+	# shellcheck disable=SC2185 # the start points come from the -files0-from list
+	find -files0-from "$list" -maxdepth 0 -print0 2>/dev/null > "$list.now" || :
+	mv -f "$list.now" "$list"
+done
 
 status=0
 systemd-tmpfiles --clean "$@" - < "$rulefile" || status=$?
 
-gone() {
+{
 	# shellcheck disable=SC2185 # the start points come from the -files0-from list
-	echo $(( $(tr -cd '\000' < "$1" | wc -c) - $(find -files0-from "$1" -maxdepth 0 -printf . 2>/dev/null | wc -c) ))
-}
-echo "tmpcleaner: removed $(gone "$files") files and $(gone "$directories") directories" >&2
+	find -files0-from "$files" -maxdepth 0 -print0 2>/dev/null || :
+	# shellcheck disable=SC2185 # the start points come from the -files0-from list
+	find -files0-from "$directories" -maxdepth 0 -print0 2>/dev/null || :
+} | LC_ALL=C awk -v files="$files" -v list="${TMPCLEANER_LIST:-}" '
+	BEGIN {
+		RS = "\0"
+		for (i = 1; i < 32; i++) escapes[sprintf("%c", i)] = sprintf("\\x%02x", i)
+		escapes[sprintf("%c", 127)] = "\\x7f"
+		escapes[sprintf("%c", 92)] = "\\x5c"
+	}
+	function escaped(path, i, byte, result) {
+		for (i = 1; i <= length(path); i++) {
+			byte = substr(path, i, 1)
+			result = result (byte in escapes ? escapes[byte] : byte)
+		}
+		return result
+	}
+	FILENAME == "-" { exists[$0] = 1; next }
+	!($0 in exists) {
+		directory = (FILENAME != files)
+		if (directory) removed_directories++; else removed_files++
+		if (list == 1 && !($0 in logged)) {
+			logged[$0] = 1
+			printf "tmpcleaner: removed%s: %s\n", directory ? " directory" : "", escaped($0)
+		}
+	}
+	END { printf "tmpcleaner: removed %d files and %d directories\n", removed_files, removed_directories }
+	' - "$files" "$directories" >&2
 exit "$status"
