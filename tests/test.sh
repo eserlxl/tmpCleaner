@@ -101,7 +101,9 @@ bind_running=0
 if unshare -rm true 2>/dev/null; then
 	bindpoint=$(mktemp -d '/var/tmp/tmpcleaner-test\040.XXXXXX')
 	mkdir -p "$dir/work/cwd"
-	cp "$dir/sleep" "$dir/libm.so.6" "$dir/work"
+	# Copy from the originals: reading $dir/sleep or $dir/libm.so.6 would renew
+	# their access time and hide whether the direct cases are really protected.
+	cp /usr/bin/sleep "$libm" "$dir/work"
 	touch "$dir/work/f" "$dir/work/unused" "$dir/work/cwd/f"
 	# shellcheck disable=SC2016 # $1 and $2 are expanded by the inner sh
 	unshare -rm sh -ec '
