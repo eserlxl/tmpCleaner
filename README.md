@@ -71,11 +71,45 @@ the wrapper to `/usr/local/bin/tmpcleaner`, and enables the timer:
 sudo make install
 ```
 
+The `install` target runs `install-conf` as its configuration-upgrade prerequisite.
 Reinstalling upgrades an unedited config (`/etc/tmpcleaner/tmpcleaner.conf`)
 to the new defaults. An edited config is kept, and the new defaults land in
 `/etc/tmpcleaner/tmpcleaner.conf.new` to merge. The last shipped defaults are
 kept in `tmpcleaner.conf.default` to tell the two apart; an install made before
-that file existed gets a `.new` once.
+that file existed gets a `.new` once. You can also run `sudo make install-conf`
+directly to install or update configuration files alone without installing the wrapper
+or touching systemd units.
+
+### Makefile variables and targets
+
+The Makefile declares two directory settings:
+
+- `CONFDIR=/etc/tmpcleaner`: The configuration directory where `tmpcleaner.conf`
+  and its defaults are installed.
+- `UNITDIR=/etc/systemd/system`: The systemd system unit directory where
+  `tmpcleaner.service` and `tmpcleaner.timer` are installed.
+
+Placement limits:
+- `CONFDIR` does not rewrite the wrapper's default configuration path. The wrapper
+  defaults to `/etc/tmpcleaner/tmpcleaner.conf`. If you override `CONFDIR` during
+  installation, you must set `TMPCLEANER_CONF` (for example in a service drop-in via
+  `systemctl edit tmpcleaner.service`) so the wrapper finds its configuration.
+- `UNITDIR` does not relocate `/usr/local/bin/tmpcleaner`. The wrapper binary is
+  always installed to `/usr/local/bin/tmpcleaner`, matching the executable path
+  hardcoded in `tmpcleaner.service`.
+
+All project Makefile targets:
+- `preview`: Run a dry-run preview using `./tmpcleaner.conf` and output entries to
+  `preview.txt` without deleting anything.
+- `install`: Main installation recipe. Runs `install-conf`, installs the wrapper to
+  `/usr/local/bin/tmpcleaner`, installs unit files into `$(UNITDIR)`, reloads systemd,
+  and enables `tmpcleaner.timer`.
+- `install-conf`: Prerequisite for `install` that handles initial configuration setup
+  or three-way configuration upgrades under `$(CONFDIR)`.
+- `uninstall`: Disable and remove the timer and service units, remove the wrapper,
+  and delete the entire `$(CONFDIR)`.
+- `test`: Run the automated test suite (`tests/test.sh`) against a local scratch
+  directory without root privileges.
 
 ### Options
 
@@ -202,6 +236,12 @@ Environment=TMPCLEANER_LIST=1
 ```sh
 sudo make uninstall
 ```
+
+
+**Warning:** `make uninstall` deletes the whole configuration directory, including
+local exclusions; back up `/etc/tmpcleaner/tmpcleaner.conf` first if you edited it.
+
+If `CONFDIR` or `UNITDIR` was customized during installation, pass the same values when uninstalling (e.g. `sudo make uninstall CONFDIR=... UNITDIR=...`).
 
 ## Test
 
