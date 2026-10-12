@@ -41,7 +41,14 @@ old "$star" "$glob" "$bs" "$newline" "$carriage" "$tabbed" "$dir/weirdX"
 # Long-running jobs: one holds files open, one works inside a directory.
 sleep 60 < "$dir/open a%b.txt" 3<"$star" 4<"$glob" 5<"$bs" 6<"$newline" 7<"$carriage" 8<"$tabbed" & pids="$pids $!"
 (cd "$dir/workdir" && exec sleep 60) & pids="$pids $!"
-until [ -n "$(find /proc/[0-9]*/cwd -maxdepth 0 -lname "$dir/workdir" 2>/dev/null)" ]; do
+waited=0
+until [ -n "$(find /proc/[0-9]*/cwd -maxdepth 0 -lname "$dir/workdir" 2>/dev/null)" ] && \
+      [ -n "$(find /proc/[0-9]*/fd -maxdepth 1 -lname "$dir/open a%b.txt" 2>/dev/null)" ]; do
+	if [ "$waited" -ge 100 ]; then
+		echo "FAIL: timed out waiting for background jobs"
+		exit 1
+	fi
+	waited=$((waited + 1))
 	sleep 0.1
 done
 
