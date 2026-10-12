@@ -120,6 +120,10 @@ printf '%s\n' "$pressure_rules" | grep -Eq "^d $dir - - - amM:30m$" || {
 	echo "FAIL: pressure mode should preserve age-by letters and set 30m"
 	fail=1
 }
+if TMPCLEANER_AGE=bogus TMPCLEANER_FULL_PERCENT=1 TMPCLEANER_FULL_AGE=30m TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --print-rules; then
+	echo "FAIL: invalid TMPCLEANER_AGE should fail under pressure too"
+	fail=1
+fi
 if TMPCLEANER_FULL_PERCENT=101 TMPCLEANER_FULL_AGE=30m TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --print-rules; then
 	echo "FAIL: invalid pressure threshold should fail"
 	fail=1

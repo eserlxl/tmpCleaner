@@ -34,6 +34,13 @@ esac
 
 conf=${TMPCLEANER_CONF:-/etc/tmpcleaner/tmpcleaner.conf}
 [ -r "$conf" ] || { echo "tmpcleaner: cannot read $conf" >&2; exit 1; }
+# Check the user's own value before pressure mode may replace it.
+if [ "${TMPCLEANER_AGE+x}" ]; then
+	printf '%s\0' "$TMPCLEANER_AGE" | LC_ALL=C grep -zEq '^[0-9]+(us|ms|s|m|min|h|d|w)?$' || {
+		echo "tmpcleaner: invalid TMPCLEANER_AGE: $TMPCLEANER_AGE" >&2
+		exit 1
+	}
+fi
 if [ "${TMPCLEANER_FULL_PERCENT+x}" ] && [ "${TMPCLEANER_FULL_AGE+x}" ]; then
 	printf '%s\0' "$TMPCLEANER_FULL_PERCENT" | LC_ALL=C grep -zEq '^([1-9][0-9]?|100)$' || {
 		echo "tmpcleaner: invalid TMPCLEANER_FULL_PERCENT: $TMPCLEANER_FULL_PERCENT" >&2
@@ -50,12 +57,6 @@ if [ "${TMPCLEANER_FULL_PERCENT+x}" ] && [ "${TMPCLEANER_FULL_AGE+x}" ]; then
 		TMPCLEANER_AGE=$TMPCLEANER_FULL_AGE
 		echo "tmpcleaner: /tmp is $usage% full, using age $TMPCLEANER_AGE" >&2
 	fi
-fi
-if [ "${TMPCLEANER_AGE+x}" ]; then
-	printf '%s\0' "$TMPCLEANER_AGE" | LC_ALL=C grep -zEq '^[0-9]+(us|ms|s|m|min|h|d|w)?$' || {
-		echo "tmpcleaner: invalid TMPCLEANER_AGE: $TMPCLEANER_AGE" >&2
-		exit 1
-	}
 fi
 
 control_escapes=$(
