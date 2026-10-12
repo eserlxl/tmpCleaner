@@ -125,7 +125,7 @@ control_escapes=$(
 in_use() {
 	# The builtin printf expands the globs without exec, so thousands of
 	# processes never exceed ARG_MAX; xargs runs find in order on batches.
-	printf '%s\0' /proc/self/ns/mnt /proc/[0-9]*/ns/mnt /proc/[0-9]*/ns/net /proc/[0-9]*/root /proc/[0-9]*/exe /proc/[0-9]*/cwd /proc/[0-9]*/fd |
+	printf '%s\0' /proc/self/ns/mnt /proc/[0-9]*/ns/mnt /proc/[0-9]*/root /proc/[0-9]*/ns/net /proc/[0-9]*/exe /proc/[0-9]*/cwd /proc/[0-9]*/fd |
 		xargs -0 sh -c 'exec find "$@" -maxdepth 1 -type l -printf "%p\0%l\0" 2>/dev/null' sh |
 		LC_ALL=C awk '
 		function decode(path) {
@@ -209,6 +209,7 @@ in_use() {
 		# A file on the /tmp filesystem whose mount is out of sight is looked
 		# up by inode at the end.
 		function unseen(link, inode, cmd, line, saved) {
+			if (inode == "" && link == "") return
 			if (inode == "") {
 				saved = RS
 				RS = "\n"
@@ -266,13 +267,20 @@ in_use() {
 		# Root links come before the other links of a process, which need them.
 		# systemd-tmpfiles keeps only the sockets of its own network namespace;
 		# a socket bound in another one is reached through /tmp all the same.
-		# A crafted socket name can forge a line, which only keeps a file.
-		function sockets(pid, file, line, saved) {
+		# Names are printed raw: a line that starts no record continues the
+		# name before it, and a forged record only keeps a file.
+		function sockets(pid, file, line, name, saved) {
 			file = "/proc/" pid "/net/unix"
 			saved = RS
 			RS = "\n"
-			while ((getline line < file) > 0)
-				if (sub(/^ *[^ ]+ +[^ ]+ +[^ ]+ +[^ ]+ +[^ ]+ +[^ ]+ +[^ ]+ /, "", line)) emit(line)
+			getline line < file
+			while ((getline line < file) > 0) {
+				if (line ~ /^ *[0-9a-fA-F]+: /) {
+					if (name != "") handle(pid, name)
+					name = sub(/^ *[^ ]+ +[^ ]+ +[^ ]+ +[^ ]+ +[^ ]+ +[^ ]+ +[^ ]+ /, "", line) ? line : ""
+				} else if (name != "") name = name "\n" line
+			}
+			if (name != "") handle(pid, name)
 			close(file)
 			RS = saved
 		}

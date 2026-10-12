@@ -12,7 +12,8 @@ cfg=$(mktemp -d)
 conf=$cfg/conf
 pids=
 bindpoint=
-trap 'kill $pids 2>/dev/null || :; rm -rf "$dir" "$cfg" "$bindpoint"' EXIT
+sockalias=
+trap 'kill $pids 2>/dev/null || :; rm -rf "$dir" "$cfg" "$bindpoint" "$sockalias"' EXIT
 
 awk '$1 == "d" { gsub(/[bcBC]/, "", $6) } { print }' "$here/tmpcleaner.conf" |
 	sed "s#/tmp#$dir#" > "$conf"
@@ -55,18 +56,28 @@ old "$star" "$glob" "$bs" "$newline" "$carriage" "$tabbed" "$quote" "$dir/weirdX
 # one is an executable started from the directory, one memory-maps a file.
 cp /usr/bin/sleep "$dir"
 "$dir/sleep" 60 & pids="$pids $!"
-# A socket listening in another network namespace, which systemd-tmpfiles
-# cannot see, is still reached through its path.
+# Sockets listening in another network namespace, which systemd-tmpfiles
+# cannot see, are still reached through their paths: one with a newline in
+# its name, and one bound through a bind mount outside /tmp.
 sock_running=0
-if command -v python3 >/dev/null && unshare -rn true 2>/dev/null; then
-	unshare -rn python3 -c 'import socket, sys, time
-s = socket.socket(socket.AF_UNIX)
-s.bind(sys.argv[1])
-s.listen()
-time.sleep(60)' "$dir/sock" &
+nlsock="$dir/sock
+nl"
+if command -v python3 >/dev/null && unshare -rmn true 2>/dev/null; then
+	sockalias=$(mktemp -d /var/tmp/tmpcleaner-sock.XXXXXX)
+	mkdir "$dir/sockdir"
+	# shellcheck disable=SC2016 # $1 to $4 are expanded by the inner sh
+	unshare -rmn sh -ec '
+		mount --bind "$1/sockdir" "$2"
+		exec python3 -c "import socket, sys, time
+socks = [socket.socket(socket.AF_UNIX) for path in sys.argv[1:]]
+for sock, path in zip(socks, sys.argv[1:]):
+    sock.bind(path)
+    sock.listen()
+time.sleep(60)" "$1/sock" "$3" "$2/s"
+	' sh "$dir" "$sockalias" "$nlsock" &
 	pids="$pids $!"
 	waited=0
-	until [ -S "$dir/sock" ]; do
+	until [ -S "$dir/sock" ] && [ -S "$nlsock" ] && [ -S "$dir/sockdir/s" ]; do
 		if [ "$waited" -ge 100 ]; then
 			echo "FAIL: timed out waiting for the socket"
 			exit 1
@@ -75,10 +86,10 @@ time.sleep(60)' "$dir/sock" &
 		sleep 0.1
 	done
 	# touch -h sets the times without opening the socket.
-	touch -h -d '7 hours ago' "$dir/sock"
+	touch -h -d '7 hours ago' "$dir/sock" "$nlsock" "$dir/sockdir/s"
 	sock_running=1
 else
-	echo "SKIP: socket protection (python3 or unshare -rn is unavailable)"
+	echo "SKIP: socket protection (python3 or unshare -rmn is unavailable)"
 fi
 
 # A name holding an invalid UTF-8 byte and a space, held open: under a UTF-8
@@ -475,7 +486,7 @@ kept "c${cr}d"; kept "t${tab}b"; kept "q\"uote"
 kept new.txt; kept krb5cc_1000; kept .X11-unix/X0; kept .X0-lock; kept systemd-private-abc/tmp/f
 kept "open a%b.txt"; kept workdir/f; kept sleep; kept libm.so.6; kept "${utf8#"$dir"/}"
 if [ "$sock_running" = 1 ]; then
-	kept sock
+	kept sock; kept "${nlsock#"$dir"/}"; kept sockdir/s
 fi
 if [ "$jail_running" = 1 ]; then
 	kept jail/data/state; kept alias/jail/data/state
@@ -541,7 +552,7 @@ rm -rf "$dir3" "$cfg/conf3"
 # (birth and ctime stay current even when atime and mtime are backdated).
 dir2=$(mktemp -d /tmp/tmpcleaner-test.XXXXXX)
 conf2=$cfg/conf2
-trap 'kill $pids 2>/dev/null || :; rm -rf "$dir" "$cfg" "$dir2" "$bindpoint"' EXIT
+trap 'kill $pids 2>/dev/null || :; rm -rf "$dir" "$cfg" "$dir2" "$bindpoint" "$sockalias"' EXIT
 
 sed "s#/tmp#$dir2#" "$here/tmpcleaner.conf" > "$conf2"
 touch "$dir2/extracted.txt"
@@ -558,7 +569,7 @@ run_log=$(TMPCLEANER_CONF=$conf2 sh "$here/tmpcleaner" 2>&1 >/dev/null)
 # The three-way config upgrade that decides whether a reinstall keeps or replaces
 # an admin's exclusions.
 confdir=$(mktemp -d /tmp/tmpcleaner-test.XXXXXX)
-trap 'kill $pids 2>/dev/null || :; rm -rf "$dir" "$cfg" "$dir2" "$confdir" "$bindpoint"' EXIT
+trap 'kill $pids 2>/dev/null || :; rm -rf "$dir" "$cfg" "$dir2" "$confdir" "$bindpoint" "$sockalias"' EXIT
 
 make -s -C "$here" install-conf CONFDIR="$confdir" >/dev/null
 cmp -s "$confdir/tmpcleaner.conf" "$here/tmpcleaner.conf" || {
