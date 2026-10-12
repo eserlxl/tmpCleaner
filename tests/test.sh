@@ -104,11 +104,11 @@ printf '%s\n' "$age_rules" | grep -Eq "^d $dir - - - amM:8h$" || {
 # Tabs and trailing whitespace must not leave the old age behind as an extra field.
 printf 'd\t%s\t-\t-\t-\tamM:6h \n' "$dir" > "$dir.ws.conf"
 ws_rules=$(TMPCLEANER_AGE=8h TMPCLEANER_CONF=$dir.ws.conf sh "$here/tmpcleaner" --print-rules)
-[ "$(printf '%s\n' "$ws_rules" | grep -c '^d')" = 1 ] &&
-	printf '%s\n' "$ws_rules" | grep -q ' amM:8h$' || {
+if ! { [ "$(printf '%s\n' "$ws_rules" | grep -c '^d')" = 1 ] &&
+	printf '%s\n' "$ws_rules" | grep -q ' amM:8h$'; }; then
 	echo "FAIL: age override should rewrite tab-separated rules with trailing space"
 	fail=1
-}
+fi
 rm -f "$dir.ws.conf"
 if TMPCLEANER_AGE='1h; x' TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --print-rules; then
 	echo "FAIL: invalid age override should fail"
