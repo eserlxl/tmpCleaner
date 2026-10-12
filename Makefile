@@ -30,8 +30,10 @@ uninstall:
 test:
 	sh tests/test.sh
 
+# 73 is systemd-tmpfiles' status when an unprivileged preview cannot open root-only dirs.
 preview:
-	TMPCLEANER_CONF=./tmpcleaner.conf sh ./tmpcleaner --dry-run > preview.txt 2>&1 || true
-	@echo "$$(grep -c 'Would remove' preview.txt) entries would be removed; see preview.txt"
+	@TMPCLEANER_CONF=./tmpcleaner.conf sh ./tmpcleaner --dry-run > preview.txt 2>&1; rc=$$?; \
+	if [ $$rc -ne 0 ] && [ $$rc -ne 73 ]; then cat preview.txt >&2; exit $$rc; fi; \
+	echo "$$(grep -c 'Would remove' preview.txt) entries would be removed; see preview.txt"
 
 .PHONY: install install-conf uninstall test preview
