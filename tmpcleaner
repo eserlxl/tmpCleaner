@@ -316,13 +316,23 @@ if [ -n "$check" ]; then
 	# towards "would be removed" (a false alarm), never towards a false "kept":
 	# a directory counts as removable once its lines cover all its entries, and
 	# entries whose names hold a newline (their lines cannot be read) stop the check.
+	dir=${check%/*}
+	while [ -n "$dir" ]; do
+		[ -r "$dir" ] || { echo "tmpcleaner: --check cannot read $2" >&2; exit 2; }
+		[ "$dir" = /tmp ] && break
+		dir=${dir%/*}
+	done
 	entries=0
 	if [ -d "$check" ] && [ ! -L "$check" ]; then
 		if [ -n "$(find "$check" -mindepth 1 -name "*$nl*" -print -quit 2>/dev/null)" ]; then
 			echo "tmpcleaner: --check cannot judge a directory holding names with newlines" >&2
 			exit 2
 		fi
-		entries=$(find "$check" -mindepth 1 -printf . 2>/dev/null | wc -c)
+		entries=$(find "$check" -mindepth 1 -printf . 2>/dev/null) || {
+			echo "tmpcleaner: --check cannot read $2" >&2
+			exit 2
+		}
+		entries=${#entries}
 	fi
 	if printf '%s\n' "$preview" | CHECK=$check ENTRIES=$entries LC_ALL=C awk '
 		BEGIN {

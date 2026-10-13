@@ -136,7 +136,8 @@ The path must exist and be absolute and under `/tmp`. It prints
 age, pressure and in-use rules as a real run. Invalid paths or missing arguments
 produce a message and exit 2. It reads the preview's text, which a crafted file
 name can imitate, so it may raise a false "would be removed" but never a false
-"kept"; a directory holding names with newlines cannot be judged and exits 2.
+"kept"; a directory holding names with newlines, or a path whose directories
+cannot be read, cannot be judged and exits 2.
 
 Status and logs:
 

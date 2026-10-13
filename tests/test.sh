@@ -500,6 +500,21 @@ if [ "$status" -ne 2 ]; then
 	echo "FAIL: --check should refuse a directory holding names with newlines"
 	fail=1
 fi
+mkdir -p "$dir/unreadable" "$dir/unreadable_parent/sub" "$dir/xonly"
+touch "$dir/xonly/old.txt"
+old "$dir/unreadable" "$dir/unreadable_parent/sub" "$dir/unreadable_parent" "$dir/xonly/old.txt" "$dir/xonly"
+chmod 000 "$dir/unreadable" "$dir/unreadable_parent/sub"
+chmod 111 "$dir/xonly"
+for target in "$dir/unreadable" "$dir/unreadable_parent" "$dir/xonly/old.txt"; do
+	status=0
+	check_out=$(TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --check "$target" 2>&1) || status=$?
+	if [ "$status" -ne 2 ] || [ -z "$check_out" ]; then
+		echo "FAIL: --check should refuse unreadable path: $target"
+		fail=1
+	fi
+done
+chmod 700 "$dir/unreadable" "$dir/unreadable_parent/sub" "$dir/xonly"
+rm -rf "$dir/unreadable" "$dir/unreadable_parent" "$dir/xonly"
 for path in '' old.txt / /tmp "$dir/missing" "$dir/../.." "$newline"; do
 	status=0
 	check_out=$(TMPCLEANER_CONF=$dir/missing.conf sh "$here/tmpcleaner" --check "$path" 2>&1) || status=$?
