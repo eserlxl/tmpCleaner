@@ -50,9 +50,29 @@ Only `/tmp` is touched; `/var/tmp` keeps the distribution's defaults.
 ## Requirements
 
 Linux with systemd (`systemd-tmpfiles`: systemd >= 249 for the service, >= 256 for `--dry-run` previews and `--check`).
-GNU coreutils >= 8.32 and GNU findutils.
+GNU coreutils >= 8.32, GNU findutils, gawk, grep, and sed.
 
 ## Install
+
+### Arch Linux (AUR)
+
+Install with an AUR helper (`yay -S linux-tmpcleaner` or `paru -S linux-tmpcleaner`), or build manually:
+
+```sh
+git clone https://aur.archlinux.org/linux-tmpcleaner.git && cd linux-tmpcleaner && makepkg -si
+```
+
+It conflicts with the unrelated AUR package `tmpcleaner`, which installs a command of the same name.
+The package installs `/usr/bin/tmpcleaner`, the systemd units in `/usr/lib/systemd/system`, and `/etc/tmpcleaner/tmpcleaner.conf` (tracked by pacman as a backup file so local edits survive upgrades and new defaults arrive as `.pacnew`). The timer is **not** enabled automatically; preview what would be removed, adjust `/etc/tmpcleaner/tmpcleaner.conf` if needed, then enable the timer:
+
+```sh
+sudo tmpcleaner --dry-run
+sudo systemctl enable --now tmpcleaner.timer
+```
+
+**Migrating from a source install:** remove a previous `make install` first (back up `/etc/tmpcleaner/tmpcleaner.conf`, run `sudo make uninstall`, install the package, then restore the config). Pacman refuses to overwrite untracked files, and units left in `/etc/systemd/system` would shadow the packaged ones in `/usr/lib/systemd/system`.
+
+### From source
 
 **Preview first.** On a machine that keeps work in `/tmp` (build trees,
 snapshots, long-lived tool sessions), the first run can remove a lot. Save a
@@ -62,76 +82,30 @@ preview of what would go to `preview.txt`, without deleting:
 sudo make preview
 ```
 
-Anything that must survive even while no program uses it goes into the
-exclusion list in `tmpcleaner.conf` (format: `man tmpfiles.d`); the age is
-set there too:
-
-```
-x /tmp/my-long-job-*
-```
-
-Then install; this copies the config to `/etc/tmpcleaner/tmpcleaner.conf`,
-the wrapper to `/usr/local/bin/tmpcleaner`, and enables the timer:
+Add any needed exclusions to `tmpcleaner.conf` (see [Configuration](#configuration)), then install; this copies the config to `/etc/tmpcleaner/tmpcleaner.conf`, the wrapper to `/usr/local/bin/tmpcleaner`, and enables the timer:
 
 ```sh
 sudo make install
 ```
 
-The `install` target runs `install-conf` as its configuration-upgrade prerequisite.
-Reinstalling upgrades an unedited config (`/etc/tmpcleaner/tmpcleaner.conf`)
-to the new defaults. An edited config is kept, and the new defaults land in
-`/etc/tmpcleaner/tmpcleaner.conf.new` to merge. The last shipped defaults are
-kept in `tmpcleaner.conf.default` to tell the two apart; an install made before
-that file existed gets a `.new` once. You can also run `sudo make install-conf`
-directly to install or update configuration files alone without installing the wrapper
-or touching systemd units.
+`install` runs `install-conf` first: reinstalling upgrades an unedited `/etc/tmpcleaner/tmpcleaner.conf` in place, or keeps an edited config and writes new defaults to `/etc/tmpcleaner/tmpcleaner.conf.new` (using `tmpcleaner.conf.default` to compare; an install from before `.default` existed gets a `.new` once). Run `sudo make install-conf` to update the config alone.
 
-### Makefile variables and targets
+#### Makefile variables and targets
 
-The Makefile declares two directory settings:
+Variables: `PREFIX=/usr/local`, `BINDIR=$(PREFIX)/bin`, `CONFDIR=/etc/tmpcleaner`, `UNITDIR=/etc/systemd/system`, and `DESTDIR=` (staged install; skips `systemctl` calls when non-empty). `install` rewrites `ExecStart=` in the installed service to `$(BINDIR)/tmpcleaner`. `CONFDIR` does not change the wrapper's built-in default path (`/etc/tmpcleaner/tmpcleaner.conf`); if you install with a different `CONFDIR`, set `TMPCLEANER_CONF` in a service drop-in (`sudo systemctl edit tmpcleaner.service`).
 
-- `CONFDIR=/etc/tmpcleaner`: The configuration directory where `tmpcleaner.conf`
-  and its defaults are installed.
-- `UNITDIR=/etc/systemd/system`: The systemd system unit directory where
-  `tmpcleaner.service` and `tmpcleaner.timer` are installed.
+Targets: `preview` (dry-run to `preview.txt`), `install`, `install-conf`, `uninstall`, `test`.
 
-Placement limits:
-- `CONFDIR` does not rewrite the wrapper's default configuration path. The wrapper
-  defaults to `/etc/tmpcleaner/tmpcleaner.conf`. If you override `CONFDIR` during
-  installation, you must set `TMPCLEANER_CONF` (for example in a service drop-in via
-  `systemctl edit tmpcleaner.service`) so the wrapper finds its configuration.
-- `UNITDIR` does not relocate `/usr/local/bin/tmpcleaner`. The wrapper binary is
-  always installed to `/usr/local/bin/tmpcleaner`, matching the executable path
-  hardcoded in `tmpcleaner.service`.
-
-All project Makefile targets:
-- `preview`: Run a dry-run preview using `./tmpcleaner.conf` and output entries to
-  `preview.txt` without deleting anything.
-- `install`: Main installation recipe. Runs `install-conf`, installs the wrapper to
-  `/usr/local/bin/tmpcleaner`, installs unit files into `$(UNITDIR)`, reloads systemd,
-  and enables `tmpcleaner.timer`.
-- `install-conf`: Prerequisite for `install` that handles initial configuration setup
-  or three-way configuration upgrades under `$(CONFDIR)`.
-- `uninstall`: Disable and remove the timer and service units, remove the wrapper,
-  and delete the entire `$(CONFDIR)`.
-- `test`: Run the automated test suite (`tests/test.sh`) against a local scratch
-  directory without root privileges.
+## Usage
 
 ### Options
 
-The wrapper provides the following options:
+- `-h`, `--help`: Show help and exit (exits 0 even when configuration is missing).
+- `--print-rules`: Print the configured rules and generated in-use exclusions without deleting anything (`sudo tmpcleaner --print-rules`).
+- `--check PATH`: Report whether an existing absolute `/tmp` path would be removed without deleting anything (`sudo tmpcleaner --check /tmp/my-job/file`).
+- Other arguments (such as `--dry-run`) are passed to `systemd-tmpfiles` (`sudo tmpcleaner --dry-run`).
 
-- `-h`, `--help`: Show this help message and exit (exits 0 even when configuration is missing).
-- `--print-rules`: Print generated tmpfiles rules and exit without deleting anything.
-- `--check PATH`: Report whether an existing absolute `/tmp` path would be removed without deleting anything. Exit 0 if removed, 1 if kept, 2 for an invalid path or usage.
-
-Other arguments (such as `--dry-run`) are passed to `systemd-tmpfiles`.
-
-Later previews: `sudo tmpcleaner --dry-run`. Show the config and generated
-in-use exclusions without deleting anything: `sudo tmpcleaner --print-rules`.
-
-Check one path without deleting anything: `sudo tmpcleaner --check /tmp/my-job/file`.
-The path must exist and be absolute and under `/tmp`. It prints
+`--check PATH` requires an existing absolute path under `/tmp`. It prints
 `would be removed: PATH` (exit 0) or `kept: PATH` (exit 1), using the same
 age, pressure and in-use rules as a real run. Invalid paths or missing arguments
 produce a message and exit 2. It reads the preview's text, which a crafted file
@@ -139,7 +113,7 @@ name can imitate, so it may raise a false "would be removed" but never a false
 "kept"; a directory holding names with newlines, or a path whose directories
 cannot be read, cannot be judged and exits 2.
 
-Status and logs:
+### Status and logs
 
 ```sh
 systemctl list-timers tmpcleaner.timer
@@ -156,16 +130,26 @@ The counts compare listings of the cleaned trees taken just before and just
 after the run, so they are exact for names of any shape; anything another
 program deletes in that second is counted too. A `d` path written with escapes
 in the configuration (`\x20`, `\"`) is not decoded for these listings, so
-removals under it are left out of the counts (cleaning is unaffected). systemd-tmpfiles itself logs to
+removals under it are left out of the counts (cleaning is unaffected). `systemd-tmpfiles` itself logs to
 the journal as usual, so warnings keep their severity.
 
 Change the interval with `sudo systemctl edit tmpcleaner.timer`. A run that
 takes longer than ten minutes is stopped and logged as failed; the next timer
 run starts normally.
 
-### Environment variables
+## Configuration
 
-The following environment variables configure the wrapper:
+Anything that must survive even while no program uses it goes into the
+exclusion list in `/etc/tmpcleaner/tmpcleaner.conf` (format: `man tmpfiles.d`);
+the age is set there too:
+
+```text
+x /tmp/my-long-job-*
+```
+
+Service environment settings below go in a unit drop-in via `sudo systemctl edit tmpcleaner.service` (works for both AUR and source installs).
+
+### Environment variables
 
 - `TMPCLEANER_CONF`: Path to configuration file (default: `/etc/tmpcleaner/tmpcleaner.conf`).
 - `TMPCLEANER_AGE`: Override duration on every `d` rule (e.g. `6h`, `30m`).
@@ -243,15 +227,25 @@ Environment=TMPCLEANER_LIST=1
 
 ## Uninstall
 
+### Arch Linux (AUR)
+
+```sh
+sudo systemctl disable --now tmpcleaner.timer
+sudo pacman -R linux-tmpcleaner
+```
+
+Pacman preserves an edited `/etc/tmpcleaner/tmpcleaner.conf` as `/etc/tmpcleaner/tmpcleaner.conf.pacsave`.
+
+### From source
+
 ```sh
 sudo make uninstall
 ```
 
-
 **Warning:** `make uninstall` deletes the whole configuration directory, including
 local exclusions; back up `/etc/tmpcleaner/tmpcleaner.conf` first if you edited it.
 
-If `CONFDIR` or `UNITDIR` was customized during installation, pass the same values when uninstalling (e.g. `sudo make uninstall CONFDIR=... UNITDIR=...`).
+If `PREFIX`, `BINDIR`, `CONFDIR`, or `UNITDIR` was customized during installation, pass the same values when uninstalling (e.g. `sudo make uninstall CONFDIR=... UNITDIR=...`).
 
 ## Test
 

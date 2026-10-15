@@ -1,15 +1,21 @@
-UNITDIR = /etc/systemd/system
-CONFDIR = /etc/tmpcleaner
+PREFIX ?= /usr/local
+BINDIR ?= $(PREFIX)/bin
+CONFDIR ?= /etc/tmpcleaner
+UNITDIR ?= /etc/systemd/system
+DESTDIR ?=
 
 install: install-conf
-	install -Dm755 tmpcleaner /usr/local/bin/tmpcleaner
-	install -Dm644 tmpcleaner.service $(UNITDIR)/tmpcleaner.service
-	install -Dm644 tmpcleaner.timer $(UNITDIR)/tmpcleaner.timer
+	install -Dm755 tmpcleaner $(DESTDIR)$(BINDIR)/tmpcleaner
+	install -Dm644 tmpcleaner.service $(DESTDIR)$(UNITDIR)/tmpcleaner.service
+	sed -i 's|^ExecStart=/usr/local/bin/tmpcleaner$$|ExecStart=$(BINDIR)/tmpcleaner|' $(DESTDIR)$(UNITDIR)/tmpcleaner.service
+	install -Dm644 tmpcleaner.timer $(DESTDIR)$(UNITDIR)/tmpcleaner.timer
+ifeq ($(DESTDIR),)
 	systemctl daemon-reload
 	systemctl enable --now tmpcleaner.timer
+endif
 
 install-conf:
-	@c=$(CONFDIR)/tmpcleaner.conf; \
+	@c=$(DESTDIR)$(CONFDIR)/tmpcleaner.conf; \
 	if [ ! -e $$c ] || cmp -s $$c $$c.default || cmp -s tmpcleaner.conf $$c; then \
 		install -Dm644 tmpcleaner.conf $$c && \
 		install -Dm644 tmpcleaner.conf $$c.default; \
@@ -21,11 +27,15 @@ install-conf:
 	fi
 
 uninstall:
+ifeq ($(DESTDIR),)
 	-systemctl disable --now tmpcleaner.timer
-	rm -f $(UNITDIR)/tmpcleaner.service $(UNITDIR)/tmpcleaner.timer
-	rm -rf $(CONFDIR)
-	rm -f /usr/local/bin/tmpcleaner
+endif
+	rm -f $(DESTDIR)$(UNITDIR)/tmpcleaner.service $(DESTDIR)$(UNITDIR)/tmpcleaner.timer
+	rm -rf $(DESTDIR)$(CONFDIR)
+	rm -f $(DESTDIR)$(BINDIR)/tmpcleaner
+ifeq ($(DESTDIR),)
 	systemctl daemon-reload
+endif
 
 test:
 	sh tests/test.sh

@@ -355,7 +355,9 @@ fi
 if [ "$bind_running" = 1 ]; then
 	status=0
 	# shellcheck disable=SC2016 # $1 is expanded by the inner sh
+	# The script is copied first: the new tmpfs hides it when the tree lies in /tmp (a makepkg build dir).
 	TMPDIR=$bindpoint unshare -rm sh -c '
+		cp "$1" "$TMPDIR/tmpcleaner" && set -- "$TMPDIR/tmpcleaner"
 		mount -t tmpfs -o size=64k,nr_inodes=16 tmpfs /tmp
 		touch /tmp/stale
 		touch -d "13 hours ago" /tmp/stale
@@ -743,6 +745,37 @@ cmp -s "$confdir/tmpcleaner.conf.new" "$here/tmpcleaner.conf" || {
 	fail=1
 }
 rm -rf "$confdir"
+
+# Staged install (package build): honors DESTDIR, PREFIX and UNITDIR, rewrites
+# ExecStart in the installed unit, and never invokes systemctl.
+staged=$(mktemp -d /tmp/tmpcleaner-test.XXXXXX)
+trap 'kill $pids 2>/dev/null || :; rm -rf "$dir" "$cfg" "$dir2" "$staged" "$bindpoint" "$detachpoint" "$sockalias"' EXIT
+mkdir "$staged/fakes"
+printf '#!/bin/sh\nprintf "%%s\\n" "$*" >> "%s/systemctl.log"\n' "$staged" > "$staged/fakes/systemctl"
+chmod +x "$staged/fakes/systemctl"
+PATH="$staged/fakes:$PATH" make -s -C "$here" install DESTDIR="$staged/root" PREFIX=/usr UNITDIR=/usr/lib/systemd/system >/dev/null
+[ -x "$staged/root/usr/bin/tmpcleaner" ] || {
+	echo "FAIL: staged install should install executable /usr/bin/tmpcleaner"
+	fail=1
+}
+if ! grep -Fxq 'ExecStart=/usr/bin/tmpcleaner' "$staged/root/usr/lib/systemd/system/tmpcleaner.service" ||
+	grep -Fq '/usr/local' "$staged/root/usr/lib/systemd/system/tmpcleaner.service"; then
+	echo "FAIL: staged install should rewrite ExecStart to /usr/bin/tmpcleaner"
+	fail=1
+fi
+[ -f "$staged/root/usr/lib/systemd/system/tmpcleaner.timer" ] || {
+	echo "FAIL: staged install should install tmpcleaner.timer"
+	fail=1
+}
+[ -f "$staged/root/etc/tmpcleaner/tmpcleaner.conf" ] || {
+	echo "FAIL: staged install should install /etc/tmpcleaner/tmpcleaner.conf"
+	fail=1
+}
+[ ! -e "$staged/systemctl.log" ] || {
+	echo "FAIL: staged install must not call systemctl"
+	fail=1
+}
+rm -rf "$staged"
 
 [ "$fail" = 0 ] && echo "PASS"
 exit "$fail"
