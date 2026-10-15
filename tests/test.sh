@@ -488,6 +488,16 @@ for name in old.txt 'open a%b.txt' new.txt; do
 		fail=1
 	fi
 done
+# The caller's systemd log settings must not hide or reshape the preview lines.
+for log_env in SYSTEMD_LOG_LEVEL=warning SYSTEMD_LOG_LEVEL=err SYSTEMD_LOG_TARGET=journal \
+	SYSTEMD_LOG_COLOR=1 SYSTEMD_LOG_LOCATION=1 SYSTEMD_LOG_TIME=1 SYSTEMD_LOG_TID=1; do
+	status=0
+	check_out=$(env "$log_env" TMPCLEANER_CONF="$conf" sh "$here/tmpcleaner" --check "$dir/old.txt") || status=$?
+	if [ "$status" -ne 0 ] || [ "$check_out" != "would be removed: $dir/old.txt" ]; then
+		echo "FAIL: --check should ignore $log_env"
+		fail=1
+	fi
+done
 status=0
 check_out=$(TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --check "$dir/mixed") || status=$?
 if [ "$status" -ne 1 ] || [ "$check_out" != "kept: $dir/mixed" ]; then
