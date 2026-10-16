@@ -106,12 +106,18 @@ Targets: `preview` (dry-run to `preview.txt`), `install`, `install-conf`, `unins
 - Other arguments (such as `--dry-run`) are passed to `systemd-tmpfiles` (`sudo tmpcleaner --dry-run`).
 
 `--check PATH` requires an existing absolute path under `/tmp`. It prints
-`would be removed: PATH` (exit 0) or `kept: PATH` (exit 1), using the same
-age, pressure and in-use rules as a real run. Invalid paths or missing arguments
-produce a message and exit 2. It reads the preview's text, which a crafted file
-name can imitate, so it may raise a false "would be removed" but never a false
-"kept"; a directory holding names with newlines, or a path whose directories
-cannot be read, cannot be judged and exits 2.
+`would be removed: PATH` (exit 0) or `kept: PATH` (exit 1, only), using the
+same age, pressure and in-use rules as a real run. Every error exits 2: invalid
+paths or missing arguments, unreadable configuration, invalid `TMPCLEANER_*`
+values, missing `/proc`, a failed in-use scan, and a `systemd-tmpfiles` failure
+other than 73. Each prints a message. Exit 1 therefore always means "kept". It reads the preview's text, which a
+crafted file name can imitate, so it may raise a false "would be removed" but
+never a false "kept"; a directory holding names with newlines, or a path whose
+directories cannot be read, cannot be judged and exits 2.
+
+A failed in-use scan stops every mode before `systemd-tmpfiles` runs
+(`--print-rules` prints nothing to stdout; `--dry-run` and the real run exit
+non-zero and nothing is removed).
 
 ### Status and logs
 

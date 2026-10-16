@@ -346,10 +346,17 @@ fi
 fail=0
 # Without /proc nothing in use could be protected, so the run must refuse.
 # shellcheck disable=SC2016 # $1 and $2 are expanded by the inner sh
-if [ "$bind_running" = 1 ] &&
-	unshare -rm sh -c 'mount -t tmpfs tmpfs /proc && TMPCLEANER_CONF=$1 sh "$2" --print-rules' sh "$conf" "$here/tmpcleaner" >/dev/null 2>&1; then
-	echo "FAIL: a run without /proc should fail"
-	fail=1
+if [ "$bind_running" = 1 ]; then
+	if unshare -rm sh -c 'mount -t tmpfs tmpfs /proc && TMPCLEANER_CONF=$1 sh "$2" --print-rules' sh "$conf" "$here/tmpcleaner" >/dev/null 2>&1; then
+		echo "FAIL: a run without /proc should fail"
+		fail=1
+	fi
+	status=0
+	unshare -rm sh -c 'mount -t tmpfs tmpfs /proc && TMPCLEANER_CONF=$1 sh "$2" --check "$3"' sh "$conf" "$here/tmpcleaner" "$dir/old.txt" >/dev/null 2>&1 || status=$?
+	if [ "$status" -ne 2 ]; then
+		echo "FAIL: --check without /proc should exit 2"
+		fail=1
+	fi
 fi
 # With TMPDIR elsewhere (as the service sets it) a full /tmp still gets cleaned.
 if [ "$bind_running" = 1 ]; then
@@ -541,6 +548,56 @@ if [ "$status" -ne 2 ] || [ -z "$check_out" ]; then
 	echo "FAIL: --check should reject a missing path before checking config"
 	fail=1
 fi
+status=0
+TMPCLEANER_CONF=$dir/missing.conf sh "$here/tmpcleaner" --check "$dir/old.txt" >/dev/null 2>&1 || status=$?
+if [ "$status" -ne 2 ]; then
+	echo "FAIL: --check with missing config should exit 2"
+	fail=1
+fi
+status=0
+TMPCLEANER_LIST=bogus TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --check "$dir/old.txt" >/dev/null 2>&1 || status=$?
+if [ "$status" -ne 2 ]; then
+	echo "FAIL: --check with invalid TMPCLEANER_LIST should exit 2"
+	fail=1
+fi
+real=$(command -v stat)
+mkdir "$cfg/shim"
+printf '#!/bin/sh\nif [ "$*" = "-c %%d /tmp" ]; then exit 1; fi\nexec "%s" "$@"\n' "$real" > "$cfg/shim/stat"
+chmod +x "$cfg/shim/stat"
+status=0
+shim_rules=$(PATH="$cfg/shim:$PATH" TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --print-rules 2>/dev/null) || status=$?
+if [ "$status" -eq 0 ] || [ -n "$shim_rules" ]; then
+	echo "FAIL: --print-rules should fail with empty stdout when the scan fails"
+	fail=1
+fi
+if PATH="$cfg/shim:$PATH" TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --dry-run >/dev/null 2>&1; then
+	echo "FAIL: --dry-run should fail when the scan fails"
+	fail=1
+fi
+fresh=$(mktemp -d "$dir/scan.XXXXXX")
+touch "$fresh/old"
+old "$fresh/old"
+sed "s#$dir#$fresh#" "$conf" > "$cfg/scan.conf"
+if PATH="$cfg/shim:$PATH" TMPCLEANER_CONF="$cfg/scan.conf" sh "$here/tmpcleaner" >/dev/null 2>&1 || [ ! -e "$fresh/old" ]; then
+	echo "FAIL: real run should fail and keep old files when the scan fails"
+	fail=1
+fi
+fresh2=$(mktemp -d "$dir/scan.XXXXXX")
+touch "$fresh2/old"
+old "$fresh2/old"
+sed "s#$dir#$fresh2#" "$conf" > "$cfg/scan2.conf"
+if ! TMPCLEANER_CONF="$cfg/scan2.conf" sh "$here/tmpcleaner" >/dev/null 2>&1 || [ -e "$fresh2/old" ]; then
+	echo "FAIL: positive control fixture should remove the old file when the scan succeeds"
+	fail=1
+fi
+rm -rf "$fresh" "$fresh2" "$cfg/scan.conf" "$cfg/scan2.conf"
+status=0
+PATH="$cfg/shim:$PATH" TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --check "$dir/old.txt" >/dev/null 2>&1 || status=$?
+if [ "$status" -ne 2 ] || [ ! -e "$dir/old.txt" ]; then
+	echo "FAIL: --check should exit 2 and keep the file when the scan fails"
+	fail=1
+fi
+rm -rf "$cfg/shim"
 [ "$fail" = 0 ] || exit 1
 
 run_log=$(env -u LC_ALL LANG=C.UTF-8 TMPCLEANER_LIST=1 TMPCLEANER_CONF="$conf" sh "$here/tmpcleaner" 2>&1 >/dev/null)
@@ -580,7 +637,14 @@ if TMPCLEANER_CONF=$cfg/bad.conf sh "$here/tmpcleaner" 2>/dev/null; then
 	echo "FAIL: a systemd-tmpfiles error should make tmpcleaner fail"
 	fail=1
 fi
-rm -f "$cfg/bad.conf"
+touch "$dir/old.txt"
+status=0
+TMPCLEANER_CONF=$cfg/bad.conf sh "$here/tmpcleaner" --check "$dir/old.txt" >/dev/null 2>&1 || status=$?
+if [ "$status" -ne 2 ]; then
+	echo "FAIL: a systemd-tmpfiles error in --check should exit 2"
+	fail=1
+fi
+rm -f "$cfg/bad.conf" "$dir/old.txt"
 if TMPCLEANER_CONF=$dir/missing.conf sh "$here/tmpcleaner"; then
 	echo "FAIL: missing config should fail"
 	fail=1

@@ -18,9 +18,13 @@ Options:
   -h, --help       Show this help message and exit
   --print-rules    Print generated tmpfiles rules and exit
   --check PATH     Report whether an existing absolute /tmp path would be removed
-                   Exit 0 if removed, 1 if kept, 2 for an invalid path or usage
+                   Exit 0 if removed, 1 if kept (only), 2 for an error (invalid
+                   path or usage, unreadable config, invalid TMPCLEANER_* value,
+                   missing /proc, a failed in-use scan, or a systemd-tmpfiles
+                   failure other than 73)
 
-Other arguments (such as --dry-run) are passed to systemd-tmpfiles.
+Other arguments (such as --dry-run) are passed to systemd-tmpfiles. When the
+in-use scan fails, nothing is removed and every mode exits non-zero.
 
 Environment variables:
   TMPCLEANER_CONF           Path to configuration file
@@ -38,8 +42,10 @@ esac
 
 nl='
 '
+errstatus=1
 check=
 if [ "${1:-}" = --check ]; then
+	errstatus=2
 	[ "$#" -eq 2 ] || { echo "tmpcleaner: --check requires one absolute path under /tmp" >&2; exit 2; }
 	case "$2" in
 		/tmp/*) ;;
@@ -76,31 +82,37 @@ if [ "${1:-}" = --check ]; then
 	esac
 fi
 
+scratch=$(mktemp -d) || { echo "tmpcleaner: cannot create a scratch directory" >&2; exit "$errstatus"; }
+trap 'rm -rf "$scratch"' EXIT
+
 conf=${TMPCLEANER_CONF:-/etc/tmpcleaner/tmpcleaner.conf}
-[ -r "$conf" ] || { echo "tmpcleaner: cannot read $conf" >&2; exit 1; }
+[ -r "$conf" ] || { echo "tmpcleaner: cannot read $conf" >&2; exit "$errstatus"; }
 case "${TMPCLEANER_LIST:-}" in
 	''|1) ;;
-	*) echo "tmpcleaner: invalid TMPCLEANER_LIST (expected 1 or empty)" >&2; exit 1 ;;
+	*) echo "tmpcleaner: invalid TMPCLEANER_LIST (expected 1 or empty)" >&2; exit "$errstatus" ;;
 esac
 # Check the user's own value before pressure mode may replace it.
 if [ "${TMPCLEANER_AGE+x}" ]; then
 	printf '%s\0' "$TMPCLEANER_AGE" | LC_ALL=C grep -zEq '^[0-9]+(us|ms|s|m|min|h|d|w)?$' || {
 		echo "tmpcleaner: invalid TMPCLEANER_AGE: $TMPCLEANER_AGE" >&2
-		exit 1
+		exit "$errstatus"
 	}
 fi
 if [ "${TMPCLEANER_FULL_PERCENT+x}" ] && [ "${TMPCLEANER_FULL_AGE+x}" ]; then
 	printf '%s\0' "$TMPCLEANER_FULL_PERCENT" | LC_ALL=C grep -zEq '^([1-9][0-9]?|100)$' || {
 		echo "tmpcleaner: invalid TMPCLEANER_FULL_PERCENT: $TMPCLEANER_FULL_PERCENT" >&2
-		exit 1
+		exit "$errstatus"
 	}
 	printf '%s\0' "$TMPCLEANER_FULL_AGE" | LC_ALL=C grep -zEq '^[0-9]+(us|ms|s|m|min|h|d|w)?$' || {
 		echo "tmpcleaner: invalid TMPCLEANER_FULL_AGE: $TMPCLEANER_FULL_AGE" >&2
-		exit 1
+		exit "$errstatus"
 	}
-	usage=$(df --output=pcent /tmp)
-	usage=$(printf '%s\n' "$usage" | sed -n '2s/^[[:space:]]*\([0-9][0-9]*\)%$/\1/p')
-	[ -n "$usage" ] || { echo "tmpcleaner: cannot read /tmp usage" >&2; exit 1; }
+	usage=$(df --output=pcent /tmp) || { echo "tmpcleaner: cannot read /tmp usage" >&2; exit "$errstatus"; }
+	usage=$(printf '%s\n' "$usage" | sed -n '2s/^[[:space:]]*\([0-9][0-9]*\)%$/\1/p') || {
+		echo "tmpcleaner: cannot read /tmp usage" >&2
+		exit "$errstatus"
+	}
+	[ -n "$usage" ] || { echo "tmpcleaner: cannot read /tmp usage" >&2; exit "$errstatus"; }
 	if [ "$usage" -ge "$TMPCLEANER_FULL_PERCENT" ]; then
 		TMPCLEANER_AGE=$TMPCLEANER_FULL_AGE
 		echo "tmpcleaner: /tmp is $usage% full, using age $TMPCLEANER_AGE" >&2
@@ -117,11 +129,11 @@ control_escapes=$(
 )
 
 # Without /proc no in-use file could be protected.
-[ -e /proc/self/mountinfo ] || { echo "tmpcleaner: /proc is not available" >&2; exit 1; }
+[ -e /proc/self/mountinfo ] || { echo "tmpcleaner: /proc is not available" >&2; exit "$errstatus"; }
 
 # Match targets by device and inode: link texts can outlive their bind mounts.
 in_use() {
-	tmpdev=$(stat -c %d /tmp)
+	tmpdev=$(stat -c %d /tmp) || return 1
 	devhex=$(printf '%02x:%02x' "$(((tmpdev >> 8) & 0xfff))" "$(((tmpdev & 0xff) | ((tmpdev >> 12) & 0xfff00)))")
 	# The builtin printf expands the globs without exec, so thousands of
 	# processes never exceed ARG_MAX; xargs runs find in order on batches.
@@ -280,9 +292,9 @@ rules() {
 			if (NF >= 6 && match($6, /^~?([abcmABCM]+:)?/)) prefix = substr($6, 1, RLENGTH)
 			$6 = prefix ENVIRON["AGE"]
 			print
-		}' "$conf"
+		}' "$conf" || return 1
 	else
-		cat "$conf"
+		cat "$conf" || return 1
 	fi
 	echo
 	# File names are untrusted (any user can hold a file open), so each must
@@ -292,27 +304,43 @@ rules() {
 	# C-escape \ " and all control bytes for the quoted field and double % (specifier).
 	# LC_ALL=C: names are bytes, not text. In a UTF-8 locale "." skips invalid
 	# bytes, so a name holding one would leave its rule half quoted.
-	in_use | LC_ALL=C sort -zu |
-		LC_ALL=C sed -z -e '/[[*?]/s/[][*?\\]/\\&/g' -e 's/[\\"]/\\&/g' \
-			-e "$control_escapes" -e 's/%/%%/g' -e 's/.*/x "&"/' | tr '\0' '\n'
+	in_use > "$scratch/inuse" || return 1
+	LC_ALL=C sort -zu "$scratch/inuse" > "$scratch/sorted" || return 1
+	LC_ALL=C sed -z -e '/[[*?]/s/[][*?\\]/\\&/g' -e 's/[\\"]/\\&/g' \
+		-e "$control_escapes" -e 's/%/%%/g' -e 's/.*/x "&"/' \
+		"$scratch/sorted" > "$scratch/excl" || return 1
+	tr '\0' '\n' < "$scratch/excl" || return 1
+	# Quoted, with \ " escaped and % doubled (a tmpfiles specifier), like the
+	# generated exclusions, whatever TMPDIR holds.
+	printf '%s' "$scratch" | sed -e 's/[\\"]/\\&/g' -e 's/%/%%/g' -e 's/.*/x "&"/' || return 1
+	echo
+}
+
+generate_rules() {
+	rules > "$scratch/rules" || {
+		echo "tmpcleaner: cannot scan processes in use; nothing was removed" >&2
+		exit "$errstatus"
+	}
 }
 
 if [ "${1:-}" = --print-rules ]; then
-	rules
+	generate_rules
+	cat "$scratch/rules"
 	exit 0
 fi
 
 if [ -n "$check" ]; then
+	generate_rules
 	# 73: an unprivileged check cannot open root-only directories; the rest is valid.
 	status=0
 	# The parser reads info-level lines verbatim: a caller's log level, target
 	# or line prefixes would hide them and turn every answer into "kept".
-	preview=$(rules | SYSTEMD_LOG_LEVEL=info SYSTEMD_LOG_TARGET=console SYSTEMD_LOG_COLOR=0 \
+	preview=$(SYSTEMD_LOG_LEVEL=info SYSTEMD_LOG_TARGET=console SYSTEMD_LOG_COLOR=0 \
 		SYSTEMD_LOG_LOCATION=0 SYSTEMD_LOG_TIME=0 SYSTEMD_LOG_TID=0 \
-		systemd-tmpfiles --clean --dry-run - 2>&1) || status=$?
+		systemd-tmpfiles --clean --dry-run - < "$scratch/rules" 2>&1) || status=$?
 	if [ "$status" -ne 0 ] && [ "$status" -ne 73 ]; then
 		printf '%s\n' "$preview" >&2
-		exit "$status"
+		exit "$errstatus"
 	fi
 	# A directory goes only if everything beneath it goes too: the preview
 	# announces old directories even when a kept entry will block the rmdir.
@@ -338,7 +366,13 @@ if [ -n "$check" ]; then
 		}
 		entries=${#entries}
 	fi
-	if printf '%s\n' "$preview" | CHECK=$check ENTRIES=$entries LC_ALL=C awk '
+	# A failed write is an error, not a verdict: only awk's 0 and 1 may answer.
+	printf '%s\n' "$preview" > "$scratch/preview" || {
+		echo "tmpcleaner: cannot write the --check scratch file" >&2
+		exit "$errstatus"
+	}
+	verdict=0
+	CHECK=$check ENTRIES=$entries LC_ALL=C awk '
 		BEGIN {
 			path = ENVIRON["CHECK"]
 			file = "Would remove \"" path "\""
@@ -348,18 +382,28 @@ if [ -n "$check" ]; then
 		$0 == directory { found_directory = 1 }
 		/"$/ && (index($0, "Would remove \"" path "/") == 1 || index($0, "Would remove directory \"" path "/") == 1) { inside++ }
 		END { exit !(found_file || (found_directory && inside >= ENVIRON["ENTRIES"] + 0)) }
-		'; then
-		printf 'would be removed: %s\n' "$2"
-		exit 0
-	fi
-	printf 'kept: %s\n' "$2"
-	exit 1
+		' "$scratch/preview" || verdict=$?
+	case "$verdict" in
+		0)
+			printf 'would be removed: %s\n' "$2"
+			exit 0
+			;;
+		1)
+			printf 'kept: %s\n' "$2"
+			exit 1
+			;;
+		*)
+			exit 2
+			;;
+	esac
 fi
 
 for arg do
 	if [ "$arg" = --dry-run ]; then
-		rules | systemd-tmpfiles --clean "$@" -
-		exit $?
+		generate_rules
+		status=0
+		systemd-tmpfiles --clean "$@" - < "$scratch/rules" || status=$?
+		exit "$status"
 	fi
 done
 
@@ -369,15 +413,7 @@ done
 # natively to the journal. Entries another process deletes during the run are
 # counted too. Scratch files sit in one private directory (mode 0700, random
 # name) that the rules exclude and the snapshots skip.
-scratch=$(mktemp -d)
-trap 'rm -rf "$scratch"' EXIT
-{
-	rules
-	# Quoted, with \ " escaped and % doubled (a tmpfiles specifier), like the
-	# generated exclusions, whatever TMPDIR holds.
-	printf '%s' "$scratch" | sed -e 's/[\\"]/\\&/g' -e 's/%/%%/g' -e 's/.*/x "&"/'
-	echo
-} > "$scratch/rules"
+generate_rules
 # Snapshot only the trees the d rules clean (normally just /tmp).
 LC_ALL=C awk '$1 == "d" {
 	# A quoted root may hold spaces, so take everything between its quotes.
