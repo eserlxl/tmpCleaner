@@ -3,7 +3,9 @@
 # Runs the /tmp age rules, but first excludes every /tmp path a running process
 # holds open or uses as its working or root directory: systemd-tmpfiles only looks at
 # timestamps, so a long-running job could otherwise lose files under its feet.
-# Extra arguments (e.g. --dry-run) go to systemd-tmpfiles.
+# Only --dry-run and --prefix=PATH are passed through to systemd-tmpfiles to
+# narrow what it applies; --exclude-prefix=PATH adds an exclusion for an
+# absolute PATH and everything below it.
 set -eu
 
 case "${1:-}" in
@@ -23,8 +25,12 @@ Options:
                    missing /proc, a failed in-use scan, or a systemd-tmpfiles
                    failure other than 73)
 
-Other arguments (such as --dry-run) are passed to systemd-tmpfiles. When the
-in-use scan fails, nothing is removed and every mode exits non-zero.
+Passed through to systemd-tmpfiles (any other argument is rejected with exit 2):
+  --dry-run                Preview what would be removed without deleting
+  --prefix=PATH            Only apply rules with the prefix PATH
+  --exclude-prefix=PATH    Keep the absolute path PATH and everything below it
+
+When the in-use scan fails, nothing is removed and every mode exits non-zero.
 
 Environment variables:
   TMPCLEANER_CONF           Path to configuration file
@@ -39,6 +45,16 @@ EOF
 		exit 0
 		;;
 esac
+
+if [ "${1:-}" != --check ]; then
+	for arg do
+		case "$arg" in
+			--dry-run|--prefix=?*|--exclude-prefix=/*) ;;
+			--print-rules) [ "$arg" = "$1" ] || { echo "tmpcleaner: unsupported argument: $arg" >&2; exit 2; } ;;
+			*) echo "tmpcleaner: unsupported argument: $arg" >&2; exit 2 ;;
+		esac
+	done
+fi
 
 nl='
 '
@@ -84,6 +100,19 @@ fi
 
 scratch=$(mktemp -d) || { echo "tmpcleaner: cannot create a scratch directory" >&2; exit "$errstatus"; }
 trap 'rm -rf "$scratch"' EXIT
+: > "$scratch/excludes"
+if [ "${1:-}" != --check ]; then
+	n=$#
+	while [ "$n" -gt 0 ]; do
+		arg=$1
+		shift
+		n=$((n - 1))
+		case "$arg" in
+			--exclude-prefix=*) printf '%s\0' "${arg#--exclude-prefix=}" >> "$scratch/excludes" ;;
+			*) set -- "$@" "$arg" ;;
+		esac
+	done
+fi
 
 conf=${TMPCLEANER_CONF:-/etc/tmpcleaner/tmpcleaner.conf}
 [ -r "$conf" ] || { echo "tmpcleaner: cannot read $conf" >&2; exit "$errstatus"; }
@@ -305,6 +334,7 @@ rules() {
 	# LC_ALL=C: names are bytes, not text. In a UTF-8 locale "." skips invalid
 	# bytes, so a name holding one would leave its rule half quoted.
 	in_use > "$scratch/inuse" || return 1
+	cat "$scratch/excludes" >> "$scratch/inuse" || return 1
 	LC_ALL=C sort -zu "$scratch/inuse" > "$scratch/sorted" || return 1
 	LC_ALL=C sed -z -e '/[[*?]/s/[][*?\\]/\\&/g' -e 's/[\\"]/\\&/g' \
 		-e "$control_escapes" -e 's/%/%%/g' -e 's/.*/x "&"/' \

@@ -474,6 +474,50 @@ echo "$preview" | grep -q 'Would remove.*old\.txt' || {
 }
 [ "$fail" = 0 ] || exit 1
 
+argdir=$(mktemp -d "$dir/args.XXXXXX")
+touch "$argdir/old.txt" "$argdir/held.txt"
+old "$argdir/old.txt" "$argdir/held.txt"
+# shellcheck disable=SC2217 # sleep only holds held.txt open for the in-use scan
+sleep 300 3<"$argdir/held.txt" & held_pid=$!
+pids="$pids $held_pid"
+cp "$conf" "$cfg/other.conf"
+for arg in --remove --create --purge --boot --root=/ --prefix --prefix= --exclude-prefix --exclude-prefix= --exclude-prefix=old.txt "$cfg/other.conf"; do
+	status=0
+	arg_err=$(TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" "$arg" 2>&1 >/dev/null) || status=$?
+	if [ "$status" -ne 2 ] || [ ! -e "$argdir/old.txt" ] || ! printf '%s\n' "$arg_err" | grep -Fq 'unsupported argument'; then
+		echo "FAIL: $arg should be rejected with exit 2 and keep old.txt"
+		fail=1
+	fi
+done
+status=0
+excl_preview=$(TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --dry-run --exclude-prefix="$dir/old.txt" 2>&1) || status=$?
+if [ "$status" -ne 0 ] || printf '%s\n' "$excl_preview" | grep -Fq "$dir/old.txt"; then
+	echo "FAIL: --dry-run --exclude-prefix should exit 0 and omit excluded path"
+	fail=1
+fi
+status=0
+held_preview=$(TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --dry-run 2>&1) || status=$?
+if [ "$status" -ne 0 ] || printf '%s\n' "$held_preview" | grep -Fq "$argdir/held.txt"; then
+	echo "FAIL: plain --dry-run should not announce held.txt"
+	fail=1
+fi
+status=0
+held_dir_preview=$(TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --dry-run --exclude-prefix="$argdir" 2>&1) || status=$?
+if [ "$status" -ne 0 ] || printf '%s\n' "$held_dir_preview" | grep -Fq "$argdir/held.txt"; then
+	echo "FAIL: --dry-run --exclude-prefix on parent directory should not announce held.txt"
+	fail=1
+fi
+status=0
+held_file_preview=$(TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --dry-run --exclude-prefix="$argdir/held.txt" 2>&1) || status=$?
+if [ "$status" -ne 0 ] || printf '%s\n' "$held_file_preview" | grep -Fq "$argdir/held.txt"; then
+	echo "FAIL: --dry-run --exclude-prefix on held.txt should not announce held.txt"
+	fail=1
+fi
+kill "$held_pid" 2>/dev/null || :
+rm -rf "$argdir"
+rm -f "$cfg/other.conf"
+[ "$fail" = 0 ] || exit 1
+
 # Through a symlinked parent directory --check must still find the real path.
 ln -s "$dir" "$dir/selflink"
 status=0
@@ -671,6 +715,22 @@ printf '%s\n' "$help_out" | grep -Fq 'TMPCLEANER_AGE' || {
 }
 printf '%s\n' "$help_out" | grep -Fq 'TMPCLEANER_LIST' || {
 	echo "FAIL: help should mention TMPCLEANER_LIST"
+	fail=1
+}
+printf '%s\n' "$help_out" | grep -Fq -- '--dry-run' || {
+	echo "FAIL: help should mention --dry-run"
+	fail=1
+}
+printf '%s\n' "$help_out" | grep -Fq -- '--prefix=PATH' || {
+	echo "FAIL: help should mention --prefix=PATH"
+	fail=1
+}
+printf '%s\n' "$help_out" | grep -Fq -- '--exclude-prefix=PATH' || {
+	echo "FAIL: help should mention --exclude-prefix=PATH"
+	fail=1
+}
+printf '%s\n' "$help_out" | grep -Fq -- 'rejected' || {
+	echo "FAIL: help should mention rejected"
 	fail=1
 }
 gone() { [ ! -e "$dir/$1" ] || { echo "FAIL: $1 should be deleted"; fail=1; }; }
