@@ -36,7 +36,10 @@ Environment variables:
   TMPCLEANER_CONF           Path to configuration file
                             (default: /etc/tmpcleaner/tmpcleaner.conf)
   TMPCLEANER_AGE            Override duration on every d rule (e.g. 6h, 30m)
-  TMPCLEANER_FULL_PERCENT   Threshold percentage of /tmp usage (1-100)
+  TMPCLEANER_FULL_PERCENT   Threshold percentage of /tmp usage (1-100); the
+                            larger of block and inode usage counts ('-' = 0).
+                            If df fails or prints unexpected output, the run
+                            aborts (exit 1, or 2 with --check)
   TMPCLEANER_FULL_AGE       Age duration to use when /tmp usage meets or
                             exceeds TMPCLEANER_FULL_PERCENT
   TMPCLEANER_LIST           Set to 1 to list removed paths with control bytes
@@ -136,15 +139,19 @@ if [ "${TMPCLEANER_FULL_PERCENT+x}" ] && [ "${TMPCLEANER_FULL_AGE+x}" ]; then
 		echo "tmpcleaner: invalid TMPCLEANER_FULL_AGE: $TMPCLEANER_FULL_AGE" >&2
 		exit "$errstatus"
 	}
-	usage=$(df --output=pcent /tmp) || { echo "tmpcleaner: cannot read /tmp usage" >&2; exit "$errstatus"; }
-	usage=$(printf '%s\n' "$usage" | sed -n '2s/^[[:space:]]*\([0-9][0-9]*\)%$/\1/p') || {
-		echo "tmpcleaner: cannot read /tmp usage" >&2
-		exit "$errstatus"
-	}
-	[ -n "$usage" ] || { echo "tmpcleaner: cannot read /tmp usage" >&2; exit "$errstatus"; }
+	dfout=$(df --output=pcent,ipcent /tmp) || { echo "tmpcleaner: cannot read /tmp usage" >&2; exit "$errstatus"; }
+	usage_line=$(printf '%s\n' "$dfout" | sed -n '2p') || { echo "tmpcleaner: cannot read /tmp usage" >&2; exit "$errstatus"; }
+	parsed=$(printf '%s\n' "$usage_line" | sed -n 's/^[[:space:]]*\([0-9][0-9]*\)%[[:space:]][[:space:]]*\([0-9][0-9]*%\|-\)[[:space:]]*$/\1 \2/p') || { echo "tmpcleaner: cannot read /tmp usage" >&2; exit "$errstatus"; }
+	[ -n "$parsed" ] || { echo "tmpcleaner: cannot read /tmp usage" >&2; exit "$errstatus"; }
+	block_use=${parsed% *}
+	inode_use=${parsed#* }
+	inode_use=${inode_use%\%}
+	[ "$inode_use" != - ] || inode_use=0
+	usage=$block_use
+	[ "$inode_use" -le "$usage" ] || usage=$inode_use
 	if [ "$usage" -ge "$TMPCLEANER_FULL_PERCENT" ]; then
 		TMPCLEANER_AGE=$TMPCLEANER_FULL_AGE
-		echo "tmpcleaner: /tmp is $usage% full, using age $TMPCLEANER_AGE" >&2
+		echo "tmpcleaner: /tmp is $usage% full (blocks $block_use%, inodes $inode_use%), using age $TMPCLEANER_AGE" >&2
 	fi
 fi
 

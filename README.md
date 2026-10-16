@@ -159,7 +159,7 @@ Service environment settings below go in a unit drop-in via `sudo systemctl edit
 
 - `TMPCLEANER_CONF`: Path to configuration file (default: `/etc/tmpcleaner/tmpcleaner.conf`).
 - `TMPCLEANER_AGE`: Override duration on every `d` rule (e.g. `6h`, `30m`).
-- `TMPCLEANER_FULL_PERCENT`: Threshold percentage of `/tmp` usage (1-100).
+- `TMPCLEANER_FULL_PERCENT`: Threshold percentage of `/tmp` usage (1-100); the larger of block and inode usage counts (`-` is 0), and a `df` error aborts the run.
 - `TMPCLEANER_FULL_AGE`: Age duration to use when `/tmp` usage meets or exceeds `TMPCLEANER_FULL_PERCENT`.
 - `TMPCLEANER_LIST`: Set to 1 to list removed paths with control bytes and backslashes escaped (default: off).
 
@@ -205,10 +205,17 @@ Environment=TMPCLEANER_FULL_PERCENT=90
 Environment=TMPCLEANER_FULL_AGE=30m
 ```
 
-Each run reads `/tmp` usage with `df --output=pcent /tmp`. At or above the
-threshold, it overrides every `d` rule's duration, including `TMPCLEANER_AGE`,
-and reports `tmpcleaner: /tmp is N% full, using age X` on stderr. Below the
-threshold, the configured age or `TMPCLEANER_AGE` applies.
+Each run reads `/tmp` usage with `df --output=pcent,ipcent /tmp` and uses the
+larger of the block percentage and the inode percentage, so a `/tmp` that runs
+out of inodes while block usage stays low still triggers pressure mode. A
+filesystem without inode accounting (such as btrfs) prints `-` for inodes, which
+counts as 0. At or above the threshold, it overrides every `d` rule's duration,
+including `TMPCLEANER_AGE`, and reports
+`tmpcleaner: /tmp is N% full (blocks B%, inodes I%), using age X` on stderr.
+Below the threshold, the configured age or `TMPCLEANER_AGE` applies.
+
+If `df` fails or its output cannot be parsed, tmpcleaner aborts: it prints `tmpcleaner: cannot read /tmp usage` and exits 1 (2 with `--check`) in every
+mode, and nothing is removed.
 
 **The shorter age applies to every unprotected file**, so recent temporary
 work can be deleted sooner. In-use protection and configured exclusions
