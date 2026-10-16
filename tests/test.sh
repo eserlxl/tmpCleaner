@@ -10,15 +10,32 @@ dir=$(mktemp -d /tmp/tmpcleaner-test.XXXXXX)
 # Fixture configs live in a private directory, never at a guessable /tmp path.
 cfg=$(mktemp -d)
 conf=$cfg/conf
+shimdir=$(mktemp -d)
 pids=
 bindpoint=
 detachpoint=
 sockalias=
-trap 'kill $pids 2>/dev/null || :; rm -rf "$dir" "$cfg" "$bindpoint" "$detachpoint" "$sockalias"' EXIT
+trap 'kill $pids 2>/dev/null || :; rm -rf "$dir" "$cfg" "$shimdir" "$bindpoint" "$detachpoint" "$sockalias"' EXIT
 
 awk '$1 == "d" { gsub(/[bcBC]/, "", $6) } { print }' "$here/tmpcleaner.conf" |
 	sed "s#/tmp#$dir#" > "$conf"
 printf '%s' "$(cat "$conf")" > "$conf"
+
+# df shim: every pressure test runs with it first on PATH, so no test reads
+# the real /tmp usage. DF_SHIM_OUT holds the data line, DF_SHIM_STATUS the exit.
+cat > "$shimdir/df" <<'SHIM'
+#!/bin/sh
+[ "$*" = "--output=pcent,ipcent /tmp" ] || { echo "df shim: unexpected arguments: $*" >&2; exit 64; }
+echo 'Use% IUse%'
+cat "$DF_SHIM_OUT"
+exit "${DF_SHIM_STATUS:-0}"
+SHIM
+chmod +x "$shimdir/df"
+dfout=$shimdir/out
+printf ' 50%%     -\n' > "$dfout"
+export DF_SHIM_OUT=$dfout
+shim() { PATH=$shimdir:$PATH "$@"; }
+setdf() { printf '%s\n' "$1" > "$dfout"; DF_SHIM_STATUS=${2:-0}; export DF_SHIM_STATUS; }
 
 old() { touch -d '13 hours ago' "$@"; }
 mkdir -p "$dir/emptydir" "$dir/freshdir" "$dir/olddir" "$dir/.X11-unix" "$dir/systemd-private-abc/tmp" "$dir/workdir"
@@ -427,32 +444,87 @@ if printf '%s\n' "$rules" | grep -Eq '^x "/tmp/*"$'; then
 	echo "FAIL: generated rules must not exclude /tmp itself"
 	fail=1
 fi
-pressure_rules=$(TMPCLEANER_FULL_PERCENT=1 TMPCLEANER_FULL_AGE=30m TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --print-rules)
-printf '%s\n' "$pressure_rules" | grep -Eq "^d $dir - - - amM:30m$" || {
-	echo "FAIL: pressure mode should preserve age-by letters and set 30m"
+configured_age=$(printf '%s\n' "$rules" | grep '^d ')
+pr() { shim env TMPCLEANER_FULL_PERCENT=90 TMPCLEANER_FULL_AGE=30m TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --print-rules; }
+setdf ' 50%     -'
+status=0; low=$(pr 2>/dev/null) || status=$?
+[ "$status" = 0 ] && [ "$(printf '%s\n' "$low" | grep '^d ')" = "$configured_age" ] || {
+	echo "FAIL: 50% blocks and '-' inodes should keep the configured age"
 	fail=1
 }
-if TMPCLEANER_AGE=bogus TMPCLEANER_FULL_PERCENT=1 TMPCLEANER_FULL_AGE=30m TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --print-rules; then
+for case_ in ' 95%     -' ' 50%   95%' ' 95%   50%'; do
+	setdf "$case_"
+	status=0; high=$(pr 2>/dev/null) || status=$?
+	[ "$status" = 0 ] && printf '%s\n' "$high" | grep -Eq "^d $dir - - - amM:30m$" || {
+		echo "FAIL: pressure mode should switch to 30m for df line '$case_'"
+		fail=1
+	}
+done
+setdf ' 50%   95%'
+pr 2>&1 >/dev/null | grep -Fxq 'tmpcleaner: /tmp is 95% full (blocks 50%, inodes 95%), using age 30m' || {
+	echo "FAIL: pressure message should report both values"
+	fail=1
+}
+setdf ' 95%     -'
+if shim env TMPCLEANER_AGE=bogus TMPCLEANER_FULL_PERCENT=1 TMPCLEANER_FULL_AGE=30m TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --print-rules; then
 	echo "FAIL: invalid TMPCLEANER_AGE should fail under pressure too"
 	fail=1
 fi
-if TMPCLEANER_FULL_PERCENT=101 TMPCLEANER_FULL_AGE=30m TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --print-rules; then
+if shim env TMPCLEANER_FULL_PERCENT=101 TMPCLEANER_FULL_AGE=30m TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --print-rules; then
 	echo "FAIL: invalid pressure threshold should fail"
 	fail=1
 fi
-if TMPCLEANER_FULL_PERCENT=1 TMPCLEANER_FULL_AGE='1h; x' TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --print-rules; then
+if shim env TMPCLEANER_FULL_PERCENT=1 TMPCLEANER_FULL_AGE='1h; x' TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --print-rules; then
 	echo "FAIL: invalid pressure age should fail"
 	fail=1
 fi
-configured_age=$(printf '%s\n' "$rules" | grep '^d ')
-percent_only=$(TMPCLEANER_FULL_PERCENT=1 TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --print-rules)
-age_only=$(TMPCLEANER_FULL_AGE=30m TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --print-rules)
+percent_only=$(shim env TMPCLEANER_FULL_PERCENT=1 TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --print-rules)
+age_only=$(shim env TMPCLEANER_FULL_AGE=30m TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --print-rules)
 for partial_rules in "$percent_only" "$age_only"; do
 	[ "$(printf '%s\n' "$partial_rules" | grep '^d ')" = "$configured_age" ] || {
 		echo "FAIL: pressure mode needs both variables to change the age"
 		fail=1
 	}
 done
+# df failures abort every mode: garbage output and a non-zero df status.
+for bad in ' x%  y%' ' 50%' ' 50% 20% 3%' '50% -x'; do
+	setdf "$bad"
+	for mode in --print-rules --dry-run; do
+		status=0; pr_out=$(shim env TMPCLEANER_FULL_PERCENT=90 TMPCLEANER_FULL_AGE=30m TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" $mode 2>&1) || status=$?
+		[ "$status" = 1 ] && printf '%s\n' "$pr_out" | grep -Fq 'cannot read /tmp usage' || {
+			echo "FAIL: unparseable df output '$bad' should abort $mode with exit 1"
+			fail=1
+		}
+	done
+done
+setdf ' 50%     -' 1
+for mode in --print-rules --dry-run; do
+	status=0; shim env TMPCLEANER_FULL_PERCENT=90 TMPCLEANER_FULL_AGE=30m TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" $mode >/dev/null 2>&1 || status=$?
+	[ "$status" = 1 ] || {
+		echo "FAIL: failing df should abort $mode with exit 1"
+		fail=1
+	}
+done
+failscratch=$(mktemp -d /tmp/tmpcleaner-dffail.XXXXXX)
+failconf=$cfg/dffail.conf
+sed "s#$dir#$failscratch#" "$conf" > "$failconf"
+printf '%s' "$(cat "$failconf")" > "$failconf"
+touch "$failscratch/old.txt"; old "$failscratch/old.txt"
+for badstate in ' 50%     -|1' ' x%  y%|0'; do
+	setdf "${badstate%|*}" "${badstate#*|}"
+	status=0; shim env TMPCLEANER_FULL_PERCENT=90 TMPCLEANER_FULL_AGE=30m TMPCLEANER_CONF=$failconf sh "$here/tmpcleaner" >/dev/null 2>&1 || status=$?
+	[ "$status" = 1 ] && [ -e "$failscratch/old.txt" ] || {
+		echo "FAIL: df error should abort the real run and keep old files ($badstate)"
+		fail=1
+	}
+	status=0; shim env TMPCLEANER_FULL_PERCENT=90 TMPCLEANER_FULL_AGE=30m TMPCLEANER_CONF=$failconf sh "$here/tmpcleaner" --check "$failscratch/old.txt" >/dev/null 2>&1 || status=$?
+	[ "$status" = 2 ] || {
+		echo "FAIL: df error should make --check exit 2 ($badstate), got $status"
+		fail=1
+	}
+done
+rm -rf "$failscratch"
+setdf ' 50%     -'
 printf '%s\n' "$rules" | grep -Fxq "x \"$dir/open a%%b.txt\"" || {
 	echo "FAIL: printed rules should exclude the held file"
 	fail=1
