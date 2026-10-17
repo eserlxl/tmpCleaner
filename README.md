@@ -146,6 +146,15 @@ in the configuration (`\x20`, `\"`) is not decoded for these listings, so
 removals under it are left out of the counts (cleaning is unaffected). `systemd-tmpfiles` itself logs to
 the journal as usual, so warnings keep their severity.
 
+When `TMPCLEANER_METRICS` is set to the absolute path of a `*.prom` file (for
+example `/var/lib/node_exporter/textfile_collector/tmpcleaner.prom`), each real
+run atomically writes `tmpcleaner_removed_files`,
+`tmpcleaner_removed_directories`, `tmpcleaner_last_run_timestamp_seconds`, and
+`tmpcleaner_last_exit_status` gauges for the Prometheus `node_exporter`
+textfile collector. Preview modes (`--dry-run`, `--print-rules`, `--check`)
+never touch the file, and a write failure logs one line to stderr without
+changing the run's exit status.
+
 Change the interval with `sudo systemctl edit tmpcleaner.timer`. A run that
 takes longer than ten minutes is stopped and logged as failed; the next timer
 run starts normally.
@@ -171,6 +180,7 @@ Service environment settings below go in a unit drop-in via `sudo systemctl edit
 - `TMPCLEANER_FULL_PERCENT`: Threshold percentage of `/tmp` usage (1-100); the larger of block and inode usage counts (`-` is 0), and a `df` error aborts the run.
 - `TMPCLEANER_FULL_AGE`: Age duration to use when `/tmp` usage meets or exceeds `TMPCLEANER_FULL_PERCENT`.
 - `TMPCLEANER_LIST`: Set to 1 to list removed paths with control bytes and backslashes escaped (default: off).
+- `TMPCLEANER_METRICS`: Absolute path of a `*.prom` file for the `node_exporter` textfile collector (real runs only).
 
 A configuration file other than the installed one can be previewed with
 `sudo env TMPCLEANER_CONF=/path/to/custom.conf tmpcleaner --dry-run`; an

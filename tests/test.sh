@@ -4,7 +4,7 @@
 # cannot be backdated, so the test drops b/B/c/C from the age-by field and
 # keeps the rest as configured.
 set -eu
-unset TMPCLEANER_AGE TMPCLEANER_FULL_PERCENT TMPCLEANER_FULL_AGE TMPCLEANER_LIST
+unset TMPCLEANER_AGE TMPCLEANER_FULL_PERCENT TMPCLEANER_FULL_AGE TMPCLEANER_LIST TMPCLEANER_METRICS
 here=$(cd "$(dirname "$0")/.." && pwd)
 dir=$(mktemp -d /tmp/tmpcleaner-test.XXXXXX)
 # Fixture configs live in a private directory, never at a guessable /tmp path.
@@ -802,19 +802,57 @@ if ! TMPCLEANER_CONF="$cfg/scan2.conf" sh "$here/tmpcleaner" >/dev/null 2>&1 || 
 	fail=1
 fi
 rm -rf "$fresh2" "$cfg/scan2.conf"
+for bad_metrics in relative.prom ./metrics.prom "$cfg/metrics.txt" /.prom "/tmp/bad${nl}.prom"; do
+	status=0
+	TMPCLEANER_METRICS="$bad_metrics" TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --print-rules >/dev/null 2>&1 || status=$?
+	if [ "$status" -ne 1 ]; then
+		echo "FAIL: invalid TMPCLEANER_METRICS '$bad_metrics' should exit 1"
+		fail=1
+	fi
+	status=0
+	TMPCLEANER_METRICS="$bad_metrics" TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --check "$dir/old.txt" >/dev/null 2>&1 || status=$?
+	if [ "$status" -ne 2 ]; then
+		echo "FAIL: --check with invalid TMPCLEANER_METRICS '$bad_metrics' should exit 2"
+		fail=1
+	fi
+done
+TMPCLEANER_METRICS="$cfg/metrics.prom" TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --print-rules >/dev/null
+TMPCLEANER_METRICS="$cfg/metrics.prom" TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --dry-run >/dev/null 2>&1
+if [ -e "$cfg/metrics.prom" ]; then
+	echo "FAIL: preview modes must not write TMPCLEANER_METRICS"
+	fail=1
+fi
 [ "$fail" = 0 ] || exit 1
 
-run_log=$(env -u LC_ALL LANG=C.UTF-8 TMPCLEANER_LIST=1 TMPCLEANER_CONF="$conf" sh "$here/tmpcleaner" 2>&1 >/dev/null)
+run_log=$(env -u LC_ALL LANG=C.UTF-8 TMPCLEANER_LIST=1 TMPCLEANER_METRICS="$cfg/metrics.prom" TMPCLEANER_CONF="$conf" sh "$here/tmpcleaner" 2>&1 >/dev/null)
 
 fail=0
+expected_files=$((5 + bind_running + sock_running))
+if ! { [ -f "$cfg/metrics.prom" ] &&
+	grep -Fxq '# HELP tmpcleaner_removed_files Number of files removed in the last run.' "$cfg/metrics.prom" &&
+	grep -Fxq '# TYPE tmpcleaner_removed_files gauge' "$cfg/metrics.prom" &&
+	grep -Fxq "tmpcleaner_removed_files $expected_files" "$cfg/metrics.prom" &&
+	grep -Fxq '# HELP tmpcleaner_removed_directories Number of directories removed in the last run.' "$cfg/metrics.prom" &&
+	grep -Fxq '# TYPE tmpcleaner_removed_directories gauge' "$cfg/metrics.prom" &&
+	grep -Fxq 'tmpcleaner_removed_directories 2' "$cfg/metrics.prom" &&
+	grep -Fxq '# HELP tmpcleaner_last_run_timestamp_seconds Unix timestamp of the last run completion.' "$cfg/metrics.prom" &&
+	grep -Fxq '# TYPE tmpcleaner_last_run_timestamp_seconds gauge' "$cfg/metrics.prom" &&
+	grep -Eq '^tmpcleaner_last_run_timestamp_seconds [1-9][0-9]*$' "$cfg/metrics.prom" &&
+	grep -Fxq '# HELP tmpcleaner_last_exit_status Exit status of the last run.' "$cfg/metrics.prom" &&
+	grep -Fxq '# TYPE tmpcleaner_last_exit_status gauge' "$cfg/metrics.prom" &&
+	grep -Fxq 'tmpcleaner_last_exit_status 0' "$cfg/metrics.prom"; }; then
+	echo "FAIL: real run should write all four gauges matching the summary counts"
+	fail=1
+fi
+rm -f "$cfg/metrics.prom"
 if ! { [ "$(printf '%s\n' "$run_log" | grep -c '^tmpcleaner: removed [0-9]')" = 1 ] &&
-	printf '%s\n' "$run_log" | grep -Fxq "tmpcleaner: removed $((5 + bind_running + sock_running)) files and 2 directories"; }; then
+	printf '%s\n' "$run_log" | grep -Fxq "tmpcleaner: removed $expected_files files and 2 directories"; }; then
 	echo "FAIL: real run should log one summary with the expected removal counts"
 	fail=1
 fi
 if ! { [ "$(printf '%s\n' "$run_log" | grep -Fxc "tmpcleaner: removed: $dir/old.txt")" = 1 ] &&
 	[ "$(printf '%s\n' "$run_log" | grep -Fxc "tmpcleaner: removed: $dir/old\x0a<0>forged")" = 1 ] &&
-	[ "$(printf '%s\n' "$run_log" | grep -c '^tmpcleaner: removed: ')" = "$((5 + bind_running + sock_running))" ] &&
+	[ "$(printf '%s\n' "$run_log" | grep -c '^tmpcleaner: removed: ')" = "$expected_files" ] &&
 	[ "$(printf '%s\n' "$run_log" | grep -c '^tmpcleaner: removed directory: ')" = 2 ]; }; then
 	echo "FAIL: listing should log every removed path once with newlines escaped"
 	fail=1
@@ -875,6 +913,10 @@ printf '%s\n' "$help_out" | grep -Fq 'TMPCLEANER_AGE' || {
 }
 printf '%s\n' "$help_out" | grep -Fq 'TMPCLEANER_LIST' || {
 	echo "FAIL: help should mention TMPCLEANER_LIST"
+	fail=1
+}
+printf '%s\n' "$help_out" | grep -Fq 'TMPCLEANER_METRICS' || {
+	echo "FAIL: help should mention TMPCLEANER_METRICS"
 	fail=1
 }
 printf '%s\n' "$help_out" | grep -Fq -- '--dry-run' || {
@@ -988,6 +1030,14 @@ run_log=$(TMPCLEANER_CONF=$conf2 sh "$here/tmpcleaner" 2>&1 >/dev/null)
 	echo "FAIL: an unset TMPCLEANER_LIST should log only the usual summary"
 	fail=1
 }
+status=0
+mfail_log=$(TMPCLEANER_METRICS="$cfg/missing-dir/metrics.prom" TMPCLEANER_CONF=$conf2 sh "$here/tmpcleaner" 2>&1 >/dev/null) || status=$?
+if [ "$status" -ne 0 ] || [ "$(printf '%s\n' "$mfail_log" | wc -l)" -ne 2 ] ||
+	! printf '%s\n' "$mfail_log" | grep -Fxq 'tmpcleaner: removed 0 files and 0 directories' ||
+	! printf '%s\n' "$mfail_log" | grep -Fq 'cannot write metrics'; then
+	echo "FAIL: metrics write failure should keep exit status 0 and log one stderr line"
+	fail=1
+fi
 
 [ -e "$dir2/extracted.txt" ] || { echo "FAIL: extracted.txt should be kept"; fail=1; }
 
