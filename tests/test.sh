@@ -59,7 +59,7 @@ chmod +x "$shimdir/df" "$shimdir/stat" "$shimdir/find" "$shimdir/systemd-tmpfile
 dfout=$shimdir/out
 catout=$shimdir/cat
 printf ' 50%%     -\n' > "$dfout"
-printf 'X %s/distro-*\nx /tmp\nx /tmp/\nx /var/tmp/other\n' "$dir" > "$catout"
+printf 'X %s/distro-*\nx "%s/quoted dir"\nx /tmp\nx /tmp/\nx /var/tmp/other\n' "$dir" "$dir" > "$catout"
 export DF_SHIM_OUT="$dfout" CAT_SHIM_OUT="$catout"
 PATH=$shimdir:$PATH
 export PATH
@@ -67,14 +67,14 @@ shim() { PATH=$shimdir:$PATH "$@"; }
 setdf() { printf '%s\n' "$1" > "$dfout"; DF_SHIM_STATUS=${2:-0}; export DF_SHIM_STATUS; }
 
 old() { touch -d '13 hours ago' "$@"; }
-mkdir -p "$dir/emptydir" "$dir/freshdir" "$dir/olddir" "$dir/.X11-unix" "$dir/systemd-private-abc/tmp" "$dir/workdir"
+mkdir -p "$dir/emptydir" "$dir/freshdir" "$dir/olddir" "$dir/.X11-unix" "$dir/systemd-private-abc/tmp" "$dir/workdir" "$dir/quoted dir"
 touch "$dir/old.txt" "$dir/new.txt" "$dir/olddir/f" "$dir/.X11-unix/X0" \
       "$dir/.X0-lock" "$dir/systemd-private-abc/tmp/f" "$dir/open a%b.txt" \
-      "$dir/workdir/f" "$dir/krb5cc_1000" "$dir/distro-auth"
+      "$dir/workdir/f" "$dir/krb5cc_1000" "$dir/distro-auth" "$dir/quoted dir/f"
 old "$dir/old.txt" "$dir/olddir/f" "$dir/.X11-unix/X0" "$dir/.X0-lock" \
-    "$dir/systemd-private-abc/tmp/f" "$dir/open a%b.txt" "$dir/workdir/f" "$dir/krb5cc_1000" "$dir/distro-auth"
+    "$dir/systemd-private-abc/tmp/f" "$dir/open a%b.txt" "$dir/workdir/f" "$dir/krb5cc_1000" "$dir/distro-auth" "$dir/quoted dir/f"
 old "$dir/olddir" "$dir/.X11-unix" "$dir/systemd-private-abc/tmp" \
-    "$dir/systemd-private-abc" "$dir/workdir"
+    "$dir/systemd-private-abc" "$dir/workdir" "$dir/quoted dir"
 
 # An old empty dir that was just listed goes; a just-created empty one stays.
 touch -m -d '13 hours ago' "$dir/emptydir"
@@ -475,6 +475,10 @@ if printf '%s\n' "$rules" | grep -Eq '^[xX][!-]*[[:space:]]+"/tmp/*"$|^[xX][!-]*
 fi
 printf '%s\n' "$rules" | grep -Fxq "X $dir/distro-*" || {
 	echo "FAIL: --print-rules should import /tmp X rules from --cat-config"
+	fail=1
+}
+printf '%s\n' "$rules" | grep -Fxq "x \"$dir/quoted dir\"" || {
+	echo "FAIL: --print-rules should import quoted /tmp exclusion with spaces from --cat-config"
 	fail=1
 }
 configured_age=$(printf '%s\n' "$rules" | grep '^d ')
@@ -943,7 +947,7 @@ gone "old${nl}<0>forged"
 kept freshdir
 kept "*"; kept "we[i]rd?"; kept "back\\slash*"; kept "new${nl}line"
 kept "c${cr}d"; kept "t${tab}b"; kept "q\"uote"
-kept new.txt; kept krb5cc_1000; kept distro-auth; kept .X11-unix/X0; kept .X0-lock; kept systemd-private-abc/tmp/f
+kept new.txt; kept krb5cc_1000; kept distro-auth; kept "quoted dir/f"; kept "quoted dir"; kept .X11-unix/X0; kept .X0-lock; kept systemd-private-abc/tmp/f
 kept "open a%b.txt"; kept workdir/f; kept sleep; kept libm.so.6; kept "${utf8#"$dir"/}"
 if [ "$sock_running" = 1 ]; then
 	kept sock; kept "${nlsock#"$dir"/}"; kept sockdir/s; kept dotsock; gone victim/f

@@ -413,8 +413,9 @@ rules() {
 	systemd-tmpfiles --cat-config > "$scratch/cat" || return 1
 	LC_ALL=C awk '
 		$1 ~ /^[xX][!-]*$/ {
-			path = $2
-			if (path ~ /^["\047].*["\047]$/) path = substr(path, 2, length(path) - 2)
+			if ($2 ~ /^"/ && match($0, /"[^"]*"/)) path = substr($0, RSTART + 1, RLENGTH - 2)
+			else if ($2 ~ /^\047/ && match($0, /\047[^\047]*\047/)) path = substr($0, RSTART + 1, RLENGTH - 2)
+			else path = $2
 			gsub(/\/+/, "/", path)
 			sub(/\/$/, "", path)
 			if (index(path, "/tmp/") == 1 && length(path) > 5) print
