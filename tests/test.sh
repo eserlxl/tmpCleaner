@@ -1814,5 +1814,54 @@ grep -Fxq 'ExecStart=/usr/local/bin/tmpcleaner' "$here/tmpcleaner.service" || {
 }
 rm -rf "$staged"
 
+# Packaging metadata is checked only after successful generation, and failed
+# regeneration leaves the last complete file and its mode intact.
+srcinfo_root=$(mktemp -d "$cfg/srcinfo.XXXXXX")
+mkdir "$srcinfo_root/tools"
+printf 'complete metadata\n' > "$srcinfo_root/original"
+cp "$srcinfo_root/original" "$srcinfo_root/.SRCINFO"
+chmod 644 "$srcinfo_root/.SRCINFO"
+cat > "$srcinfo_root/tools/makepkg" <<'SHIM'
+#!/bin/sh
+[ "$*" = --printsrcinfo ] || exit 64
+case "$SRCINFO_CASE" in
+	match|match-fail) cat original ;;
+	stale) printf 'new complete metadata\n' ;;
+	partial-fail) printf 'partial' ;;
+esac
+case "$SRCINFO_CASE" in *-fail) exit 42 ;; esac
+SHIM
+chmod +x "$srcinfo_root/tools/makepkg"
+for srcinfo_case in match stale match-fail partial-fail; do
+	for srcinfo_target in check-srcinfo srcinfo; do
+		cp "$srcinfo_root/original" "$srcinfo_root/.SRCINFO"
+		status=0
+		(cd "$srcinfo_root" && PATH="$srcinfo_root/tools:$PATH" SRCINFO_CASE=$srcinfo_case \
+			make -s -f "$here/Makefile" "$srcinfo_target") > "$srcinfo_root/log" 2>&1 || status=$?
+		if [ "$srcinfo_case" = match ] || { [ "$srcinfo_case" = stale ] && [ "$srcinfo_target" = srcinfo ]; }; then
+			[ "$status" -eq 0 ] || { echo "FAIL: successful metadata generation ($srcinfo_case $srcinfo_target)"; fail=1; }
+		else
+			[ "$status" -ne 0 ] || { echo "FAIL: metadata check/generator failure was hidden ($srcinfo_case $srcinfo_target)"; fail=1; }
+		fi
+		if [ "$srcinfo_case" = stale ] && [ "$srcinfo_target" = srcinfo ]; then
+			printf 'new complete metadata\n' > "$srcinfo_root/expected"
+		else
+			cp "$srcinfo_root/original" "$srcinfo_root/expected"
+		fi
+		if ! cmp -s "$srcinfo_root/expected" "$srcinfo_root/.SRCINFO" ||
+			[ "$(stat -c %a "$srcinfo_root/.SRCINFO")" != 644 ] ||
+			[ -n "$(find "$srcinfo_root" -maxdepth 1 -name '.SRCINFO.*' -print -quit)" ]; then
+			echo "FAIL: metadata contents/mode or temporary-file cleanup ($srcinfo_case $srcinfo_target)"
+			fail=1
+		fi
+		if [ "$srcinfo_case:$srcinfo_target" = stale:check-srcinfo ] &&
+			! grep -Fq '.SRCINFO is stale; run make srcinfo' "$srcinfo_root/log"; then
+			echo 'FAIL: stale metadata check must retain the update diagnostic'
+			fail=1
+		fi
+	done
+done
+rm -rf "$srcinfo_root"
+
 [ "$fail" = 0 ] && echo "PASS"
 exit "$fail"

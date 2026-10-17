@@ -64,10 +64,17 @@ preview:
 
 # Maintainer helpers for the AUR package: makepkg is only needed here, not by test.
 srcinfo:
-	makepkg --printsrcinfo > .SRCINFO
+	@tmp=$$(mktemp ./.SRCINFO.XXXXXX) || exit $$?; \
+	trap 'status=$$?; rm -f -- "$$tmp"; exit "$$status"' EXIT; \
+	makepkg --printsrcinfo > "$$tmp" || exit $$?; \
+	if [ -e .SRCINFO ]; then chmod --reference=.SRCINFO "$$tmp"; else chmod 644 "$$tmp"; fi && \
+		mv -f -- "$$tmp" .SRCINFO
 
 check-srcinfo:
-	@makepkg --printsrcinfo | diff -u .SRCINFO - || { echo ".SRCINFO is stale; run make srcinfo" >&2; exit 1; }
+	@tmp=$$(mktemp ./.SRCINFO.XXXXXX) || exit $$?; \
+	trap 'status=$$?; rm -f -- "$$tmp"; exit "$$status"' EXIT; \
+	makepkg --printsrcinfo > "$$tmp" || exit $$?; \
+	diff -u .SRCINFO "$$tmp" || { echo ".SRCINFO is stale; run make srcinfo" >&2; exit 1; }
 
 # Warning level and above; notes and style hints stay advisory.
 lint:
