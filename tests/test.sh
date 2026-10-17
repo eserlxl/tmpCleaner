@@ -860,10 +860,19 @@ fi
 status=0
 check_out=$(TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --check "$dir/$ctrl_name/f" 2>"$cfg/check.err") || status=$?
 check_err=$(cat "$cfg/check.err")
-if [ "$status" -ne 1 ] || [ "$check_out" != "kept: $dir/$ctrl_name/f" ] || [ "$check_err" != "tmpcleaner: inside an in-use directory: $dir/c?????z" ]; then
+if [ "$status" -ne 1 ] || [ "$check_out" != "kept: $dir/c?????z/f" ] || [ "$check_err" != "tmpcleaner: inside an in-use directory: $dir/c?????z" ]; then
 	echo "FAIL: --check should sanitize control bytes in an in-use ancestor directory"
 	fail=1
 fi
+esc_name=$(printf 'e\033[2Jx')
+touch "$dir/$esc_name"
+old "$dir/$esc_name"
+check_out=$(TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --check "$dir/$esc_name" 2>/dev/null) || :
+if [ "$check_out" != "would be removed: $dir/e?[2Jx" ]; then
+	echo "FAIL: --check should mask control bytes in the verdict line"
+	fail=1
+fi
+rm -f -- "$dir/${esc_name:?}"
 kill "$ctrl_fd_pid" "$ctrl_cwd_pid" 2>/dev/null || :
 wait "$ctrl_fd_pid" "$ctrl_cwd_pid" 2>/dev/null || :
 rm -rf "$dir/ctrlparent" "$dir/${ctrl_name:?}" "$cfg/check.err"

@@ -520,9 +520,11 @@ if [ -n "$check" ]; then
 		/"$/ && (index($0, "Would remove \"" path "/") == 1 || index($0, "Would remove directory \"" path "/") == 1) { inside++ }
 		END { exit !(found_file || (found_directory && inside >= ENVIRON["ENTRIES"] + 0)) }
 		' "$scratch/preview" || verdict=$?
+	# The checked name may come from /tmp too: mask control bytes like the reasons.
+	shown=$(printf '%s' "$2" | LC_ALL=C tr '\001-\037\177' '[?*]')
 	case "$verdict" in
 		0)
-			printf 'would be removed: %s\n' "$2"
+			printf 'would be removed: %s\n' "$shown"
 			exit 0
 			;;
 		1)
@@ -543,7 +545,7 @@ if [ -n "$check" ]; then
 					else print "tmpcleaner: not old enough, or kept by a configuration rule"
 				}
 				' "$scratch/sorted" >&2
-			printf 'kept: %s\n' "$2"
+			printf 'kept: %s\n' "$shown"
 			exit 1
 			;;
 		*)
