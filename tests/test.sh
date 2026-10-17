@@ -22,10 +22,11 @@ awk '$1 == "d" { gsub(/[bcBC]/, "", $6) } { print }' "$here/tmpcleaner.conf" |
 	sed "s#/tmp#$dir#" > "$conf"
 printf '%s' "$(cat "$conf")" > "$conf"
 
-# df, stat, find, and systemd-tmpfiles shims: every pressure or scan-failure
-# test runs with $shimdir first on PATH. DF_SHIM_OUT holds the data line,
-# DF_SHIM_STATUS the exit; STAT_SHIM_FAIL, FIND_SHIM_FAIL, and CAT_SHIM_FAIL
-# select which scan step fails; CAT_SHIM_OUT answers --cat-config from a file.
+# df, stat, find, mktemp, and systemd-tmpfiles shims: every pressure or
+# scan-failure test runs with $shimdir first on PATH. DF_SHIM_OUT holds the
+# data line, DF_SHIM_STATUS the exit; STAT_SHIM_FAIL, FIND_SHIM_FAIL,
+# MKTEMP_SHIM_FAIL, and CAT_SHIM_FAIL select which step fails; CAT_SHIM_OUT
+# answers --cat-config from a file.
 cat > "$shimdir/df" <<'SHIM'
 #!/bin/sh
 [ "$*" = "--output=pcent,ipcent /tmp" ] || { echo "df shim: unexpected arguments: $*" >&2; exit 64; }
@@ -49,6 +50,20 @@ case "\${FIND_SHIM_FAIL:-}:\$*" in
 esac
 exec "$(command -v find)" "\$@"
 SHIM
+cat > "$shimdir/mktemp" <<SHIM
+#!/bin/sh
+case "\${MKTEMP_SHIM_FAIL:-}:\$*" in
+	primary:-d|both:-d|both:"-d -p /dev/shm") exit 1 ;;
+	readonly:-d)
+		d=\$("$(command -v mktemp)" -d) || exit 1
+		printf '%s\n' "\$d" > "\$MKTEMP_SHIM_PARTIAL"
+		mkdir "\$d/excludes"
+		printf '%s\n' "\$d"
+		exit 0
+		;;
+esac
+exec "$(command -v mktemp)" "\$@"
+SHIM
 cat > "$shimdir/systemd-tmpfiles" <<SHIM
 #!/bin/sh
 if [ "\$*" = --cat-config ]; then
@@ -58,7 +73,7 @@ if [ "\$*" = --cat-config ]; then
 fi
 exec "$(command -v systemd-tmpfiles)" "\$@"
 SHIM
-chmod +x "$shimdir/df" "$shimdir/stat" "$shimdir/find" "$shimdir/systemd-tmpfiles"
+chmod +x "$shimdir/df" "$shimdir/stat" "$shimdir/find" "$shimdir/mktemp" "$shimdir/systemd-tmpfiles"
 dfout=$shimdir/out
 catout=$shimdir/cat
 printf ' 50%%     -\n' > "$dfout"
@@ -478,6 +493,50 @@ if [ "$bind_running" = 1 ]; then
 		fail=1
 	fi
 fi
+# Without unshare, scratch creation still falls back to /dev/shm (and removes
+# a partial primary directory when $scratch/excludes cannot be written), and
+# aborts when both scratch locations fail.
+for mkfail in primary readonly; do
+	fbdir=$(mktemp -d "$dir/fb.XXXXXX")
+	touch "$fbdir/old"
+	old "$fbdir/old"
+	sed "s#$dir#$fbdir#" "$conf" > "$cfg/fb.conf"
+	rm -f "$cfg/partial"
+	status=0
+	shim env MKTEMP_SHIM_FAIL="$mkfail" MKTEMP_SHIM_PARTIAL="$cfg/partial" TMPCLEANER_CONF="$cfg/fb.conf" sh "$here/tmpcleaner" 2>/dev/null || status=$?
+	if [ "$status" -ne 0 ] || [ -e "$fbdir/old" ]; then
+		echo "FAIL: scratch fallback to /dev/shm should clean old files ($mkfail)"
+		fail=1
+	fi
+	if [ "$mkfail" = readonly ]; then
+		partial=$(cat "$cfg/partial" 2>/dev/null || :)
+		if [ -z "$partial" ] || [ -e "$partial" ]; then
+			echo "FAIL: partial primary scratch directory should be removed on fallback"
+			rm -rf "$partial"
+			fail=1
+		fi
+	fi
+	rm -rf "$fbdir" "$cfg/fb.conf" "$cfg/partial"
+done
+noscratch=$(mktemp -d "$dir/noscratch.XXXXXX")
+touch "$noscratch/old"
+old "$noscratch/old"
+sed "s#$dir#$noscratch#" "$conf" > "$cfg/noscratch.conf"
+status=0
+noscratch_err=$(shim env MKTEMP_SHIM_FAIL=both TMPCLEANER_CONF="$cfg/noscratch.conf" sh "$here/tmpcleaner" 2>&1) || status=$?
+if [ "$status" -ne 1 ] || [ ! -e "$noscratch/old" ] ||
+	! printf '%s\n' "$noscratch_err" | grep -Fq 'tmpcleaner: cannot create a scratch directory'; then
+	echo "FAIL: total scratch failure should exit 1, report error, and keep old files"
+	fail=1
+fi
+status=0
+noscratch_check_err=$(shim env MKTEMP_SHIM_FAIL=both TMPCLEANER_CONF="$cfg/noscratch.conf" sh "$here/tmpcleaner" --check "$noscratch/old" 2>&1) || status=$?
+if [ "$status" -ne 2 ] || [ ! -e "$noscratch/old" ] ||
+	! printf '%s\n' "$noscratch_check_err" | grep -Fq 'tmpcleaner: cannot create a scratch directory'; then
+	echo "FAIL: --check on total scratch failure should exit 2, report error, and keep old files"
+	fail=1
+fi
+rm -rf "$noscratch" "$cfg/noscratch.conf"
 age_rules=$(TMPCLEANER_AGE=8h TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --print-rules)
 printf '%s\n' "$age_rules" | grep -Eq "^d $dir - - - amM:8h$" || {
 	echo "FAIL: age override should preserve age-by letters and set 8h"
