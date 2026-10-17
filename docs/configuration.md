@@ -79,7 +79,7 @@ counts as 0. At or above the threshold, it overrides every `d` rule's duration,
 including `TMPCLEANER_AGE`, and reports
 `tmpcleaner: /tmp is N% full (blocks B%, inodes I%), using age X` on stderr.
 Below the threshold, the configured age or `TMPCLEANER_AGE` applies; preview
-modes (`--print-rules`, `--check`, `--dry-run`) report
+modes (`--print-rules`, `--print-in-use0`, `--check`, `--dry-run`) report
 `tmpcleaner: /tmp is N% full (blocks B%, inodes I%), below T%; keeping the configured age`
 on stderr, while a real run prints nothing extra.
 
@@ -97,6 +97,9 @@ cleanup, in addition to the summary. Files are logged as
 `tmpcleaner: removed: PATH` and directories as
 `tmpcleaner: removed directory: PATH`. Control bytes and backslashes in each
 path use `\xHH` escapes so a filename cannot start a new journal line.
+Listings and counts cover every supported age-cleanup rule type, including
+removed roots; overlapping configured roots do not duplicate paths. See
+[counting and metrics](status-and-logs.md) for details.
 Unset or empty leaves the usual output unchanged (default: off); any other value stops
 the run before cleaning.
 

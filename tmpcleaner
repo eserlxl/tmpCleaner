@@ -671,8 +671,8 @@ done
 # counted too. Scratch files sit in one private directory (mode 0700, random
 # name) that the rules exclude and the snapshots skip.
 generate_rules
-# Snapshot only the trees the d rules clean (normally just /tmp).
-LC_ALL=C awk '$1 == "d" {
+# Snapshot every supported age-cleanup root (normally just /tmp).
+LC_ALL=C awk 'substr($1, 1, 1) ~ /^[dDevqQCrR]$/ {
 	# A quoted root may hold spaces, so take everything between its quotes.
 	if ($2 ~ /^"/ && match($0, /"[^"]*"/)) root = substr($0, RSTART + 1, RLENGTH - 2)
 	else if ($2 ~ /^\047/ && match($0, /\047[^\047]*\047/)) root = substr($0, RSTART + 1, RLENGTH - 2)
@@ -683,7 +683,7 @@ LC_ALL=C awk '$1 == "d" {
 	"$scratch/rules" > "$scratch/roots"
 snapshot() {
 	while IFS= read -r root; do
-		find "$root" -xdev -mindepth 1 -samefile "$scratch" -prune -o -printf '%y %p\0' 2>/dev/null || :
+		find "$root" -xdev -samefile "$scratch" -prune -o -printf '%y %p\0' 2>/dev/null || :
 	done < "$scratch/roots" | LC_ALL=C sort -zu > "$1"
 }
 snapshot "$scratch/before"

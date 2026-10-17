@@ -1400,6 +1400,67 @@ if [ "$bind_running" = 1 ]; then
 	done
 fi
 
+# Counts, listings and metrics include every age-cleanup type and deduplicate
+# overlapping roots. Boot-only rules and static exclusions remain untouched.
+count_root=$(mktemp -d "$dir/counts.XXXXXX")
+mkdir "$cfg/count-source"
+: > "$cfg/count.conf"
+: > "$cfg/count.expected"
+for count_type in e D v q Q C d- 'd!'; do
+	count_path=$count_root/$count_type
+	mkdir "$count_path"
+	touch "$count_path/old"
+	old "$count_path/old"
+	if [ "$count_type" = C ]; then
+		printf 'C "%s" - - - amM:12h %s\n' "$count_path" "$cfg/count-source" >> "$cfg/count.conf"
+	else
+		printf "%s '%s' - - - amM:12h\n" "$count_type" "$count_path" >> "$cfg/count.conf"
+	fi
+	[ "$count_type" = 'd!' ] || printf 'tmpcleaner: removed: %s/old\n' "$count_path" >> "$cfg/count.expected"
+done
+touch "$count_root/e/kept"
+old "$count_root/e/kept"
+printf 'x %s/e/kept\n' "$count_root" >> "$cfg/count.conf"
+mkdir -p "$count_root/overlap/nested"
+touch "$count_root/overlap/nested/old"
+old "$count_root/overlap/nested/old"
+printf 'd %s/overlap - - - amM:12h\nD %s/overlap/nested - - - amM:12h\n' "$count_root" "$count_root" >> "$cfg/count.conf"
+printf 'tmpcleaner: removed: %s/overlap/nested/old\n' "$count_root" >> "$cfg/count.expected"
+count_files=8 count_dirs=0
+backend_major=$(systemd-tmpfiles --version | awk 'NR == 1 { print $2 + 0 }')
+if [ "$backend_major" -ge 262 ]; then
+	touch "$count_root/r"
+	mkdir "$count_root/R"
+	touch "$count_root/R/old"
+	old "$count_root/r" "$count_root/R/old" "$count_root/R"
+	printf 'r %s/r - - - amM:12h\nR %s/R - - - amM:12h\n' "$count_root" "$count_root" >> "$cfg/count.conf"
+	printf 'tmpcleaner: removed: %s/r\ntmpcleaner: removed: %s/R/old\ntmpcleaner: removed directory: %s/R\n' "$count_root" "$count_root" "$count_root" >> "$cfg/count.expected"
+	count_files=10 count_dirs=1
+fi
+printf 'tmpcleaner: removed %s files and %s directories\n' "$count_files" "$count_dirs" >> "$cfg/count.expected"
+status=0
+TMPDIR=$count_root/d- TMPCLEANER_CONF=$cfg/count.conf TMPCLEANER_LIST=1 TMPCLEANER_METRICS=$cfg/count.prom \
+	sh "$here/tmpcleaner" > "$cfg/count.out" 2> "$cfg/count.log" || status=$?
+LC_ALL=C sort "$cfg/count.expected" > "$cfg/count.expected-sorted"
+LC_ALL=C sort "$cfg/count.log" > "$cfg/count.actual-sorted"
+if [ "$status" -ne 0 ] || [ -s "$cfg/count.out" ] ||
+	! cmp -s "$cfg/count.expected-sorted" "$cfg/count.actual-sorted" ||
+	! grep -Fxq "tmpcleaner_removed_files $count_files" "$cfg/count.prom" ||
+	! grep -Fxq "tmpcleaner_removed_directories $count_dirs" "$cfg/count.prom" ||
+	[ ! -e "$count_root/d!/old" ] || [ ! -e "$count_root/e/kept" ]; then
+	echo 'FAIL: age-cleanup types must have exact deduplicated counts, listings and metrics'
+	fail=1
+fi
+while IFS= read -r count_line; do
+	case "$count_line" in
+		'tmpcleaner: removed: '*) count_path=${count_line#'tmpcleaner: removed: '} ;;
+		'tmpcleaner: removed directory: '*) count_path=${count_line#'tmpcleaner: removed directory: '} ;;
+		*) continue ;;
+	esac
+	[ ! -e "$count_path" ] || { echo "FAIL: counted fixture still exists: $count_path"; fail=1; }
+done < "$cfg/count.expected"
+rm -rf "$count_root" "$cfg/count-source"
+
 # Scratch paths are literal even with glob and control bytes inside the cleaned tree.
 # The single-quoted root also exercises the removal-count parser.
 for scratch_name in . 'scratch[ab]' 'scratch*?' "$(printf 'scratch\001\t\nend')"; do
