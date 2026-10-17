@@ -110,7 +110,7 @@ scratch=$(mktemp -d 2>/dev/null) && { printf x > "$scratch/excludes"; } 2>/dev/n
 	scratch=$(mktemp -d -p /dev/shm 2>/dev/null)
 } || { echo "tmpcleaner: cannot create a scratch directory" >&2; exit "$errstatus"; }
 trap 'rm -rf "$scratch"' EXIT
-: > "$scratch/excludes"
+printf '%s\0' "$scratch" > "$scratch/excludes"
 if [ "${1:-}" != --check ]; then
 	n=$#
 	while [ "$n" -gt 0 ]; do
@@ -448,10 +448,6 @@ rules() {
 		-e "$control_escapes" -e 's/%/%%/g' -e 's/.*/x "&"/' \
 		"$scratch/sorted" > "$scratch/excl" || return 1
 	tr '\0' '\n' < "$scratch/excl" || return 1
-	# Quoted, with \ " escaped and % doubled (a tmpfiles specifier), like the
-	# generated exclusions, whatever TMPDIR holds.
-	printf '%s' "$scratch" | sed -e 's/[\\"]/\\&/g' -e 's/%/%%/g' -e 's/.*/x "&"/' || return 1
-	echo
 }
 
 generate_rules() {
@@ -596,7 +592,7 @@ LC_ALL=C awk '$1 == "d" {
 	"$scratch/rules" > "$scratch/roots"
 snapshot() {
 	while IFS= read -r root; do
-		find "$root" -xdev -mindepth 1 -path "$scratch" -prune -o -printf '%y %p\0' 2>/dev/null || :
+		find "$root" -xdev -mindepth 1 -samefile "$scratch" -prune -o -printf '%y %p\0' 2>/dev/null || :
 	done < "$scratch/roots" | LC_ALL=C sort -zu > "$1"
 }
 snapshot "$scratch/before"

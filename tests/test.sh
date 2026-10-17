@@ -1201,18 +1201,23 @@ if [ "$bind_running" = 1 ]; then
 	done
 fi
 
-# The run keeps its own scratch files even when they sit in the cleaned tree
-# (given as a single-quoted path, which the counts must read too).
-dir3=$(mktemp -d /tmp/tmpcleaner-test.XXXXXX)
-printf "d '%s' - - - amM:0\\n" "$dir3" > "$cfg/conf3"
-touch "$dir3/f"
-status=0
-scratch_log=$(TMPDIR=$dir3 TMPCLEANER_AGE=0 TMPCLEANER_CONF=$cfg/conf3 sh "$here/tmpcleaner" 2>&1) || status=$?
-if [ "$status" -ne 0 ] || ! printf '%s\n' "$scratch_log" | grep -Fxq 'tmpcleaner: removed 1 files and 0 directories'; then
-	echo "FAIL: the run must not remove its own scratch files"
-	fail=1
-fi
-rm -rf "$dir3" "$cfg/conf3"
+# Scratch paths are literal even with glob and control bytes inside the cleaned tree.
+# The single-quoted root also exercises the removal-count parser.
+for scratch_name in . 'scratch[ab]' 'scratch*?' "$(printf 'scratch\001\t\nend')"; do
+	dir3=$(mktemp -d "$dir/scratch.XXXXXX")
+	scratch_dir=$dir3/$scratch_name
+	mkdir -p "$scratch_dir"
+	printf "d '%s' - - - amM:0\\n" "$dir3" > "$cfg/conf3"
+	touch "$dir3/f"
+	status=0
+	scratch_log=$(TMPDIR=$scratch_dir TMPCLEANER_AGE=0 TMPCLEANER_CONF=$cfg/conf3 sh "$here/tmpcleaner" 2>&1) || status=$?
+	if [ "$status" -ne 0 ] || [ "$scratch_log" != 'tmpcleaner: removed 1 files and 0 directories' ] ||
+		[ -e "$dir3/f" ] || [ -n "$(find "$scratch_dir" -mindepth 1 -print -quit)" ]; then
+		echo "FAIL: the run must preserve scratch state, count the removed file, and leave no scratch files"
+		fail=1
+	fi
+	rm -rf "$dir3" "$cfg/conf3"
+done
 
 # A second run tests that the shipped age rule keeps freshly extracted files
 # (birth and ctime stay current even when atime and mtime are backdated).
