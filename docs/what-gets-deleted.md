@@ -83,12 +83,18 @@ change it; see [configuration.md](configuration.md).
 
 ## How to keep something
 
-Add an `x` line to `/etc/tmpcleaner/tmpcleaner.conf`. It keeps the path and
-everything below it, whatever its age, and accepts shell globs:
+Add an `x` line to `/etc/tmpcleaner/tmpcleaner.conf`. It excludes matching paths
+and their contents while a parent cleanup rule walks the tree, whatever their
+age, and accepts shell globs:
 
 ```text
 x /tmp/my-long-job-*
 ```
+
+A separately configured cleanup root at or below the excluded directory can
+still clean its contents. For example, `x /tmp/tree/keep` cannot save
+`/tmp/tree/keep/old` if a separate `d /tmp/tree/keep ...` rule cleans it. Remove
+the conflicting cleanup rule; see [configuration.md](configuration.md).
 
 The next run reads it; nothing needs reloading. Package upgrades keep an edited
 config (pacman writes new defaults to `.pacnew`, `make install` to

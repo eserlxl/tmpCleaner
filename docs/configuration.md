@@ -12,6 +12,10 @@ distribution's `tmpfiles.d` files are appended automatically via
 x /tmp/my-long-job-*
 ```
 
+An exclusion applies while a parent cleanup rule traverses the tree. A
+separately configured cleanup root at or below the excluded directory can still
+clean its contents; remove the conflicting cleanup rule. See [how to keep something](what-gets-deleted.md#how-to-keep-something).
+
 Cleanup rule paths must be literal absolute paths, plain or simply quoted;
 `%%` represents a literal percent. Backslash encodings, other `%` specifiers,
 and ambiguous glob-capable roots stop every run before cleaning, including
