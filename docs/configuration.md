@@ -12,6 +12,12 @@ distribution's `tmpfiles.d` files are appended automatically via
 x /tmp/my-long-job-*
 ```
 
+Cleanup rule paths must be literal absolute paths, plain or simply quoted;
+`%%` represents a literal percent. Backslash encodings, other `%` specifiers,
+and ambiguous glob-capable roots stop every run before cleaning, including
+runs without CLI exclusions. See the [supported path grammar](cli-reference.md)
+and literal directory-root exceptions.
+
 Service environment settings below go in a unit drop-in via `sudo systemctl edit tmpcleaner.service` (works for both AUR and source installs).
 
 ## Environment variables

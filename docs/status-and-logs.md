@@ -15,9 +15,9 @@ tmpcleaner: removed 3 files and 2 directories
 
 The counts compare listings of the cleaned trees taken just before and just
 after the run, so they are exact for names of any shape; anything another
-program deletes in that second is counted too. A `d` path written with escapes
-in the configuration (`\x20`, `\"`) is not decoded for these listings, so
-removals under it are left out of the counts (cleaning is unaffected). `systemd-tmpfiles` itself logs to
+program deletes in that second is counted too. Cleanup roots must follow the
+[literal path grammar](cli-reference.md); unsupported encoded or ambiguous
+roots stop the run before cleaning. `systemd-tmpfiles` itself logs to
 the journal as usual, so warnings keep their severity.
 
 When `TMPCLEANER_METRICS` is set to the absolute path of a `*.prom` file (for

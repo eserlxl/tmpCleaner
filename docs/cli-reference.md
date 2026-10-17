@@ -32,6 +32,14 @@ Exclusions use the same canonicalized, literal paths as other modes. Actual
 in-use protection keeps its own reason. Other trailing options, including
 `--prefix` and `--dry-run`, are rejected before configuration is read.
 
+In-use paths and explicit exclusions protect contents even when the configuration
+cleans the protected directory or a deeper root directly. Rule paths
+must be literal absolute paths, unquoted or simply single/double quoted;
+`%%` denotes a literal percent. Backslash encodings, other `%` specifiers and
+glob patterns in glob-capable rule types stop the run before cleaning (exit 1,
+or 2 with `--check`). Directory-root types `d`, `D`, `v`, `q`, `Q`, and `C` may
+contain literal glob characters. Existing `x`/`X` rules are preserved.
+
 A failed in-use scan stops every mode before `systemd-tmpfiles` runs
 (`--print-rules` prints nothing to stdout; `--dry-run` and the real run exit
 non-zero and nothing is removed).

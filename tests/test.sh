@@ -79,6 +79,7 @@ if [ "\$*" = --cat-config ]; then
 	cat "\$CAT_SHIM_OUT"
 	exit 0
 fi
+[ -z "\${CLEAN_SHIM_MARKER:-}" ] || printf '%s\n' "\$*" >> "\$CLEAN_SHIM_MARKER"
 exec "$(command -v systemd-tmpfiles)" "\$@"
 SHIM
 chmod +x "$shimdir/df" "$shimdir/stat" "$shimdir/find" "$shimdir/mktemp" "$shimdir/systemd-tmpfiles"
@@ -857,6 +858,109 @@ for arg in --prefix=/tmp --dry-run --remove --help --exclude-prefix --exclude-pr
 		fail=1
 	fi
 done
+# Explicit exclusions also suppress independently configured cleanup roots.
+for filter_name in keep 'keep[ab]' 'keep%root' "keep' quoted"; do
+	for filter_scope in all prefix in-use; do
+		filter_root=$(mktemp -d "$dir/root-filter.XXXXXX")
+		filter_keep=$filter_root/$filter_name
+		mkdir -p "$filter_keep/deep" "$filter_keep-sibling" "$filter_root/keepa"
+		touch "$filter_keep/old" "$filter_keep/.hidden" "$filter_keep/deep/old" "$filter_keep/deep/.hidden" \
+			"$filter_keep-sibling/old" "$filter_keep-sibling/.hidden" "$filter_root/keepa/old" "$filter_root/keepa/.hidden"
+		old "$filter_keep/old" "$filter_keep/.hidden" "$filter_keep/deep/old" "$filter_keep/deep/.hidden" \
+			"$filter_keep-sibling/old" "$filter_keep-sibling/.hidden" "$filter_root/keepa/old" "$filter_root/keepa/.hidden"
+		rule_keep=$(printf '%s' "$filter_keep" | sed 's/%/%%/g')
+		printf 'd %s - - - amM:12h\nd "%s" - - - amM:12h\nd "%s/deep" - - - amM:12h\n' \
+			"$filter_root" "$rule_keep" "$rule_keep" > "$cfg/root-filter.conf"
+		set --
+		[ "$filter_scope" != prefix ] || set -- "--prefix=$filter_root"
+		filter_pid=
+		if [ "$filter_scope" = in-use ]; then
+			(cd "$filter_keep" && exec sleep infinity) & filter_pid=$!
+			pids="$pids $filter_pid"
+			waited=0
+			while [ "$(readlink "/proc/$filter_pid/cwd")" != "$filter_keep" ] && [ "$waited" -lt 100 ]; do
+				waited=$((waited + 1)); sleep 0.1
+			done
+		else
+			set -- "$@" "--exclude-prefix=$filter_keep"
+		fi
+		status=0
+		TMPCLEANER_CONF=$cfg/root-filter.conf sh "$here/tmpcleaner" "$@" >/dev/null 2>&1 || status=$?
+		if [ "$status" -ne 0 ] || [ ! -e "$filter_keep/old" ] || [ ! -e "$filter_keep/.hidden" ] ||
+			[ ! -e "$filter_keep/deep/old" ] || [ ! -e "$filter_keep/deep/.hidden" ] ||
+			[ -e "$filter_keep-sibling/old" ] || [ -e "$filter_keep-sibling/.hidden" ] ||
+			[ -e "$filter_root/keepa/old" ] || [ -e "$filter_root/keepa/.hidden" ]; then
+			echo "FAIL: explicit exclusion must protect exact/deeper roots and keep siblings eligible ($filter_name, $filter_scope)"
+			fail=1
+		fi
+		status=0
+		set -- "--exclude-prefix=$filter_keep"
+		expected_err='tmpcleaner: kept by an explicit --exclude-prefix'
+		if [ "$filter_scope" = in-use ]; then
+			set --
+			expected_err="tmpcleaner: inside an in-use directory: $filter_keep"
+		fi
+		check_out=$(TMPCLEANER_CONF=$cfg/root-filter.conf sh "$here/tmpcleaner" --check "$filter_keep/old" \
+			"$@" 2>"$cfg/check.err") || status=$?
+		if [ "$status" -ne 1 ] || [ "$check_out" != "kept: $filter_keep/old" ] ||
+			[ "$(cat "$cfg/check.err")" != "$expected_err" ]; then
+			echo "FAIL: --check must honor explicit exclusions of configured roots"
+			fail=1
+		fi
+		[ -z "$filter_pid" ] || { kill "$filter_pid"; wait "$filter_pid" 2>/dev/null || :; }
+		rm -rf "$filter_root"
+	done
+done
+# Native whitespace separators must not disguise an exact protected root.
+filter_root=$(mktemp -d "$dir/root-filter.XXXXXX")
+mkdir "$filter_root/cr" "$filter_root/ff" "$filter_root/vt"
+touch "$filter_root/cr/old" "$filter_root/ff/old" "$filter_root/vt/old" "$filter_root/sibling"
+old "$filter_root/cr/old" "$filter_root/ff/old" "$filter_root/vt/old" "$filter_root/sibling"
+printf 'd %s - - - amM:12h\nd %s/cr\r- - - amM:12h\nd %s/ff\f- - - amM:12h\nd %s/vt\v- - - amM:12h\n\r\n' \
+	"$filter_root" "$filter_root" "$filter_root" "$filter_root" > "$cfg/root-filter.conf"
+status=0
+TMPCLEANER_CONF=$cfg/root-filter.conf sh "$here/tmpcleaner" "--exclude-prefix=$filter_root/cr" \
+	"--exclude-prefix=$filter_root/ff" "--exclude-prefix=$filter_root/vt" >/dev/null 2>&1 || status=$?
+if [ "$status" -ne 0 ] || [ ! -e "$filter_root/cr/old" ] || [ ! -e "$filter_root/ff/old" ] ||
+	[ ! -e "$filter_root/vt/old" ] || [ -e "$filter_root/sibling" ]; then
+	echo "FAIL: native CR/FF/VT separators must preserve protected roots and keep siblings eligible"
+	fail=1
+fi
+rm -rf "$filter_root"
+# Types other than d must not bypass a prefix, while x/X remain unchanged.
+filter_root=$(mktemp -d "$dir/root-filter.XXXXXX")
+printf 'd %s - - - amM:12h\nx %s/keep/guard\nX %s/keep/other\n' "$filter_root" "$filter_root" "$filter_root" > "$cfg/root-filter.conf"
+for rule_type in D e v q Q C R f; do printf '%s %s/keep/%s - - - 12h\n' "$rule_type" "$filter_root" "$rule_type" >> "$cfg/root-filter.conf"; done
+filter_rules=$(TMPCLEANER_CONF=$cfg/root-filter.conf sh "$here/tmpcleaner" --print-rules "--exclude-prefix=$filter_root/keep")
+if printf '%s\n' "$filter_rules" | grep -Eq '^[DevqQCRf] ' ||
+	! printf '%s\n' "$filter_rules" | grep -Fxq "x $filter_root/keep/guard" ||
+	! printf '%s\n' "$filter_rules" | grep -Fxq "X $filter_root/keep/other"; then
+	echo "FAIL: explicit exclusions must filter every non-x/X root type"
+	fail=1
+fi
+for bad_root in "$filter_root/encoded\\x20root" "$filter_root/%T" "$filter_root/glob*"; do
+	printf 'e %s - - - 12h\n' "$bad_root" > "$cfg/root-filter.conf"
+	for filter_mode in real dry check rules unfiltered; do
+		case "$filter_mode" in
+			real) set -- ;;
+			dry) set -- --dry-run ;;
+			check) set -- --check "$dir/old.txt" ;;
+			rules|unfiltered) set -- --print-rules ;;
+		esac
+		[ "$filter_mode" = unfiltered ] || set -- "$@" "--exclude-prefix=$filter_root/keep"
+		status=0
+		filter_out=$(CLEAN_SHIM_MARKER=$cfg/filter.clean TMPCLEANER_CONF=$cfg/root-filter.conf sh "$here/tmpcleaner" "$@" \
+			2>"$cfg/filter.err") || status=$?
+		expected_status=1
+		[ "$filter_mode" != check ] || expected_status=2
+		if [ "$status" -ne "$expected_status" ] || [ -n "$filter_out" ] || [ -e "$cfg/filter.clean" ] ||
+			! grep -Fq 'cannot safely interpret rule' "$cfg/filter.err"; then
+			echo "FAIL: $filter_mode must refuse unsupported rule paths before cleaning"
+			fail=1
+		fi
+	done
+done
+rm -rf "$filter_root" "$cfg/root-filter.conf" "$cfg/filter.err" "$cfg/filter.clean"
 mkdir "$dir/heldparent"
 ln "$dir/open a%b.txt" "$dir/heldparent/open a%b.txt"
 old "$dir/heldparent"
