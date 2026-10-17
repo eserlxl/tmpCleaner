@@ -24,6 +24,14 @@ another program deletes in that second is counted too. Cleanup roots must follow
 roots stop the run before cleaning. `systemd-tmpfiles` itself logs to
 the journal as usual, so warnings keep their severity.
 
+`TMPCLEANER_LIST=1` adds escaped path records on stderr. `TMPCLEANER_LIST=nul`
+instead exports each path observed to disappear once as raw bytes plus NUL on
+stdout, including directories, without type prefixes or an ordering guarantee.
+The summary and backend output stay on stderr in this mode. These are observed
+disappearances, including other processes' deletions, rather than proof that
+tmpcleaner deleted each path. Inspect the exit status: a failed cleanup can
+still export paths it removed before failing. Preview output is unchanged.
+
 When `TMPCLEANER_METRICS` is set to the absolute path of a `*.prom` file (for
 example `/var/lib/node_exporter/textfile_collector/tmpcleaner.prom`), each real
 run atomically writes `tmpcleaner_removed_files`,

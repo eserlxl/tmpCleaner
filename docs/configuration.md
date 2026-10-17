@@ -37,7 +37,7 @@ Service environment settings below go in a unit drop-in via `sudo systemctl edit
 - `TMPCLEANER_AGE`: Override duration on every `d` rule (e.g. `6h`, `30m`).
 - `TMPCLEANER_FULL_PERCENT`: Threshold percentage of `/tmp` usage (1-100); the larger of block and inode usage counts (`-` is 0), and a `df` error aborts the run.
 - `TMPCLEANER_FULL_AGE`: Age duration to use when `/tmp` usage meets or exceeds `TMPCLEANER_FULL_PERCENT`.
-- `TMPCLEANER_LIST`: Set to 1 to list removed paths with control bytes and backslashes escaped (default: off).
+- `TMPCLEANER_LIST`: Set to `1` for escaped removal logs, or `nul` for raw NUL-separated paths on stdout (real runs only; default: off).
 - `TMPCLEANER_METRICS`: Absolute path of a `*.prom` file for the `node_exporter` textfile collector (real runs only).
 
 A configuration file other than the installed one can be previewed with
@@ -115,7 +115,13 @@ path use `\xHH` escapes so a filename cannot start a new journal line.
 Listings and counts cover every supported age-cleanup rule type, including
 removed roots; overlapping configured roots do not duplicate paths. See
 [counting and metrics](status-and-logs.md) for details.
-Unset or empty leaves the usual output unchanged (default: off); any other value stops
+Set `TMPCLEANER_LIST=nul` to export the same observed disappearances as exact
+path bytes followed by NUL on stdout, without type prefixes. Each path appears
+once, including directories; ordering is unspecified. Summary and backend
+output go to stderr. Check the exit status: a failed backend can still remove
+paths and produce records, and another process's deletions can also appear.
+Preview modes keep their usual output and do not export removals.
+Unset or empty leaves the usual output unchanged (default: off); values other than `1` or `nul` stop
 the run before cleaning.
 
 For the service, run `sudo systemctl edit tmpcleaner.service` and add:

@@ -46,7 +46,8 @@ Environment variables:
   TMPCLEANER_FULL_AGE       Age duration to use when /tmp usage meets or
                             exceeds TMPCLEANER_FULL_PERCENT
   TMPCLEANER_LIST           Set to 1 to list removed paths with control bytes
-                            and backslashes escaped (default: off)
+                            and backslashes escaped, or nul for raw NUL-separated
+                            paths on stdout (real runs only; default: off)
   TMPCLEANER_METRICS        Absolute path of a *.prom file for the
                             node_exporter textfile collector (real runs only)
 EOF
@@ -231,8 +232,8 @@ fi
 conf=${TMPCLEANER_CONF:-/etc/tmpcleaner/tmpcleaner.conf}
 [ -r "$conf" ] || { echo "tmpcleaner: cannot read $conf" >&2; exit "$errstatus"; }
 case "${TMPCLEANER_LIST:-}" in
-	''|1) ;;
-	*) echo "tmpcleaner: invalid TMPCLEANER_LIST (expected 1 or empty)" >&2; exit "$errstatus" ;;
+	''|1|nul) ;;
+	*) echo "tmpcleaner: invalid TMPCLEANER_LIST (expected 1, nul or empty)" >&2; exit "$errstatus" ;;
 esac
 # Check the user's own value before pressure mode may replace it.
 if [ "${TMPCLEANER_AGE+x}" ]; then
@@ -753,7 +754,11 @@ snapshot() {
 snapshot "$scratch/before"
 
 status=0
-systemd-tmpfiles --clean "$@" - < "$scratch/rules" || status=$?
+if [ "${TMPCLEANER_LIST:-}" = nul ]; then
+	systemd-tmpfiles --clean "$@" - < "$scratch/rules" >&2 || status=$?
+else
+	systemd-tmpfiles --clean "$@" - < "$scratch/rules" || status=$?
+fi
 
 snapshot "$scratch/after"
 LC_ALL=C comm -z -23 "$scratch/before" "$scratch/after" |
@@ -774,14 +779,15 @@ LC_ALL=C comm -z -23 "$scratch/before" "$scratch/after" |
 	{
 		directory = (substr($0, 1, 1) == "d")
 		if (directory) directories++; else files++
-		if (list == 1) printf "tmpcleaner: removed%s: %s\n", directory ? " directory" : "", escaped(substr($0, 3))
+		if (list == 1) printf "tmpcleaner: removed%s: %s\n", directory ? " directory" : "", escaped(substr($0, 3)) > "/dev/stderr"
+		if (list == "nul") printf "%s%c", substr($0, 3), 0
 	}
 	END {
-		printf "tmpcleaner: removed %d files and %d directories\n", files, directories
+		printf "tmpcleaner: removed %d files and %d directories\n", files, directories > "/dev/stderr"
 		# -v would decode backslashes in the scratch path; ENVIRON keeps it raw.
 		printf "%d %d\n", files, directories > ENVIRON["COUNTS"]
 	}
-	' >&2
+	'
 if read -r files directories < "$scratch/counts" 2>/dev/null; then
 	metric_files=$files metric_directories=$directories
 fi

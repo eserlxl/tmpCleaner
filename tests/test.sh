@@ -82,7 +82,12 @@ if [ "\$*" = --cat-config ]; then
 fi
 [ -z "\${CLEAN_SHIM_MARKER:-}" ] || printf '%s\n' "\$*" >> "\$CLEAN_SHIM_MARKER"
 [ -z "\${CLEAN_SHIM_DELAY:-}" ] || sleep "\$CLEAN_SHIM_DELAY"
+[ -z "\${CLEAN_SHIM_STDOUT:-}" ] || printf '%s\n' "\$CLEAN_SHIM_STDOUT"
 [ -z "\${CLEAN_SHIM_STATUS:-}" ] || exit "\$CLEAN_SHIM_STATUS"
+if [ -n "\${CLEAN_SHIM_POST_STATUS:-}" ]; then
+	"$(command -v systemd-tmpfiles)" "\$@" || exit \$?
+	exit "\$CLEAN_SHIM_POST_STATUS"
+fi
 exec "$(command -v systemd-tmpfiles)" "\$@"
 SHIM
 cat > "$shimdir/date" <<SHIM
@@ -638,7 +643,7 @@ until [ "$(readlink "/proc/$raw_pid/cwd")" = "$raw_cwd" ] && [ "/proc/$raw_pid/f
 	sleep 0.01
 done
 status=0
-TMPDIR=$cfg/raw-tmp TMPCLEANER_CONF=$cfg/raw.conf TMPCLEANER_LIST=1 TMPCLEANER_METRICS=$cfg/raw.prom \
+TMPDIR=$cfg/raw-tmp TMPCLEANER_CONF=$cfg/raw.conf TMPCLEANER_LIST=nul TMPCLEANER_METRICS=$cfg/raw.prom \
 	CLEAN_SHIM_MARKER=$cfg/raw.clean sh "$here/tmpcleaner" --print-in-use0 > "$cfg/raw.out" 2> "$cfg/raw.err" || status=$?
 if [ "$status" -ne 0 ] || [ -s "$cfg/raw.err" ] || [ -e "$cfg/raw.prom" ] || [ -e "$cfg/raw.clean" ] ||
 	! RAW_OPEN=$raw_open RAW_CWD=$raw_cwd RAW_ROOT=$raw_root LC_ALL=C awk '
@@ -1632,6 +1637,79 @@ for scratch_name in . 'scratch[ab]' 'scratch*?' "$(printf 'scratch\001\t\nend')"
 	fi
 	rm -rf "$dir3" "$cfg/conf3"
 done
+
+# NUL removal listings preserve hostile bytes, directories and overlapping roots.
+list_root=$(mktemp -d "$dir/list-nul.XXXXXX")
+printf 'd %s - - - amM:12h\nd %s//. - - - amM:12h\n' "$list_root" "$list_root" > "$cfg/list.conf"
+touch "$list_root/held"
+old "$list_root/held"
+# shellcheck disable=SC2217 # sleep holds this file open for protection
+sleep infinity < "$list_root/held" & list_pid=$!; pids="$pids $list_pid"
+tries=0
+until [ "/proc/$list_pid/fd/0" -ef "$list_root/held" ]; do
+	tries=$((tries + 1)); [ "$tries" -lt 100 ] || { echo 'FAIL: NUL listing holder did not start'; exit 1; }
+	sleep 0.01
+done
+for list_status in 0 42; do
+	: > "$cfg/list.expected"
+	for list_name in "line${nl}end" 'back\slash' 'glob[*]?' "$(printf 'control\001\tend')"; do
+		touch "$list_root/$list_name"
+		old "$list_root/$list_name"
+		printf '%s\0' "$list_root/$list_name" >> "$cfg/list.expected"
+	done
+	mkdir "$list_root/gone-dir"
+	old "$list_root/gone-dir"
+	printf '%s\0' "$list_root/gone-dir" >> "$cfg/list.expected"
+	status=0
+	TMPDIR=$list_root TMPCLEANER_CONF=$cfg/list.conf TMPCLEANER_LIST=nul TMPCLEANER_METRICS=$cfg/list.prom \
+		CLEAN_SHIM_STDOUT=backend-output CLEAN_SHIM_POST_STATUS=$list_status sh "$here/tmpcleaner" \
+		> "$cfg/list.out" 2> "$cfg/list.err" || status=$?
+	LC_ALL=C sort -z "$cfg/list.expected" > "$cfg/list.expected-sorted"
+	LC_ALL=C sort -z "$cfg/list.out" > "$cfg/list.actual-sorted"
+	if [ "$status" -ne "$list_status" ] || ! cmp -s "$cfg/list.expected-sorted" "$cfg/list.actual-sorted" ||
+		[ "$(grep -c '^tmpcleaner: removed ' "$cfg/list.err")" -ne 1 ] ||
+		! grep -Fxq 'tmpcleaner: removed 4 files and 1 directories' "$cfg/list.err" ||
+		! grep -Fxq backend-output "$cfg/list.err" ||
+		! grep -Fxq "tmpcleaner_last_exit_status $list_status" "$cfg/list.prom" ||
+		! grep -Fxq 'tmpcleaner_removed_files 4' "$cfg/list.prom" ||
+		! grep -Fxq 'tmpcleaner_removed_directories 1' "$cfg/list.prom" ||
+		[ ! -e "$list_root/held" ] || [ -n "$(find "$list_root" -mindepth 1 ! -name held -print -quit)" ]; then
+		echo 'FAIL: NUL listings must export only exact unique disappearances and preserve backend status/metrics'
+		fail=1
+	fi
+done
+status=0
+TMPCLEANER_CONF=$cfg/list.conf TMPCLEANER_LIST=nul sh "$here/tmpcleaner" > "$cfg/list.out" 2> "$cfg/list.err" || status=$?
+if [ "$status" -ne 0 ] || [ -s "$cfg/list.out" ] ||
+	[ "$(cat "$cfg/list.err")" != 'tmpcleaner: removed 0 files and 0 directories' ]; then
+	echo 'FAIL: empty NUL listing must keep stdout empty and log one summary'
+	fail=1
+fi
+status=0
+TMPCLEANER_CONF=$cfg/list.conf TMPCLEANER_LIST=nul CAT_SHIM_FAIL=1 sh "$here/tmpcleaner" \
+	> "$cfg/list.out" 2> "$cfg/list.err" || status=$?
+if [ "$status" -ne 1 ] || [ -s "$cfg/list.out" ]; then
+	echo 'FAIL: a pre-clean failure must not export removals'
+	fail=1
+fi
+# NUL listing selection leaves previews in their normal formats and never cleans.
+for list_preview in rules dry check; do
+	case "$list_preview" in
+		rules) set -- --print-rules ;;
+		dry) set -- --dry-run ;;
+		check) set -- --check "$list_root/held" ;;
+	esac
+	status=0
+	TMPCLEANER_CONF=$cfg/list.conf TMPCLEANER_LIST=nul CLEAN_SHIM_STDOUT=backend-output sh "$here/tmpcleaner" "$@" \
+		> "$cfg/list.out" 2> "$cfg/list.err" || status=$?
+	case "$list_preview" in
+		rules) [ "$status" -eq 0 ] && grep -Fq "d $list_root " "$cfg/list.out" ;;
+		dry) [ "$status" -eq 0 ] && grep -Fxq backend-output "$cfg/list.out" ;;
+		check) [ "$status" -eq 1 ] && grep -Fxq "kept: $list_root/held" "$cfg/list.out" ;;
+	esac || { echo "FAIL: NUL listing must preserve $list_preview preview output"; fail=1; }
+done
+kill "$list_pid"; wait "$list_pid" 2>/dev/null || :
+rm -rf "$list_root"
 
 # A second run tests that the shipped age rule keeps freshly extracted files
 # (birth and ctime stay current even when atime and mtime are backdated).
