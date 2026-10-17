@@ -82,7 +82,12 @@ fi
 [ -z "\${CLEAN_SHIM_MARKER:-}" ] || printf '%s\n' "\$*" >> "\$CLEAN_SHIM_MARKER"
 exec "$(command -v systemd-tmpfiles)" "\$@"
 SHIM
-chmod +x "$shimdir/df" "$shimdir/stat" "$shimdir/find" "$shimdir/mktemp" "$shimdir/systemd-tmpfiles"
+cat > "$shimdir/date" <<SHIM
+#!/bin/sh
+[ -z "\${DATE_SHIM_FAIL:-}" ] || exit 1
+exec "$(command -v date)" "\$@"
+SHIM
+chmod +x "$shimdir/df" "$shimdir/stat" "$shimdir/find" "$shimdir/mktemp" "$shimdir/systemd-tmpfiles" "$shimdir/date"
 dfout=$shimdir/out
 catout=$shimdir/cat
 printf ' 50%%     -\n' > "$dfout"
@@ -94,6 +99,12 @@ shim() { PATH=$shimdir:$PATH "$@"; }
 setdf() { printf '%s\n' "$1" > "$dfout"; DF_SHIM_STATUS=${2:-0}; export DF_SHIM_STATUS; }
 
 old() { touch -d '13 hours ago' "$@"; }
+failure_metrics_ok() {
+	grep -Fxq 'tmpcleaner_removed_files 0' "$cfg/failure.prom" &&
+	grep -Fxq 'tmpcleaner_removed_directories 0' "$cfg/failure.prom" &&
+	grep -Fxq 'tmpcleaner_last_exit_status 1' "$cfg/failure.prom" &&
+	grep -Eq '^tmpcleaner_last_run_timestamp_seconds [1-9][0-9]*$' "$cfg/failure.prom"
+}
 mkdir -p "$dir/emptydir" "$dir/freshdir" "$dir/olddir" "$dir/.X11-unix" "$dir/systemd-private-abc/tmp" "$dir/workdir" "$dir/quoted dir"
 touch "$dir/old.txt" "$dir/new.txt" "$dir/olddir/f" "$dir/.X11-unix/X0" \
       "$dir/.X0-lock" "$dir/systemd-private-abc/tmp/f" "$dir/open a%b.txt" \
@@ -463,6 +474,15 @@ if [ "$bind_running" = 1 ]; then
 		echo "FAIL: --check without /proc should exit 2"
 		fail=1
 	fi
+	printf 'tmpcleaner_last_exit_status 0\n' > "$cfg/failure.prom"
+	status=0
+	# shellcheck disable=SC2016 # arguments are expanded by the inner sh
+	unshare -rm sh -c 'mount -t tmpfs tmpfs /proc && TMPCLEANER_CONF=$1 TMPCLEANER_METRICS=$3 sh "$2"' \
+		sh "$conf" "$here/tmpcleaner" "$cfg/failure.prom" >/dev/null 2>&1 || status=$?
+	if [ "$status" -ne 1 ] || ! failure_metrics_ok; then
+		echo 'FAIL: a real run without /proc must refresh failure metrics'
+		fail=1
+	fi
 fi
 # With TMPDIR elsewhere (as the service sets it) a full /tmp still gets cleaned.
 if [ "$bind_running" = 1 ]; then
@@ -538,9 +558,10 @@ touch "$noscratch/old"
 old "$noscratch/old"
 sed "s#$dir#$noscratch#" "$conf" > "$cfg/noscratch.conf"
 status=0
-noscratch_err=$(shim env MKTEMP_SHIM_FAIL=both TMPCLEANER_CONF="$cfg/noscratch.conf" sh "$here/tmpcleaner" 2>&1) || status=$?
+printf 'tmpcleaner_last_exit_status 0\n' > "$cfg/failure.prom"
+noscratch_err=$(shim env MKTEMP_SHIM_FAIL=both TMPCLEANER_METRICS=$cfg/failure.prom TMPCLEANER_CONF="$cfg/noscratch.conf" sh "$here/tmpcleaner" 2>&1) || status=$?
 if [ "$status" -ne 1 ] || [ ! -e "$noscratch/old" ] ||
-	! printf '%s\n' "$noscratch_err" | grep -Fq 'tmpcleaner: cannot create a scratch directory'; then
+	! printf '%s\n' "$noscratch_err" | grep -Fq 'tmpcleaner: cannot create a scratch directory' || ! failure_metrics_ok; then
 	echo "FAIL: total scratch failure should exit 1, report error, and keep old files"
 	fail=1
 fi
@@ -740,8 +761,9 @@ printf '%s' "$(cat "$failconf")" > "$failconf"
 touch "$failscratch/old.txt"; old "$failscratch/old.txt"
 for badstate in ' 50%     -|1' ' x%  y%|0'; do
 	setdf "${badstate%|*}" "${badstate#*|}"
-	status=0; shim env TMPCLEANER_FULL_PERCENT=90 TMPCLEANER_FULL_AGE=30m TMPCLEANER_CONF=$failconf sh "$here/tmpcleaner" >/dev/null 2>&1 || status=$?
-	[ "$status" = 1 ] && [ -e "$failscratch/old.txt" ] || {
+	printf 'tmpcleaner_last_exit_status 0\n' > "$cfg/failure.prom"
+	status=0; shim env TMPCLEANER_METRICS=$cfg/failure.prom TMPCLEANER_FULL_PERCENT=90 TMPCLEANER_FULL_AGE=30m TMPCLEANER_CONF=$failconf sh "$here/tmpcleaner" >/dev/null 2>&1 || status=$?
+	[ "$status" = 1 ] && [ -e "$failscratch/old.txt" ] && failure_metrics_ok || {
 		echo "FAIL: df error should abort the real run and keep old files ($badstate)"
 		fail=1
 	}
@@ -1170,9 +1192,11 @@ for scanfail in STAT_SHIM_FAIL=tmp STAT_SHIM_FAIL=cached STAT_SHIM_FAIL=verify S
 	touch "$fresh/old"
 	old "$fresh/old"
 	sed "s#$dir#$fresh#" "$conf" > "$cfg/scan.conf"
+	printf 'tmpcleaner_last_exit_status 0\n' > "$cfg/failure.prom"
+	rm -f "$cfg/failed-clean"
 	status=0
-	shim env "$scanfail" TMPCLEANER_CONF="$cfg/scan.conf" sh "$here/tmpcleaner" >/dev/null 2>&1 || status=$?
-	if [ "$status" -ne 1 ] || [ ! -e "$fresh/old" ]; then
+	shim env "$scanfail" TMPCLEANER_METRICS=$cfg/failure.prom CLEAN_SHIM_MARKER=$cfg/failed-clean TMPCLEANER_CONF="$cfg/scan.conf" sh "$here/tmpcleaner" >/dev/null 2>&1 || status=$?
+	if [ "$status" -ne 1 ] || [ ! -e "$fresh/old" ] || [ -e "$cfg/failed-clean" ] || ! failure_metrics_ok; then
 		echo "FAIL: real run should exit 1 and keep old files when the scan fails ($scanfail)"
 		fail=1
 	fi
@@ -1207,10 +1231,47 @@ for bad_metrics in relative.prom ./metrics.prom "$cfg/metrics.txt" /.prom "/tmp/
 		fail=1
 	fi
 done
-TMPCLEANER_METRICS="$cfg/metrics.prom" TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --print-rules >/dev/null
-TMPCLEANER_METRICS="$cfg/metrics.prom" TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --dry-run >/dev/null 2>&1
-if [ -e "$cfg/metrics.prom" ]; then
-	echo "FAIL: preview modes must not write TMPCLEANER_METRICS"
+# Initialized real-run failures replace stale success even before a scan starts.
+printf 'd %%T - - - 12h\n' > "$cfg/metrics-bad-root.conf"
+for earlyfail in "TMPCLEANER_CONF=$cfg/missing.conf" TMPCLEANER_AGE=bogus TMPCLEANER_LIST=bogus \
+	TMPCLEANER_FULL_PERCENT=101 TMPCLEANER_FULL_AGE=bogus "TMPCLEANER_CONF=$cfg/metrics-bad-root.conf"; do
+	printf 'tmpcleaner_last_exit_status 0\n' > "$cfg/failure.prom"
+	rm -f "$cfg/failed-clean"
+	status=0
+	shim env TMPCLEANER_CONF="$conf" TMPCLEANER_FULL_PERCENT=90 TMPCLEANER_FULL_AGE=30m "$earlyfail" \
+		TMPCLEANER_METRICS=$cfg/failure.prom CLEAN_SHIM_MARKER=$cfg/failed-clean sh "$here/tmpcleaner" >/dev/null 2>&1 || status=$?
+	if [ "$status" -ne 1 ] || [ -e "$cfg/failed-clean" ] || ! failure_metrics_ok; then
+		echo "FAIL: initialized real-run failure must refresh metrics without cleaning ($earlyfail)"
+		fail=1
+	fi
+done
+printf 'existing metrics bytes\n' > "$cfg/metrics.expected"
+for mode in --print-rules --print-in-use0 --dry-run --check; do
+	set -- "$mode"
+	[ "$mode" != --check ] || set -- --check "$dir/old.txt"
+	for previewfail in '' CAT_SHIM_FAIL=1; do
+		cp "$cfg/metrics.expected" "$cfg/metrics.prom"
+		status=0
+		# An empty value is accepted as an unset shim failure flag.
+		shim env "${previewfail:-CAT_SHIM_FAIL=}" TMPCLEANER_METRICS=$cfg/metrics.prom TMPCLEANER_CONF="$conf" \
+			sh "$here/tmpcleaner" "$@" >/dev/null 2>&1 || status=$?
+		if ! cmp -s "$cfg/metrics.expected" "$cfg/metrics.prom"; then
+			echo "FAIL: preview must preserve existing metrics ($mode $previewfail, status $status)"
+			fail=1
+		fi
+	done
+done
+status=0
+TMPCLEANER_METRICS=$cfg/metrics.prom TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --unknown >/dev/null 2>&1 || status=$?
+if [ "$status" -ne 2 ] || ! cmp -s "$cfg/metrics.expected" "$cfg/metrics.prom"; then
+	echo 'FAIL: rejected CLI usage must not write metrics'
+	fail=1
+fi
+cp "$cfg/metrics.expected" "$cfg/invalid${nl}.prom"
+status=0
+TMPCLEANER_METRICS="$cfg/invalid${nl}.prom" TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" >/dev/null 2>&1 || status=$?
+if [ "$status" -ne 1 ] || ! cmp -s "$cfg/metrics.expected" "$cfg/invalid${nl}.prom"; then
+	echo 'FAIL: an invalid metrics path must leave existing metrics untouched'
 	fail=1
 fi
 [ "$fail" = 0 ] || exit 1
@@ -1502,6 +1563,22 @@ if [ "$status" -ne 0 ] || [ "$(printf '%s\n' "$mfail_log" | wc -l)" -ne 2 ] ||
 	echo "FAIL: metrics write failure should keep exit status 0 and log one stderr line"
 	fail=1
 fi
+for writefail in destination timestamp; do
+	metric_target=$cfg/missing-dir/metrics.prom
+	[ "$writefail" != timestamp ] || metric_target=$cfg/metrics.prom
+	for cleanfail in '' CAT_SHIM_FAIL=1; do
+		status=0
+		mfail_log=$(shim env "${cleanfail:-CAT_SHIM_FAIL=}" "DATE_SHIM_FAIL=$([ "$writefail" != timestamp ] || printf 1)" \
+			TMPCLEANER_METRICS=$metric_target TMPCLEANER_CONF=$conf2 sh "$here/tmpcleaner" 2>&1 >/dev/null) || status=$?
+		expected_status=0
+		[ -z "$cleanfail" ] || expected_status=1
+		if [ "$status" -ne "$expected_status" ] ||
+			[ "$(printf '%s\n' "$mfail_log" | grep -c 'tmpcleaner: cannot write metrics')" -ne 1 ]; then
+			echo "FAIL: metrics failure must warn once and preserve original status ($writefail $cleanfail)"
+			fail=1
+		fi
+	done
+done
 
 [ -e "$dir2/extracted.txt" ] || { echo "FAIL: extracted.txt should be kept"; fail=1; }
 

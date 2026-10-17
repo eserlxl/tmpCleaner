@@ -33,6 +33,16 @@ textfile collector. Preview modes (`--dry-run`, `--print-rules`, `--print-in-use
 never touch the file, and a write failure logs one line to stderr without
 changing the run's exit status.
 
+Metrics publication is armed after CLI and metrics-path validation and preview
+classification, before scratch creation. Real runs that fail after that point
+(including configuration, pressure, scratch or in-use scan failures) replace
+stale success metrics with their nonzero exit status and zero removals when
+cleanup counts were not obtained. Successful cleanup retains its measured
+counts. Invalid CLI usage or an invalid metrics path leaves metrics untouched.
+All preview modes preserve an existing metrics file even when they fail.
+Publication uses the shell's exit handler; unhandled termination or `SIGKILL`
+can prevent that handler from running and leave the previous file in place.
+
 The service runs with `ProtectSystem=strict`, which leaves only `/tmp`
 writable, so the drop-in must also allow the collector directory
 (`sudo systemctl edit tmpcleaner.service`):

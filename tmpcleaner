@@ -115,13 +115,69 @@ if [ "${1:-}" = --check ]; then
 	esac
 fi
 
+case "${TMPCLEANER_METRICS:-}" in
+	'') ;;
+	/?*.prom)
+		case "$TMPCLEANER_METRICS" in
+			/.prom|*/.prom|*"$nl"*) echo "tmpcleaner: invalid TMPCLEANER_METRICS (expected absolute *.prom path)" >&2; exit "$errstatus" ;;
+		esac
+		;;
+	*) echo "tmpcleaner: invalid TMPCLEANER_METRICS (expected absolute *.prom path)" >&2; exit "$errstatus" ;;
+esac
+previewing=0
+case "${1:-}" in
+	--print-rules|--print-in-use0|--check) previewing=1 ;;
+	*)
+		for arg do
+			[ "$arg" = --dry-run ] && previewing=1
+		done
+		;;
+esac
+[ -z "$check" ] || previewing=1
+write_metrics() {
+	mtmp=
+	mdir=${TMPCLEANER_METRICS%/*}
+	# A metrics failure is logged, never turned into the run's exit status.
+	if now=$(date +%s 2>/dev/null) && mtmp=$(mktemp "${mdir:-/}/.tmpcleaner.XXXXXX" 2>/dev/null) && {
+		cat > "$mtmp" <<EOF && chmod a+r "$mtmp" && mv -f "$mtmp" "$TMPCLEANER_METRICS"
+# HELP tmpcleaner_removed_files Number of files removed in the last run.
+# TYPE tmpcleaner_removed_files gauge
+tmpcleaner_removed_files $metric_files
+# HELP tmpcleaner_removed_directories Number of directories removed in the last run.
+# TYPE tmpcleaner_removed_directories gauge
+tmpcleaner_removed_directories $metric_directories
+# HELP tmpcleaner_last_run_timestamp_seconds Unix timestamp of the last run completion.
+# TYPE tmpcleaner_last_run_timestamp_seconds gauge
+tmpcleaner_last_run_timestamp_seconds $now
+# HELP tmpcleaner_last_exit_status Exit status of the last run.
+# TYPE tmpcleaner_last_exit_status gauge
+tmpcleaner_last_exit_status $exit_status
+EOF
+	} 2>/dev/null; then
+		:
+	else
+		rm -f "${mtmp:-}" 2>/dev/null || :
+		echo "tmpcleaner: cannot write metrics to $TMPCLEANER_METRICS" >&2
+	fi
+}
+scratch='' metric_files=0 metric_directories=0
+finish() {
+	exit_status=$?
+	trap - EXIT
+	if [ "$previewing" = 0 ] && [ -n "${TMPCLEANER_METRICS:-}" ]; then
+		write_metrics || :
+	fi
+	[ -z "$scratch" ] || rm -rf "$scratch" || :
+	exit "$exit_status"
+}
+trap finish EXIT
+
 # A full /tmp may still hold a new directory but no data: when the default
 # location cannot store a byte, retry once in /dev/shm before aborting.
 scratch=$(mktemp -d 2>/dev/null) && { printf x > "$scratch/excludes"; } 2>/dev/null || {
 	[ -z "$scratch" ] || rm -rf "$scratch"
 	scratch=$(mktemp -d -p /dev/shm 2>/dev/null)
 } || { echo "tmpcleaner: cannot create a scratch directory" >&2; exit "$errstatus"; }
-trap 'rm -rf "$scratch"' EXIT
 printf '%s\0' "$scratch" > "$scratch/excludes"
 if [ "$#" -gt 0 ]; then
 	n=$#
@@ -158,15 +214,6 @@ case "${TMPCLEANER_LIST:-}" in
 	''|1) ;;
 	*) echo "tmpcleaner: invalid TMPCLEANER_LIST (expected 1 or empty)" >&2; exit "$errstatus" ;;
 esac
-case "${TMPCLEANER_METRICS:-}" in
-	'') ;;
-	/?*.prom)
-		case "$TMPCLEANER_METRICS" in
-			/.prom|*/.prom|*"$nl"*) echo "tmpcleaner: invalid TMPCLEANER_METRICS (expected absolute *.prom path)" >&2; exit "$errstatus" ;;
-		esac
-		;;
-	*) echo "tmpcleaner: invalid TMPCLEANER_METRICS (expected absolute *.prom path)" >&2; exit "$errstatus" ;;
-esac
 # Check the user's own value before pressure mode may replace it.
 if [ "${TMPCLEANER_AGE+x}" ]; then
 	printf '%s\0' "$TMPCLEANER_AGE" | LC_ALL=C grep -zEq '^[0-9]+(us|ms|s|m|min|h|d|w)?$' || {
@@ -174,16 +221,6 @@ if [ "${TMPCLEANER_AGE+x}" ]; then
 		exit "$errstatus"
 	}
 fi
-previewing=0
-case "${1:-}" in
-	--print-rules|--print-in-use0|--check) previewing=1 ;;
-	*)
-		for arg do
-			[ "$arg" = --dry-run ] && previewing=1
-		done
-		;;
-esac
-[ -z "$check" ] || previewing=1
 if [ "${TMPCLEANER_FULL_PERCENT+x}" ] && [ "${TMPCLEANER_FULL_AGE+x}" ]; then
 	printf '%s\0' "$TMPCLEANER_FULL_PERCENT" | LC_ALL=C grep -zEq '^([1-9][0-9]?|100)$' || {
 		echo "tmpcleaner: invalid TMPCLEANER_FULL_PERCENT: $TMPCLEANER_FULL_PERCENT" >&2
@@ -720,30 +757,7 @@ LC_ALL=C comm -z -23 "$scratch/before" "$scratch/after" |
 		printf "%d %d\n", files, directories > ENVIRON["COUNTS"]
 	}
 	' >&2
-if [ -n "${TMPCLEANER_METRICS:-}" ]; then
-	now=$(date +%s)
-	mdir=${TMPCLEANER_METRICS%/*}
-	# A metrics failure is logged, never turned into the run's exit status.
-	if read -r files directories < "$scratch/counts" 2>/dev/null && mtmp=$(mktemp "${mdir:-/}/.tmpcleaner.XXXXXX" 2>/dev/null) && {
-		cat > "$mtmp" <<EOF && chmod a+r "$mtmp" && mv -f "$mtmp" "$TMPCLEANER_METRICS"
-# HELP tmpcleaner_removed_files Number of files removed in the last run.
-# TYPE tmpcleaner_removed_files gauge
-tmpcleaner_removed_files $files
-# HELP tmpcleaner_removed_directories Number of directories removed in the last run.
-# TYPE tmpcleaner_removed_directories gauge
-tmpcleaner_removed_directories $directories
-# HELP tmpcleaner_last_run_timestamp_seconds Unix timestamp of the last run completion.
-# TYPE tmpcleaner_last_run_timestamp_seconds gauge
-tmpcleaner_last_run_timestamp_seconds $now
-# HELP tmpcleaner_last_exit_status Exit status of the last run.
-# TYPE tmpcleaner_last_exit_status gauge
-tmpcleaner_last_exit_status $status
-EOF
-	} 2>/dev/null; then
-		:
-	else
-		rm -f "${mtmp:-}" 2>/dev/null || :
-		echo "tmpcleaner: cannot write metrics to $TMPCLEANER_METRICS" >&2
-	fi
+if read -r files directories < "$scratch/counts" 2>/dev/null; then
+	metric_files=$files metric_directories=$directories
 fi
 exit "$status"
