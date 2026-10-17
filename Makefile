@@ -15,15 +15,15 @@ ifeq ($(DESTDIR),)
 endif
 
 install-conf:
-	@c=$(DESTDIR)$(CONFDIR)/tmpcleaner.conf; \
-	if [ ! -e $$c ] || cmp -s $$c $$c.default || cmp -s tmpcleaner.conf $$c; then \
-		install -Dm644 tmpcleaner.conf $$c && \
-		install -Dm644 tmpcleaner.conf $$c.default; \
+	@c="$(DESTDIR)$(CONFDIR)/tmpcleaner.conf"; \
+	if [ ! -e "$$c" ] || cmp -s "$$c" "$$c.default" || cmp -s tmpcleaner.conf "$$c"; then \
+		install -Dm644 tmpcleaner.conf "$$c" && \
+		install -Dm644 tmpcleaner.conf "$$c.default"; \
 	else \
-		install -Dm644 tmpcleaner.conf $$c.new && \
-		install -Dm644 tmpcleaner.conf $$c.default && \
+		install -Dm644 tmpcleaner.conf "$$c.new" && \
+		install -Dm644 tmpcleaner.conf "$$c.default" && \
 		echo "Notice: $$c has local changes; new defaults installed as $$c.new (please merge)" && \
-		{ diff -u $$c $$c.new || true; }; \
+		{ diff -u "$$c" "$$c.new" || true; }; \
 	fi
 
 uninstall:

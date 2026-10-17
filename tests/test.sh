@@ -1509,37 +1509,46 @@ fi
 # an admin's exclusions.
 confdir=$(mktemp -d /tmp/tmpcleaner-test.XXXXXX)
 trap 'kill $pids 2>/dev/null || :; rm -rf "$dir" "$cfg" "$dir2" "$confdir" "$bindpoint" "$detachpoint" "$sockalias"' EXIT
+confsource=$confdir/source
+confdest="$confdir/stage safe"
+confpath="$confdest/target [safe]"
+mkdir "$confsource"
+cp "$here/Makefile" "$here/tmpcleaner.conf" "$confsource"
 
-make -s -C "$here" install-conf CONFDIR="$confdir" >/dev/null
-cmp -s "$confdir/tmpcleaner.conf" "$here/tmpcleaner.conf" || {
+make -s -C "$confsource" install-conf DESTDIR="$confdest" CONFDIR='/target [safe]' >/dev/null
+cmp -s "$confpath/tmpcleaner.conf" "$here/tmpcleaner.conf" || {
 	echo "FAIL: initial install should create tmpcleaner.conf matching shipped file"
 	fail=1
 }
-cmp -s "$confdir/tmpcleaner.conf.default" "$here/tmpcleaner.conf" || {
+cmp -s "$confpath/tmpcleaner.conf.default" "$here/tmpcleaner.conf" || {
 	echo "FAIL: initial install should create tmpcleaner.conf.default matching shipped file"
 	fail=1
 }
 
-sed '$d' "$here/tmpcleaner.conf" > "$confdir/tmpcleaner.conf"
-cp "$confdir/tmpcleaner.conf" "$confdir/tmpcleaner.conf.default"
-make -s -C "$here" install-conf CONFDIR="$confdir" >/dev/null
-cmp -s "$confdir/tmpcleaner.conf" "$here/tmpcleaner.conf" || {
+sed '$d' "$here/tmpcleaner.conf" > "$confpath/tmpcleaner.conf"
+cp "$confpath/tmpcleaner.conf" "$confpath/tmpcleaner.conf.default"
+make -s -C "$confsource" install-conf DESTDIR="$confdest" CONFDIR='/target [safe]' >/dev/null
+cmp -s "$confpath/tmpcleaner.conf" "$here/tmpcleaner.conf" || {
 	echo "FAIL: unedited upgrade should update tmpcleaner.conf to shipped file"
 	fail=1
 }
-[ ! -e "$confdir/tmpcleaner.conf.new" ] || {
+[ ! -e "$confpath/tmpcleaner.conf.new" ] || {
 	echo "FAIL: unedited upgrade should not create tmpcleaner.conf.new"
 	fail=1
 }
 
-printf 'x /tmp/local-rule\n' >> "$confdir/tmpcleaner.conf"
-make -s -C "$here" install-conf CONFDIR="$confdir" >/dev/null
-grep -Fxq 'x /tmp/local-rule' "$confdir/tmpcleaner.conf" || {
+printf 'x /tmp/local-rule\n' >> "$confpath/tmpcleaner.conf"
+make -s -C "$confsource" install-conf DESTDIR="$confdest" CONFDIR='/target [safe]' >/dev/null
+grep -Fxq 'x /tmp/local-rule' "$confpath/tmpcleaner.conf" || {
 	echo "FAIL: local rule should survive reinstall"
 	fail=1
 }
-cmp -s "$confdir/tmpcleaner.conf.new" "$here/tmpcleaner.conf" || {
+cmp -s "$confpath/tmpcleaner.conf.new" "$here/tmpcleaner.conf" || {
 	echo "FAIL: edited reinstall should create tmpcleaner.conf.new matching shipped file"
+	fail=1
+}
+[ -z "$(find "$confsource" -mindepth 1 ! -name Makefile ! -name tmpcleaner.conf -print -quit)" ] || {
+	echo "FAIL: config install should not create files in the source directory"
 	fail=1
 }
 rm -rf "$confdir"
