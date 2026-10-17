@@ -318,7 +318,7 @@ in_use() {
 		}
 		# Keep the sockets on the /tmp filesystem among the quoted paths in
 		# args (one stat for many: a process per name would cost seconds).
-		function verify(args, cmd, line, saved, ok) {
+		function verify(args, cmd, line, saved, ok, status) {
 			cmd = "stat -L --cached=always --printf \"%d %i %F\\0\" -- /" args " 2>/dev/null"
 			saved = RS
 			RS = "\0"
@@ -326,9 +326,10 @@ in_use() {
 				if (!ok++) continue
 				if (split(line, id, " ") == 3 && id[1] == tmpdev && id[3] == "socket") want(id[2])
 			}
-			close(cmd)
+			status = close(cmd)
 			RS = saved
-			if (!ok) failed = 1
+			# Status 1 is routine when a target vanishes or cannot be accessed.
+			if (!ok || status < 0 || status > 1) failed = 1
 		}
 		$0 == "fail" { failed = 1; next }
 		NR % 2 && $0 == "inodes" { inodes = 1; next }
@@ -394,8 +395,8 @@ in_use() {
 				if (path == "/tmp") walked = 1
 				if (substr(line, 1, n - 1) in wanted) emit(path)
 			}
-			close(cmd)
-			if (!walked) exit 1
+			status = close(cmd)
+			if (!walked || status < 0 || status > 1) exit 1
 		}'
 }
 
