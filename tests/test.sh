@@ -1283,6 +1283,70 @@ fi
 	echo "FAIL: staged install must not call systemctl"
 	fail=1
 }
+PATH="$staged/fakes:$PATH" make -s -C "$here" uninstall DESTDIR="$staged/root" PREFIX=/usr UNITDIR=/usr/lib/systemd/system >/dev/null
+if [ -e "$staged/root/usr/bin/tmpcleaner" ] ||
+	[ -e "$staged/root/usr/lib/systemd/system/tmpcleaner.service" ] ||
+	[ -e "$staged/root/usr/lib/systemd/system/tmpcleaner.timer" ] ||
+	[ -e "$staged/root/etc/tmpcleaner" ]; then
+	echo "FAIL: staged uninstall should remove binary, units, and CONFDIR"
+	fail=1
+fi
+[ ! -e "$staged/systemctl.log" ] || {
+	echo "FAIL: staged uninstall must not call systemctl"
+	fail=1
+}
+
+# Unstaged install/uninstall (empty DESTDIR): invokes systemctl in order and
+# honors custom PREFIX, BINDIR, CONFDIR, and UNITDIR without touching source files.
+PATH="$staged/fakes:$PATH" make -s -C "$here" install \
+	PREFIX="$staged/prefix" \
+	BINDIR="$staged/bin" \
+	CONFDIR="$staged/conf" \
+	UNITDIR="$staged/units" >/dev/null
+[ -x "$staged/bin/tmpcleaner" ] || {
+	echo "FAIL: unstaged install should install executable in custom BINDIR"
+	fail=1
+}
+if ! grep -Fxq "ExecStart=$staged/bin/tmpcleaner" "$staged/units/tmpcleaner.service" ||
+	grep -Fq '/usr/local' "$staged/units/tmpcleaner.service"; then
+	echo "FAIL: unstaged install should rewrite ExecStart to custom BINDIR"
+	fail=1
+fi
+[ -f "$staged/units/tmpcleaner.timer" ] || {
+	echo "FAIL: unstaged install should install tmpcleaner.timer in custom UNITDIR"
+	fail=1
+}
+[ -f "$staged/conf/tmpcleaner.conf" ] || {
+	echo "FAIL: unstaged install should install tmpcleaner.conf in custom CONFDIR"
+	fail=1
+}
+if [ ! -f "$staged/systemctl.log" ] ||
+	[ "$(cat "$staged/systemctl.log")" != "$(printf 'daemon-reload\nenable --now tmpcleaner.timer')" ]; then
+	echo "FAIL: unstaged install should run daemon-reload then enable --now tmpcleaner.timer"
+	fail=1
+fi
+: > "$staged/systemctl.log"
+PATH="$staged/fakes:$PATH" make -s -C "$here" uninstall \
+	PREFIX="$staged/prefix" \
+	BINDIR="$staged/bin" \
+	CONFDIR="$staged/conf" \
+	UNITDIR="$staged/units" >/dev/null
+if [ -e "$staged/bin/tmpcleaner" ] ||
+	[ -e "$staged/units/tmpcleaner.service" ] ||
+	[ -e "$staged/units/tmpcleaner.timer" ] ||
+	[ -e "$staged/conf" ]; then
+	echo "FAIL: unstaged uninstall should remove binary, units, and custom CONFDIR"
+	fail=1
+fi
+if [ ! -f "$staged/systemctl.log" ] ||
+	[ "$(cat "$staged/systemctl.log")" != "$(printf 'disable --now tmpcleaner.timer\ndaemon-reload')" ]; then
+	echo "FAIL: unstaged uninstall should run disable --now tmpcleaner.timer then daemon-reload"
+	fail=1
+fi
+grep -Fxq 'ExecStart=/usr/local/bin/tmpcleaner' "$here/tmpcleaner.service" || {
+	echo "FAIL: install/uninstall must leave source tmpcleaner.service unchanged"
+	fail=1
+}
 rm -rf "$staged"
 
 [ "$fail" = 0 ] && echo "PASS"
