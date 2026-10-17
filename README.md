@@ -109,7 +109,8 @@ Targets: `preview` (dry-run to `preview.txt`), `install`, `install-conf`, `unins
 `would be removed: PATH` (exit 0) or `kept: PATH` (exit 1, only) on stdout, using the
 same age, pressure and in-use rules as a real run; when a path is kept, it also
 prints one reason line to stderr (`tmpcleaner: in use by a running process`,
-`tmpcleaner: holds an in-use path: ...`, or
+`tmpcleaner: holds an in-use path: ...`,
+`tmpcleaner: inside an in-use directory: ...`, or
 `tmpcleaner: not old enough, or kept by a configuration rule`). Every error exits 2: invalid
 paths or missing arguments, unreadable configuration, invalid `TMPCLEANER_*`
 values, missing `/proc`, a failed in-use scan, and a `systemd-tmpfiles` failure

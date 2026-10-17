@@ -671,6 +671,14 @@ if [ "$status" -ne 1 ] || [ "$check_out" != "kept: $dir/heldparent" ] || [ "$che
 	echo "FAIL: --check should explain an old directory holding an in-use file"
 	fail=1
 fi
+status=0
+check_out=$(TMPCLEANER_CONF="$conf" sh "$here/tmpcleaner" --check "$dir/workdir/f" 2>"$cfg/check.err") || status=$?
+check_err=$(cat "$cfg/check.err")
+rm -f "$cfg/check.err"
+if [ "$status" -ne 1 ] || [ "$check_out" != "kept: $dir/workdir/f" ] || [ "$check_err" != "tmpcleaner: inside an in-use directory: $dir/workdir" ]; then
+	echo "FAIL: --check should explain a file inside an in-use directory"
+	fail=1
+fi
 # The caller's systemd log settings must not hide or reshape the preview lines.
 for log_env in SYSTEMD_LOG_LEVEL=warning SYSTEMD_LOG_LEVEL=err SYSTEMD_LOG_TARGET=journal \
 	SYSTEMD_LOG_COLOR=1 SYSTEMD_LOG_LOCATION=1 SYSTEMD_LOG_TIME=1 SYSTEMD_LOG_TID=1; do
