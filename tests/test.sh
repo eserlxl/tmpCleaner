@@ -40,6 +40,8 @@ case "\${STAT_SHIM_FAIL:-}:\$*" in
 	tmp:"-c %d /tmp"|cached:*--cached=always*) exit 1 ;;
 	# Only the socket check in verify(): the in-use batch prints %n as well.
 	verify:*"%d %i %F"*) exit 1 ;;
+	# A batch cut after its sentinel, as an OOM kill would leave it.
+	killed:*"%n %F"*) "$(command -v stat)" -L --cached=always --printf '%d %i %n %F\0' -- /; kill -KILL \$\$ ;;
 esac
 exec "$(command -v stat)" "\$@"
 SHIM
@@ -47,6 +49,7 @@ cat > "$shimdir/find" <<SHIM
 #!/bin/sh
 case "\${FIND_SHIM_FAIL:-}:\$*" in
 	walk:"/tmp -xdev -printf"*) exit 1 ;;
+	killed:/proc/self/ns/mnt*) "$(command -v find)" /proc/self/ns/mnt -maxdepth 0 -type l -printf '%p\0%l\0'; kill -KILL \$\$ ;;
 esac
 exec "$(command -v find)" "\$@"
 SHIM
@@ -935,7 +938,7 @@ if [ "$status" -ne 2 ]; then
 	echo "FAIL: --check with invalid TMPCLEANER_LIST should exit 2"
 	fail=1
 fi
-for scanfail in STAT_SHIM_FAIL=tmp STAT_SHIM_FAIL=cached STAT_SHIM_FAIL=verify FIND_SHIM_FAIL=walk CAT_SHIM_FAIL=1; do
+for scanfail in STAT_SHIM_FAIL=tmp STAT_SHIM_FAIL=cached STAT_SHIM_FAIL=verify STAT_SHIM_FAIL=killed FIND_SHIM_FAIL=walk FIND_SHIM_FAIL=killed CAT_SHIM_FAIL=1; do
 	status=0
 	shim_rules=$(shim env "$scanfail" TMPCLEANER_CONF="$conf" sh "$here/tmpcleaner" --print-rules 2>/dev/null) || status=$?
 	if [ "$status" -ne 1 ] || [ -n "$shim_rules" ]; then

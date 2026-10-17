@@ -218,15 +218,21 @@ in_use() {
 	devhex=$(printf '%02x:%02x' "$(((tmpdev >> 8) & 0xfff))" "$(((tmpdev & 0xff) | ((tmpdev >> 12) & 0xfff00)))")
 	# The builtin printf expands the globs without exec, so thousands of
 	# processes never exceed ARG_MAX; xargs runs find in order on batches.
+	# xargs exits 123 when a find or stat failed on a vanished /proc entry,
+	# which is routine. 124 and up means a batch was killed or could not run,
+	# so its records may stop after the sentinel: a "fail" pair (keeping the
+	# pairing below) fails the scan.
 	{
 		printf '%s\0' /proc/[0-9]*/ns/mnt /proc/[0-9]*/root /proc/[0-9]*/ns/net |
-			LC_ALL=C xargs -0 sh -c 'printf "/\0/\0"; exec find /proc/self/ns/mnt "$@" -maxdepth 0 -type l -printf "%p\0%l\0" 2>/dev/null' sh || :
+			LC_ALL=C xargs -0 sh -c 'printf "/\0/\0"; exec find /proc/self/ns/mnt "$@" -maxdepth 0 -type l -printf "%p\0%l\0" 2>/dev/null' sh ||
+			[ "$?" -lt 124 ] || printf 'fail\0fail\0'
 		printf 'inodes\0'
 		# One stat per target; a socket fd stats as a socket with the socket
 		# inode. Cached attributes only: an fd on a hung network filesystem must
 		# not stall the run.
 		printf '%s\0' /proc/[0-9]*/root /proc/[0-9]*/exe /proc/[0-9]*/cwd /proc/[0-9]*/fd/* |
-			LC_ALL=C xargs -0 sh -c 'printf "batch\0"; exec stat -L --cached=always --printf "%d %i %n %F\0" -- / "$@" 2>/dev/null' sh || :
+			LC_ALL=C xargs -0 sh -c 'printf "batch\0"; exec stat -L --cached=always --printf "%d %i %n %F\0" -- / "$@" 2>/dev/null' sh ||
+			[ "$?" -lt 124 ] || printf 'fail\0fail\0'
 	} | LC_ALL=C awk -v tmpdev="$tmpdev" -v devhex="$devhex" '
 		BEGIN {
 			RS = "\0"
@@ -324,6 +330,7 @@ in_use() {
 			RS = saved
 			if (!ok) failed = 1
 		}
+		$0 == "fail" { failed = 1; next }
 		NR % 2 && $0 == "inodes" { inodes = 1; next }
 		inodes {
 			if ($0 == "batch") {
