@@ -60,7 +60,7 @@ disables and stops the timer when `DESTDIR` is empty.
 
 #### Makefile variables and targets
 
-Variables: `PREFIX=/usr/local`, `BINDIR=$(PREFIX)/bin`, `CONFDIR=/etc/tmpcleaner`, `UNITDIR=/etc/systemd/system`, `ENABLE_TIMER=1`, and `DESTDIR=` (staged install; skips `systemctl` calls when non-empty). `install` rewrites `ExecStart=` in the installed service to `$(BINDIR)/tmpcleaner`. `CONFDIR` does not change the wrapper's built-in default path (`/etc/tmpcleaner/tmpcleaner.conf`); if you install with a different `CONFDIR`, set `TMPCLEANER_CONF` in a service drop-in (`sudo systemctl edit tmpcleaner.service`).
+Variables: `PREFIX=/usr/local`, `BINDIR=$(PREFIX)/bin`, `CONFDIR=/etc/tmpcleaner`, `UNITDIR=/etc/systemd/system`, `ENABLE_TIMER=1`, `KEEP_CONFIG=0`, and `DESTDIR=` (staged install; skips `systemctl` calls when non-empty). `install` rewrites `ExecStart=` in the installed service to `$(BINDIR)/tmpcleaner`. `CONFDIR` does not change the wrapper's built-in default path (`/etc/tmpcleaner/tmpcleaner.conf`); if you install with a different `CONFDIR`, set `TMPCLEANER_CONF` in a service drop-in (`sudo systemctl edit tmpcleaner.service`).
 
 Quote shell arguments when setting paths containing spaces or punctuation.
 Source-install paths cannot contain newlines. `BINDIR` must be absolute and
@@ -90,7 +90,18 @@ Pacman preserves an edited `/etc/tmpcleaner/tmpcleaner.conf` as `/etc/tmpcleaner
 sudo make uninstall
 ```
 
-**Warning:** `make uninstall` deletes the whole configuration directory, including
+**Warning:** By default, `make uninstall` deletes the whole configuration directory, including
 local exclusions; back up `/etc/tmpcleaner/tmpcleaner.conf` first if you edited it.
+
+To retain the entire configuration directory, including `.default`, `.new` and
+local files or subdirectories, use:
+
+```sh
+sudo make uninstall KEEP_CONFIG=1
+```
+
+`KEEP_CONFIG` accepts only `0` or `1` (default `0`). It changes only configuration
+removal; the binary and units are still removed and the timer is stopped and
+disabled. Staged uninstall still skips service actions.
 
 If `PREFIX`, `BINDIR`, `CONFDIR`, or `UNITDIR` was customized during installation, pass the same values when uninstalling (e.g. `sudo make uninstall CONFDIR=... UNITDIR=...`).

@@ -1895,6 +1895,18 @@ if [ ! -x "$staged_dest/usr/bin/tmpcleaner" ] || [ ! -f "$staged_dest$staged_uni
 	echo 'FAIL: staged install with ENABLE_TIMER=0 must install files without service actions'
 	fail=1
 fi
+mkdir "$staged_dest/etc/tmpcleaner/local dir"
+printf 'local\000bytes\n' > "$staged_dest/etc/tmpcleaner/local dir/notes"
+printf 'pending defaults\n' > "$staged_dest/etc/tmpcleaner/tmpcleaner.conf.new"
+cp -a "$staged_dest/etc/tmpcleaner" "$staged/config.expected"
+PATH="$staged/fakes:$PATH" make -s -C "$here" uninstall KEEP_CONFIG=1 \
+	DESTDIR="$staged_dest" PREFIX=/usr UNITDIR="$staged_units" >/dev/null
+if ! diff -r "$staged/config.expected" "$staged_dest/etc/tmpcleaner" >/dev/null ||
+	[ -e "$staged_dest/usr/bin/tmpcleaner" ] || [ -e "$staged_dest$staged_units/tmpcleaner.service" ] ||
+	[ -e "$staged_dest$staged_units/tmpcleaner.timer" ] || [ -e "$staged/systemctl.log" ]; then
+	echo 'FAIL: staged KEEP_CONFIG=1 must preserve the whole config tree and remove binary/units without service actions'
+	fail=1
+fi
 
 # Invalid executable paths fail generation before installing binary or units.
 for bad_bin in "$staged/bad'quote" "$staged/bad\"quote" "$staged/bad\\slash" \
@@ -2000,9 +2012,34 @@ for invalid_timer in '' 2 yes '0 1' '1 0' 00; do
 		fail=1
 	fi
 done
+mkdir "$custom_conf/local dir"
+printf 'local\000bytes\n' > "$custom_conf/local dir/notes"
+cp -a "$custom_conf" "$staged/custom-config.expected"
+for invalid_keep in '' 2 yes '0 1' '1 0' 00; do
+	: > "$staged/systemctl.log"
+	status=0
+	PATH="$staged/fakes:$PATH" make -s -C "$here" uninstall "KEEP_CONFIG=$invalid_keep" \
+		BINDIR="$make_bin" CONFDIR="$make_conf" UNITDIR="$make_units" > "$staged/invalid-keep.log" 2>&1 || status=$?
+	if [ "$status" -eq 0 ] || [ -s "$staged/systemctl.log" ] ||
+		[ ! -x "$custom_bin/tmpcleaner" ] || [ ! -f "$custom_units/tmpcleaner.service" ] ||
+		[ ! -f "$custom_units/tmpcleaner.timer" ] || ! diff -r "$staged/custom-config.expected" "$custom_conf" >/dev/null ||
+		! grep -Fq 'KEEP_CONFIG must be 0 or 1' "$staged/invalid-keep.log"; then
+		echo 'FAIL: invalid KEEP_CONFIG must fail before any removal or service action'
+		fail=1
+	fi
+done
+: > "$staged/systemctl.log"
+PATH="$staged/fakes:$PATH" make -s -C "$here" uninstall KEEP_CONFIG=1 \
+	BINDIR="$make_bin" CONFDIR="$make_conf" UNITDIR="$make_units" >/dev/null
+if [ -e "$custom_bin/tmpcleaner" ] || [ -e "$custom_units/tmpcleaner.service" ] ||
+	[ -e "$custom_units/tmpcleaner.timer" ] || ! diff -r "$staged/custom-config.expected" "$custom_conf" >/dev/null ||
+	[ "$(cat "$staged/systemctl.log")" != "$(printf 'disable --now tmpcleaner.timer\ndaemon-reload')" ]; then
+	echo 'FAIL: unstaged KEEP_CONFIG=1 must preserve the config tree while removing binary/units and stopping the timer'
+	fail=1
+fi
 : > "$staged/systemctl.log"
 PATH="$staged/fakes:$PATH" make -s -C "$here" uninstall \
-	ENABLE_TIMER=0 \
+	ENABLE_TIMER=0 KEEP_CONFIG=0 \
 	PREFIX="$staged/prefix" \
 	BINDIR="$make_bin" \
 	CONFDIR="$make_conf" \

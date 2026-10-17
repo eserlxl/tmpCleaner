@@ -9,6 +9,12 @@ ifneq ($(ENABLE_TIMER),1)
 $(error ENABLE_TIMER must be 0 or 1)
 endif
 endif
+KEEP_CONFIG ?= 0
+ifneq ($(KEEP_CONFIG),0)
+ifneq ($(KEEP_CONFIG),1)
+$(error KEEP_CONFIG must be 0 or 1)
+endif
+endif
 define newline
 
 
@@ -55,7 +61,9 @@ ifeq ($(DESTDIR),)
 	-systemctl disable --now tmpcleaner.timer
 endif
 	rm -f -- $(call shell_quote,$(DESTDIR)$(UNITDIR)/tmpcleaner.service) $(call shell_quote,$(DESTDIR)$(UNITDIR)/tmpcleaner.timer)
+ifeq ($(KEEP_CONFIG),0)
 	rm -rf -- $(call shell_quote,$(DESTDIR)$(CONFDIR))
+endif
 	rm -f -- $(call shell_quote,$(DESTDIR)$(BINDIR)/tmpcleaner)
 ifeq ($(DESTDIR),)
 	systemctl daemon-reload
