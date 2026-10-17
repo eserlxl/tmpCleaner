@@ -1,5 +1,8 @@
 # tmpCleaner
 
+[![License: GPL v3+](https://img.shields.io/badge/License-GPLv3%2B-blue.svg)](LICENSE)
+[![AUR](https://img.shields.io/aur/version/linux-tmpcleaner)](https://aur.archlinux.org/packages/linux-tmpcleaner)
+
 Deletes entries under `/tmp` that are older than 12 hours. Runs as a systemd
 timer: 5 minutes after boot, then every 15 minutes.
 
@@ -8,304 +11,113 @@ file (`tmpcleaner.conf`), the same code your distribution already uses for
 `/tmp`. A small wrapper (`tmpcleaner`) adds one thing it lacks: protection for
 files that running programs still use.
 
-## What gets deleted
+## Contents
 
-A file is removed only when its access, birth, status-change and modification
-times are **all** older than 12 hours. So a file that was recently written or
-extracted survives. Reading alone is a weak signal: with the usual `relatime`
-mount option the access time moves at most once a day.
+- [Quick start](#quick-start)
+- [Install](#install)
+- [What gets deleted](#what-gets-deleted)
+- [Keeping files](#keeping-files)
+- [Documentation](#documentation)
+- [Development](#development)
+- [License](#license)
 
-A directory is removed when it is empty (after its old contents are gone) and
-its birth and modification times are older than 12 hours. Its access time is
-ignored, because merely listing a directory (`ls`, a `--dry-run` preview)
-renews it. A directory created less than 12 hours ago stays even when empty.
+## Quick start
 
-Previews print directories as `Would remove directory`; a preview cannot know
-that a directory will still hold a kept file, so a real run may remove fewer.
+```sh
+sudo tmpcleaner --dry-run                     # preview what a run would remove
+sudo systemctl enable --now tmpcleaner.timer  # clean every 15 minutes
+sudo tmpcleaner --check /tmp/my-job/file      # ask whether one path would be removed
+journalctl -u tmpcleaner.service              # one summary line per run
+```
 
-Never deleted:
-
-- Executables of running processes, files a running process holds open,
-  memory-mapped files such as loaded libraries, and everything inside a
-  directory a running process works in (its current directory) or uses as its
-  root directory (chrooted or containerized processes), including files and
-  directories reached through bind mounts (a process working in `/tmp` itself
-  does not keep all of `/tmp`). The in-use list is
-  taken from `/proc` just before each run (a snapshot before cleaning),
-  so files opened during a run are not covered and long-lived work belongs in
-  the exclusion list.
-- X11/ICE socket dirs and X lock files (`/tmp/.X11-unix`, `/tmp/.ICE-unix`,
-  `/tmp/.X0-lock`, ...)
-- systemd `PrivateTmp` dirs of running services (`/tmp/systemd-private-*`)
-- Kerberos ticket caches (`/tmp/krb5cc_*`)
-- Any other `/tmp` exclusion (`x` or `X` rule, except a bare `/tmp`) shipped by
-  installed packages or local overrides in `tmpfiles.d` (read from
-  `systemd-tmpfiles --cat-config`)
-- Unix sockets that are still in use (listed in `/proc/net/unix` of any
-  network namespace). Not recognized: a socket bound by a relative name in
-  another network namespace, one whose own name forges a line of that table,
-  and one whose name no process can reach any more (bound, then chrooted
-  away, by the last process of a private mount namespace).
-- Anything on a different mount below `/tmp`; symlinks are never followed
-
-Only `/tmp` is touched; `/var/tmp` keeps the distribution's defaults.
-
-## Requirements
-
-Linux with systemd (`systemd-tmpfiles`: systemd >= 249 for the service, >= 256 for `--dry-run` previews and `--check`).
-GNU coreutils >= 8.32, GNU findutils, gawk, grep, and sed.
+Every option is in the [command-line reference](docs/cli-reference.md).
 
 ## Install
 
-### Arch Linux (AUR)
+On Arch Linux, install the [`linux-tmpcleaner`](https://aur.archlinux.org/packages/linux-tmpcleaner)
+AUR package (`yay -S linux-tmpcleaner` or `paru -S linux-tmpcleaner`). The
+timer is **not** enabled automatically: preview with `sudo tmpcleaner --dry-run`,
+add exclusions if needed, then enable it as in the quick start.
 
-Install with an AUR helper (`yay -S linux-tmpcleaner` or `paru -S linux-tmpcleaner`), or build manually:
-
-```sh
-git clone https://aur.archlinux.org/linux-tmpcleaner.git && cd linux-tmpcleaner && makepkg -si
-```
-
-It conflicts with the unrelated AUR package `tmpcleaner`, which installs a command of the same name.
-The package installs `/usr/bin/tmpcleaner`, the systemd units in `/usr/lib/systemd/system`, and `/etc/tmpcleaner/tmpcleaner.conf` (tracked by pacman as a backup file so local edits survive upgrades and new defaults arrive as `.pacnew`). The timer is **not** enabled automatically; preview what would be removed, adjust `/etc/tmpcleaner/tmpcleaner.conf` if needed, then enable the timer:
-
-```sh
-sudo tmpcleaner --dry-run
-sudo systemctl enable --now tmpcleaner.timer
-```
-
-**Migrating from a source install:** remove a previous `make install` first (back up `/etc/tmpcleaner/tmpcleaner.conf`, run `sudo make uninstall`, install the package, then restore the config). Pacman refuses to overwrite untracked files, and units left in `/etc/systemd/system` would shadow the packaged ones in `/usr/lib/systemd/system`.
-
-### From source
-
-**Preview first.** On a machine that keeps work in `/tmp` (build trees,
-snapshots, long-lived tool sessions), the first run can remove a lot. Save a
-preview of what would go to `preview.txt`, without deleting:
+From a checkout, save a preview to `preview.txt`, then install; `make install`
+**enables the timer at once**:
 
 ```sh
 sudo make preview
-```
-
-Add any needed exclusions to `tmpcleaner.conf` (see [Configuration](#configuration)), then install; this copies the config to `/etc/tmpcleaner/tmpcleaner.conf`, the wrapper to `/usr/local/bin/tmpcleaner`, and enables the timer:
-
-```sh
 sudo make install
 ```
 
-`install` runs `install-conf` first: reinstalling upgrades an unedited `/etc/tmpcleaner/tmpcleaner.conf` in place, or keeps an edited config and writes new defaults to `/etc/tmpcleaner/tmpcleaner.conf.new` (using `tmpcleaner.conf.default` to compare; an install from before `.default` existed gets a `.new` once). Run `sudo make install-conf` to update the config alone.
+Linux with systemd >= 249 (>= 256 for `--dry-run` and `--check`) and GNU
+coreutils >= 8.32 are required. Requirements, Makefile variables, migrating
+from a source install to the package, and uninstalling are in
+[docs/installation.md](docs/installation.md).
 
-#### Makefile variables and targets
+> [!WARNING]
+> `sudo make uninstall` deletes the whole `/etc/tmpcleaner` directory, including
+> local exclusions; back up `/etc/tmpcleaner/tmpcleaner.conf` first if you edited it.
 
-Variables: `PREFIX=/usr/local`, `BINDIR=$(PREFIX)/bin`, `CONFDIR=/etc/tmpcleaner`, `UNITDIR=/etc/systemd/system`, and `DESTDIR=` (staged install; skips `systemctl` calls when non-empty). `install` rewrites `ExecStart=` in the installed service to `$(BINDIR)/tmpcleaner`. `CONFDIR` does not change the wrapper's built-in default path (`/etc/tmpcleaner/tmpcleaner.conf`); if you install with a different `CONFDIR`, set `TMPCLEANER_CONF` in a service drop-in (`sudo systemctl edit tmpcleaner.service`).
+## What gets deleted
 
-Targets: `preview` (dry-run to `preview.txt`), `install`, `install-conf`, `uninstall`, `test`;
-for maintainers, `srcinfo` regenerates `.SRCINFO` from `PKGBUILD` and `check-srcinfo` fails when it is stale; `lint` runs shellcheck at warning level.
+A file is removed only when its access, birth, status-change and modification
+times are **all** older than 12 hours; an empty directory goes once its birth
+and modification times are. Only `/tmp` is touched; `/var/tmp` keeps the
+distribution's defaults.
 
-## Usage
+> [!WARNING]
+> **Preview first.** On a machine that keeps work in `/tmp` (build trees,
+> snapshots, long-lived tool sessions), the first run can remove a lot. Files
+> in use are protected only by a `/proc` snapshot taken just before each run,
+> so long-lived work that is not always open belongs in the exclusion list.
 
-### Options
+Running executables, open and memory-mapped files, everything under a running
+process's current or root directory, live Unix sockets, X11/ICE sockets,
+`PrivateTmp` dirs, Kerberos caches, and other mounts below `/tmp` are never
+deleted; the full rules are in [docs/what-gets-deleted.md](docs/what-gets-deleted.md).
 
-- `-h`, `--help`: Show help and exit (exits 0 even when configuration is missing).
-- `--print-rules`: Print the configured rules and generated in-use exclusions without deleting anything (`sudo tmpcleaner --print-rules`).
-- `--check PATH`: Report whether an existing absolute `/tmp` path would be removed without deleting anything (`sudo tmpcleaner --check /tmp/my-job/file`).
-- `--dry-run`, `--prefix=PATH`, `--exclude-prefix=PATH`: `--dry-run` previews what would be removed without deleting and prints a summary (`tmpcleaner: would remove N files and M directories`) to stderr; `--prefix=PATH` only applies rules with that prefix (passed to `systemd-tmpfiles`); `--exclude-prefix=PATH` (absolute path, `=` form only; parent directories are canonicalized so `..` components and symlinked parents still match) keeps PATH and everything below it, in addition to the in-use protection, and never lets a path that is in use be removed (`sudo tmpcleaner --dry-run --exclude-prefix=/tmp/my-job`); any other argument (for example `--remove`, `--create`, `--purge`, `--boot`, `--root=...`, `--replace=...`, or a positional config file) exits 2 before any config is read or anything is cleaned.
+## Keeping files
 
-`--check PATH` requires an existing absolute path under `/tmp`. It prints
-`would be removed: PATH` (exit 0) or `kept: PATH` (exit 1, only) on stdout, using the
-same age, pressure and in-use rules as a real run; when a path is kept, it also
-prints one reason line to stderr (`tmpcleaner: in use by a running process`,
-`tmpcleaner: holds an in-use path: ...`,
-`tmpcleaner: inside an in-use directory: ...`, or
-`tmpcleaner: not old enough, or kept by a configuration rule`). Control bytes in
-these paths are printed as `?`. Every error exits 2: invalid
-paths or missing arguments, unreadable configuration, invalid `TMPCLEANER_*`
-values, missing `/proc`, a failed in-use scan, and a `systemd-tmpfiles` failure
-other than 73. Each prints a message. Exit 1 therefore always means "kept". It reads the preview's text, which a
-crafted file name can imitate, so it may raise a false "would be removed" but
-never a false "kept"; a directory holding names with newlines, or a path whose
-directories cannot be read, cannot be judged and exits 2.
-
-A failed in-use scan stops every mode before `systemd-tmpfiles` runs
-(`--print-rules` prints nothing to stdout; `--dry-run` and the real run exit
-non-zero and nothing is removed).
-
-### Status and logs
-
-```sh
-systemctl list-timers tmpcleaner.timer
-journalctl -u tmpcleaner.service
-```
-
-Each real run logs one summary, including runs that remove nothing:
-
-```text
-tmpcleaner: removed 3 files and 2 directories
-```
-
-The counts compare listings of the cleaned trees taken just before and just
-after the run, so they are exact for names of any shape; anything another
-program deletes in that second is counted too. A `d` path written with escapes
-in the configuration (`\x20`, `\"`) is not decoded for these listings, so
-removals under it are left out of the counts (cleaning is unaffected). `systemd-tmpfiles` itself logs to
-the journal as usual, so warnings keep their severity.
-
-When `TMPCLEANER_METRICS` is set to the absolute path of a `*.prom` file (for
-example `/var/lib/node_exporter/textfile_collector/tmpcleaner.prom`), each real
-run atomically writes `tmpcleaner_removed_files`,
-`tmpcleaner_removed_directories`, `tmpcleaner_last_run_timestamp_seconds`, and
-`tmpcleaner_last_exit_status` gauges for the Prometheus `node_exporter`
-textfile collector. Preview modes (`--dry-run`, `--print-rules`, `--check`)
-never touch the file, and a write failure logs one line to stderr without
-changing the run's exit status.
-
-The service runs with `ProtectSystem=strict`, which leaves only `/tmp`
-writable, so the drop-in must also allow the collector directory
-(`sudo systemctl edit tmpcleaner.service`):
-
-```ini
-[Service]
-Environment=TMPCLEANER_METRICS=/var/lib/node_exporter/textfile_collector/tmpcleaner.prom
-ReadWritePaths=/var/lib/node_exporter/textfile_collector
-```
-
-The service sets `RuntimeDirectory=tmpcleaner` and `Environment=TMPDIR=/run/tmpcleaner`
-so its scratch files live outside `/tmp` and a full `/tmp` still gets cleaned.
-For manual runs where `TMPDIR` is unset, `tmpcleaner` falls back to a private
-scratch directory under `/dev/shm` when `/tmp` is full.
-
-Change the interval with `sudo systemctl edit tmpcleaner.timer`. A run that
-takes longer than ten minutes is stopped and logged as failed; the next timer
-run starts normally.
-
-## Configuration
-
-Anything that must survive even while no program uses it goes into the
-exclusion list in `/etc/tmpcleaner/tmpcleaner.conf` (format: `man tmpfiles.d`);
-the age is set there too (`x` and `X` rules for paths under `/tmp` from the
-distribution's `tmpfiles.d` files are appended automatically via
-`systemd-tmpfiles --cat-config`, except a bare `/tmp`):
+Add an `x` rule to `/etc/tmpcleaner/tmpcleaner.conf` (format: `man tmpfiles.d`)
+for anything that must survive even while no program uses it:
 
 ```text
 x /tmp/my-long-job-*
 ```
 
-Service environment settings below go in a unit drop-in via `sudo systemctl edit tmpcleaner.service` (works for both AUR and source installs).
+Age overrides, the opt-in pressure mode (a shorter age when `/tmp` is nearly
+full, which applies to **every unprotected file**), and the other service
+settings are in [docs/configuration.md](docs/configuration.md).
 
-### Environment variables
+## Documentation
 
-- `TMPCLEANER_CONF`: Path to configuration file (default: `/etc/tmpcleaner/tmpcleaner.conf`).
-- `TMPCLEANER_AGE`: Override duration on every `d` rule (e.g. `6h`, `30m`).
-- `TMPCLEANER_FULL_PERCENT`: Threshold percentage of `/tmp` usage (1-100); the larger of block and inode usage counts (`-` is 0), and a `df` error aborts the run.
-- `TMPCLEANER_FULL_AGE`: Age duration to use when `/tmp` usage meets or exceeds `TMPCLEANER_FULL_PERCENT`.
-- `TMPCLEANER_LIST`: Set to 1 to list removed paths with control bytes and backslashes escaped (default: off).
-- `TMPCLEANER_METRICS`: Absolute path of a `*.prom` file for the `node_exporter` textfile collector (real runs only).
+**User guides**
 
-A configuration file other than the installed one can be previewed with
-`sudo env TMPCLEANER_CONF=/path/to/custom.conf tmpcleaner --dry-run`; an
-unreadable file stops the run before cleaning.
+| Document | Contents |
+|----------|----------|
+| [docs/installation.md](docs/installation.md) | Requirements, AUR and source installs, Makefile variables and targets, uninstalling |
+| [docs/what-gets-deleted.md](docs/what-gets-deleted.md) | Age rules for files and directories, and everything that is never deleted |
+| [docs/configuration.md](docs/configuration.md) | Exclusion list, environment variables, age override, pressure mode, removal listing |
+| [docs/cli-reference.md](docs/cli-reference.md) | Every option, `--check` verdicts and reasons, exit statuses |
+| [docs/status-and-logs.md](docs/status-and-logs.md) | Timer status, run summaries, Prometheus metrics, scratch space, interval |
 
-### Override the age
+**Maintainer docs**
 
-Set `TMPCLEANER_AGE` to override the duration on every `d` rule (e.g. `6h`, `30m`) while keeping
-its age-by letters and the config unchanged. Use a non-negative integer with
-an optional unit: `us`, `ms`, `s`, `m`, `min`, `h`, `d`, or `w` (seconds when
-omitted). An empty or invalid value stops the run before cleaning; when unset,
-the configured ages apply. A rule whose quoted path holds spaces keeps its
-configured age, with a warning.
+| Document | Contents |
+|----------|----------|
+| [docs/installation.md](docs/installation.md#makefile-variables-and-targets) | `srcinfo`, `check-srcinfo`, and `lint` targets |
+| [PKGBUILD](PKGBUILD) | AUR package recipe |
+| [tests/test.sh](tests/test.sh) | Test suite run by `make test` |
 
-For the service, run `sudo systemctl edit tmpcleaner.service` and add:
+## Development
 
-```ini
-[Service]
-Environment=TMPCLEANER_AGE=12h
-```
-
-Preview a one-off override without editing the config:
+The local gate runs before every push or release:
 
 ```sh
-sudo env TMPCLEANER_AGE=12h tmpcleaner --dry-run
-```
-
-### Use a shorter age when /tmp is nearly full
-
-Pressure mode is off by default. Set both `TMPCLEANER_FULL_PERCENT` (threshold
-percentage of `/tmp` usage, an integer from 1 to 100) and `TMPCLEANER_FULL_AGE`
-(age duration to use when `/tmp` usage meets or exceeds `TMPCLEANER_FULL_PERCENT`,
-in the same format as `TMPCLEANER_AGE`) to enable it. With either variable unset,
-the usual age applies. When both are set, invalid values stop the run before cleaning.
-
-Run `sudo systemctl edit tmpcleaner.service` and add, for example:
-
-```ini
-[Service]
-Environment=TMPCLEANER_FULL_PERCENT=90
-Environment=TMPCLEANER_FULL_AGE=30m
-```
-
-Each run reads `/tmp` usage with `df --output=pcent,ipcent /tmp` and uses the
-larger of the block percentage and the inode percentage, so a `/tmp` that runs
-out of inodes while block usage stays low still triggers pressure mode. A
-filesystem without inode accounting (such as btrfs) prints `-` for inodes, which
-counts as 0. At or above the threshold, it overrides every `d` rule's duration,
-including `TMPCLEANER_AGE`, and reports
-`tmpcleaner: /tmp is N% full (blocks B%, inodes I%), using age X` on stderr.
-Below the threshold, the configured age or `TMPCLEANER_AGE` applies; preview
-modes (`--print-rules`, `--check`, `--dry-run`) report
-`tmpcleaner: /tmp is N% full (blocks B%, inodes I%), below T%; keeping the configured age`
-on stderr, while a real run prints nothing extra.
-
-If `df` fails or its output cannot be parsed, tmpcleaner aborts: it prints `tmpcleaner: cannot read /tmp usage` and exits 1 (2 with `--check`) in every
-mode, and nothing is removed.
-
-**The shorter age applies to every unprotected file**, so recent temporary
-work can be deleted sooner. In-use protection and configured exclusions
-still apply.
-
-### List removed paths
-
-Set `TMPCLEANER_LIST=1` to log each path that disappeared during a real
-cleanup, in addition to the summary. Files are logged as
-`tmpcleaner: removed: PATH` and directories as
-`tmpcleaner: removed directory: PATH`. Control bytes and backslashes in each
-path use `\xHH` escapes so a filename cannot start a new journal line.
-Unset or empty leaves the usual output unchanged (default: off); any other value stops
-the run before cleaning.
-
-For the service, run `sudo systemctl edit tmpcleaner.service` and add:
-
-```ini
-[Service]
-Environment=TMPCLEANER_LIST=1
-```
-
-## Uninstall
-
-### Arch Linux (AUR)
-
-```sh
-sudo systemctl disable --now tmpcleaner.timer
-sudo pacman -R linux-tmpcleaner
-```
-
-Pacman preserves an edited `/etc/tmpcleaner/tmpcleaner.conf` as `/etc/tmpcleaner/tmpcleaner.conf.pacsave`.
-
-### From source
-
-```sh
-sudo make uninstall
-```
-
-**Warning:** `make uninstall` deletes the whole configuration directory, including
-local exclusions; back up `/etc/tmpcleaner/tmpcleaner.conf` first if you edited it.
-
-If `PREFIX`, `BINDIR`, `CONFDIR`, or `UNITDIR` was customized during installation, pass the same values when uninstalling (e.g. `sudo make uninstall CONFDIR=... UNITDIR=...`).
-
-## Test
-
-```sh
+make lint            # shellcheck at warning level
 make test
+make check-srcinfo   # fails when .SRCINFO is stale
 ```
 
-Runs the rules against a scratch directory (no root needed), including a file
+`make test` runs the rules against a scratch directory (no root needed), including a file
 held open and a directory used by a background process.
 
 ## License
