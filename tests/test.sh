@@ -1586,6 +1586,48 @@ fi
 	fail=1
 }
 
+# Spaced uninstall paths stay single operands. Run from an owned directory so
+# even the old split relative operands can only reach disposable fixtures.
+for uninstall_case in confdir destdir; do
+	uninstall_root=$(mktemp -d "$cfg/uninstall.XXXXXX")
+	uninstall_work=$uninstall_root/work
+	if [ "$uninstall_case" = confdir ]; then
+		uninstall_dest=$uninstall_root/stage
+		uninstall_conf='/target safe' uninstall_units='/units safe' uninstall_bin='/bin safe'
+		uninstall_prefix=$uninstall_dest/target
+	else
+		uninstall_dest="$uninstall_root/stage safe"
+		uninstall_conf=/target uninstall_units=/units uninstall_bin=/bin
+		uninstall_prefix=$uninstall_root/stage
+	fi
+	mkdir -p "$uninstall_dest$uninstall_conf" "$uninstall_dest$uninstall_units" "$uninstall_dest$uninstall_bin" \
+		"$uninstall_prefix" "$uninstall_work/safe/target" "$uninstall_work/safe/units" "$uninstall_work/safe/bin" "$uninstall_root/shim"
+	touch "$uninstall_dest$uninstall_conf/real.conf" "$uninstall_dest$uninstall_units/tmpcleaner.service" \
+		"$uninstall_dest$uninstall_units/tmpcleaner.timer" "$uninstall_dest$uninstall_bin/tmpcleaner" \
+		"$uninstall_prefix/unrelated" "$uninstall_work/safe/unrelated" "$uninstall_work/safe/target/unrelated" \
+		"$uninstall_work/safe/units/tmpcleaner.service" "$uninstall_work/safe/units/tmpcleaner.timer" "$uninstall_work/safe/bin/tmpcleaner"
+	cat > "$uninstall_root/shim/systemctl" <<'SHIM'
+#!/bin/sh
+: > "$UNINSTALL_SYSTEMCTL_MARKER"
+exit 1
+SHIM
+	chmod +x "$uninstall_root/shim/systemctl"
+	status=0
+	(cd "$uninstall_work" && PATH="$uninstall_root/shim:$PATH" UNINSTALL_SYSTEMCTL_MARKER=$uninstall_root/systemctl.called \
+		make -s -f "$here/Makefile" uninstall DESTDIR="$uninstall_dest" CONFDIR="$uninstall_conf" \
+		UNITDIR="$uninstall_units" BINDIR="$uninstall_bin") > "$uninstall_root/log" 2>&1 || status=$?
+	if [ "$status" -ne 0 ] || [ -e "$uninstall_dest$uninstall_conf" ] ||
+		[ -e "$uninstall_dest$uninstall_units/tmpcleaner.service" ] || [ -e "$uninstall_dest$uninstall_units/tmpcleaner.timer" ] ||
+		[ -e "$uninstall_dest$uninstall_bin/tmpcleaner" ] || [ -e "$uninstall_root/systemctl.called" ] ||
+		[ ! -e "$uninstall_prefix/unrelated" ] || [ ! -e "$uninstall_work/safe/unrelated" ] ||
+		[ ! -e "$uninstall_work/safe/target/unrelated" ] || [ ! -e "$uninstall_work/safe/units/tmpcleaner.service" ] ||
+		[ ! -e "$uninstall_work/safe/units/tmpcleaner.timer" ] || [ ! -e "$uninstall_work/safe/bin/tmpcleaner" ]; then
+		echo "FAIL: staged uninstall must preserve path boundaries and skip systemctl ($uninstall_case)"
+		fail=1
+	fi
+	rm -rf "$uninstall_root"
+done
+
 # Unstaged install/uninstall (empty DESTDIR): invokes systemctl in order and
 # honors custom PREFIX, BINDIR, CONFDIR, and UNITDIR without touching source files.
 PATH="$staged/fakes:$PATH" make -s -C "$here" install \

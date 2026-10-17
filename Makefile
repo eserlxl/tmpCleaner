@@ -30,9 +30,9 @@ uninstall:
 ifeq ($(DESTDIR),)
 	-systemctl disable --now tmpcleaner.timer
 endif
-	rm -f $(DESTDIR)$(UNITDIR)/tmpcleaner.service $(DESTDIR)$(UNITDIR)/tmpcleaner.timer
-	rm -rf $(DESTDIR)$(CONFDIR)
-	rm -f $(DESTDIR)$(BINDIR)/tmpcleaner
+	rm -f -- "$(DESTDIR)$(UNITDIR)/tmpcleaner.service" "$(DESTDIR)$(UNITDIR)/tmpcleaner.timer"
+	rm -rf -- "$(DESTDIR)$(CONFDIR)"
+	rm -f -- "$(DESTDIR)$(BINDIR)/tmpcleaner"
 ifeq ($(DESTDIR),)
 	systemctl daemon-reload
 endif
