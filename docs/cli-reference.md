@@ -44,6 +44,10 @@ Every non-`x`/`X` root must normalize under `/tmp` and resolve inside `/tmp`'s
 canonical tree. Outside roots and lexical or symlink escapes stop all modes
 before cleanup, including with `--prefix` (exit 1, or 2 with `--check`).
 `/tmp` itself must not be a symlink.
+Non-`x`/`X` roots at or below nested `/tmp` mountpoints are refused too, including
+bind mounts and missing descendants. A parent root such as `/tmp` remains valid,
+including when `/tmp` itself is a mount. Unreadable or malformed mount information
+stops every mode before cleanup.
 
 A raw inventory can be consumed without decoding tmpfiles rules, for example
 `sudo tmpcleaner --print-in-use0 | xargs -0 -r stat --`.

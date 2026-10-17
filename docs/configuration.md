@@ -22,6 +22,10 @@ symlinks leading outside `/tmp` stop every mode before cleanup; custom configs
 cannot extend the process scanner's `/tmp` protection to other directories.
 Existing `x`/`X` exclusion lines are preserved.
 `/tmp` itself must not be a symlink, matching the scanner's literal `/tmp` scope.
+Separately configured roots at or below nested `/tmp` mounts are also refused,
+including bind mounts and missing descendants. Keep cleanup on the parent
+tree, whose traversal skips nested mounts; a mount at `/tmp` itself is supported.
+Unreadable or malformed mount information stops the run before cleaning.
 
 Cleanup rule paths must be literal absolute paths, plain or simply quoted;
 `%%` represents a literal percent. Backslash encodings, other `%` specifiers,

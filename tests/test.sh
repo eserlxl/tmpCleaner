@@ -98,6 +98,13 @@ exec "$(command -v date)" "\$@"
 SHIM
 cat > "$shimdir/awk" <<SHIM
 #!/bin/sh
+case "\$1" in
+	*'getline line < "/proc/self/mountinfo"'*)
+		if [ -n "\${MOUNTINFO_SHIM_FILE:-}" ]; then
+			program=\$(printf '%s' "\$1" | sed "s@/proc/self/mountinfo@\$MOUNTINFO_SHIM_FILE@g")
+			shift; set -- "\$program" "\$@"
+		fi ;;
+esac
 case "\$*" in
 	*'elapsed = finish - start'*)
 		[ -z "\${DURATION_SHIM_MARKER:-}" ] || : > "\$DURATION_SHIM_MARKER"
@@ -1082,6 +1089,82 @@ if ! TMPCLEANER_CONF=$cfg/root-filter.conf sh "$here/tmpcleaner" --print-rules >
 fi
 rm -rf "$scope_outside" "$filter_root" "$cfg/root-filter.conf" "$cfg/filter.err" "$cfg/filter.out" "$cfg/filter.clean"
 scope_outside=
+# Nested mount roots cannot bypass the /tmp-only inode index or -xdev walk.
+cat > "$cfg/mount-roots.sh" <<'MOUNT_TEST'
+set -eu
+here=$1 dir=$2 cfg=$3
+root=$dir/mount-roots
+mkdir -p "$root/tmpfs" "$root/source" "$root/bind-dir"
+touch "$root/source/file" "$root/bind-file"
+mount --make-rprivate /
+# A mount at /tmp itself is allowed; only nested mountpoints are boundaries.
+mount --bind /tmp /tmp
+mount -t tmpfs tmpfs "$root/tmpfs"
+printf 'held\n' > "$root/tmpfs/held"
+touch -d '13 hours ago' "$root/tmpfs/held"
+exec 3< "$root/tmpfs/held"
+mount --bind "$root/source" "$root/bind-dir"
+mount --bind "$root/source/file" "$root/bind-file"
+escaped="$root/space $(printf '\t\nx')\040"
+mkdir "$escaped"
+mount -t tmpfs tmpfs "$escaped"
+ln -s "$escaped" "$root/escaped-alias"
+for path in "$root/tmpfs" "$root/tmpfs/missing/deeper" "$root/bind-dir" "$root/bind-file" "$root/escaped-alias"; do
+	printf 'd %s - - - amM:12h\n' "$path" > "$cfg/mount.conf"
+	for mode in real dry check rules raw; do
+		case "$mode" in
+			real) set -- "--prefix=$path" ;;
+			dry) set -- --dry-run ;;
+			check) set -- --check "$root/tmpfs/held" ;;
+			rules) set -- --print-rules ;;
+			raw) set -- --print-in-use0 ;;
+		esac
+		status=0
+		CLEAN_SHIM_STATUS=99 CLEAN_SHIM_MARKER=$cfg/mount.clean TMPCLEANER_CONF=$cfg/mount.conf \
+			sh "$here/tmpcleaner" "$@" > "$cfg/mount.out" 2> "$cfg/mount.err" || status=$?
+		expected=1; [ "$mode" != check ] || expected=2
+		[ "$status" -eq "$expected" ] && [ ! -s "$cfg/mount.out" ] && [ ! -e "$cfg/mount.clean" ] &&
+			grep -Fq 'cleanup root crosses a nested /tmp mount' "$cfg/mount.err" || {
+			cat "$cfg/mount.err"; echo "FAIL: nested mount root must fail before cleanup ($mode: $path)"; exit 1;
+		}
+	done
+done
+printf 'd /tmp - - - 12h\nx %s/tmpfs\n' "$root" > "$cfg/mount.conf"
+TMPCLEANER_CONF=$cfg/mount.conf sh "$here/tmpcleaner" --print-rules > "$cfg/mount.out"
+grep -Fxq "x $root/tmpfs" "$cfg/mount.out"
+[ "$(cat "$root/tmpfs/held")" = held ]
+MOUNT_TEST
+if unshare -rm true 2>/dev/null; then
+	if ! unshare -rm sh "$cfg/mount-roots.sh" "$here" "$dir" "$cfg"; then fail=1; fi
+else
+	echo 'SKIP: nested mount roots (unshare -rm is not permitted or unavailable)'
+fi
+# Mountinfo read errors, empty files and partial malformed records fail closed.
+printf 'd %s - - - 12h\n' "$dir" > "$cfg/mount.conf"
+: > "$cfg/mount.empty"
+head -n 1 /proc/self/mountinfo > "$cfg/mount.truncated"
+printf '1 2 0:1 / /tmp/truncated rw - tmpfs\n' >> "$cfg/mount.truncated"
+for mount_info in "$cfg/mount.missing" "$cfg/mount.empty" "$cfg/mount.truncated"; do
+	for mode in real dry check rules raw; do
+		case "$mode" in
+			real) set -- ;;
+			dry) set -- --dry-run ;;
+			check) set -- --check "$dir/old.txt" ;;
+			rules) set -- --print-rules ;;
+			raw) set -- --print-in-use0 ;;
+		esac
+		status=0
+		MOUNTINFO_SHIM_FILE=$mount_info CLEAN_SHIM_STATUS=99 CLEAN_SHIM_MARKER=$cfg/mount.clean \
+			TMPCLEANER_CONF=$cfg/mount.conf sh "$here/tmpcleaner" "$@" > "$cfg/mount.out" 2> "$cfg/mount.err" || status=$?
+		expected=1; [ "$mode" != check ] || expected=2
+		if [ "$status" -ne "$expected" ] || [ -s "$cfg/mount.out" ] || [ -e "$cfg/mount.clean" ] ||
+			! grep -Fq mountinfo "$cfg/mount.err"; then
+			echo "FAIL: mountinfo failure must stop $mode before cleanup ($mount_info)"
+			fail=1
+		fi
+	done
+done
+rm -rf "$dir/mount-roots"
 mkdir "$dir/heldparent"
 ln "$dir/open a%b.txt" "$dir/heldparent/open a%b.txt"
 old "$dir/heldparent"
