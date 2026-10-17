@@ -21,8 +21,9 @@ awk '$1 == "d" { gsub(/[bcBC]/, "", $6) } { print }' "$here/tmpcleaner.conf" |
 	sed "s#/tmp#$dir#" > "$conf"
 printf '%s' "$(cat "$conf")" > "$conf"
 
-# df shim: every pressure test runs with it first on PATH, so no test reads
-# the real /tmp usage. DF_SHIM_OUT holds the data line, DF_SHIM_STATUS the exit.
+# df, stat, and find shims: every pressure or scan-failure test runs with
+# $shimdir first on PATH. DF_SHIM_OUT holds the data line, DF_SHIM_STATUS the
+# exit; STAT_SHIM_FAIL and FIND_SHIM_FAIL select which scan step fails.
 cat > "$shimdir/df" <<'SHIM'
 #!/bin/sh
 [ "$*" = "--output=pcent,ipcent /tmp" ] || { echo "df shim: unexpected arguments: $*" >&2; exit 64; }
@@ -30,7 +31,21 @@ echo 'Use% IUse%'
 cat "$DF_SHIM_OUT"
 exit "${DF_SHIM_STATUS:-0}"
 SHIM
-chmod +x "$shimdir/df"
+cat > "$shimdir/stat" <<SHIM
+#!/bin/sh
+case "\${STAT_SHIM_FAIL:-}:\$*" in
+	tmp:"-c %d /tmp"|cached:*--cached=always*) exit 1 ;;
+esac
+exec "$(command -v stat)" "\$@"
+SHIM
+cat > "$shimdir/find" <<SHIM
+#!/bin/sh
+case "\${FIND_SHIM_FAIL:-}:\$*" in
+	walk:"/tmp -xdev -printf"*) exit 1 ;;
+esac
+exec "$(command -v find)" "\$@"
+SHIM
+chmod +x "$shimdir/df" "$shimdir/stat" "$shimdir/find"
 dfout=$shimdir/out
 printf ' 50%%     -\n' > "$dfout"
 export DF_SHIM_OUT=$dfout
@@ -676,28 +691,37 @@ if [ "$status" -ne 2 ]; then
 	echo "FAIL: --check with invalid TMPCLEANER_LIST should exit 2"
 	fail=1
 fi
-real=$(command -v stat)
-mkdir "$cfg/shim"
-printf '#!/bin/sh\nif [ "$*" = "-c %%d /tmp" ]; then exit 1; fi\nexec "%s" "$@"\n' "$real" > "$cfg/shim/stat"
-chmod +x "$cfg/shim/stat"
-status=0
-shim_rules=$(PATH="$cfg/shim:$PATH" TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --print-rules 2>/dev/null) || status=$?
-if [ "$status" -eq 0 ] || [ -n "$shim_rules" ]; then
-	echo "FAIL: --print-rules should fail with empty stdout when the scan fails"
-	fail=1
-fi
-if PATH="$cfg/shim:$PATH" TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --dry-run >/dev/null 2>&1; then
-	echo "FAIL: --dry-run should fail when the scan fails"
-	fail=1
-fi
-fresh=$(mktemp -d "$dir/scan.XXXXXX")
-touch "$fresh/old"
-old "$fresh/old"
-sed "s#$dir#$fresh#" "$conf" > "$cfg/scan.conf"
-if PATH="$cfg/shim:$PATH" TMPCLEANER_CONF="$cfg/scan.conf" sh "$here/tmpcleaner" >/dev/null 2>&1 || [ ! -e "$fresh/old" ]; then
-	echo "FAIL: real run should fail and keep old files when the scan fails"
-	fail=1
-fi
+for scanfail in STAT_SHIM_FAIL=tmp STAT_SHIM_FAIL=cached FIND_SHIM_FAIL=walk; do
+	status=0
+	shim_rules=$(shim env "$scanfail" TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --print-rules 2>/dev/null) || status=$?
+	if [ "$status" -ne 1 ] || [ -n "$shim_rules" ]; then
+		echo "FAIL: --print-rules should exit 1 with empty stdout when the scan fails ($scanfail)"
+		fail=1
+	fi
+	status=0
+	shim env "$scanfail" TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --dry-run >/dev/null 2>&1 || status=$?
+	if [ "$status" -ne 1 ]; then
+		echo "FAIL: --dry-run should exit 1 when the scan fails ($scanfail)"
+		fail=1
+	fi
+	fresh=$(mktemp -d "$dir/scan.XXXXXX")
+	touch "$fresh/old"
+	old "$fresh/old"
+	sed "s#$dir#$fresh#" "$conf" > "$cfg/scan.conf"
+	status=0
+	shim env "$scanfail" TMPCLEANER_CONF="$cfg/scan.conf" sh "$here/tmpcleaner" >/dev/null 2>&1 || status=$?
+	if [ "$status" -ne 1 ] || [ ! -e "$fresh/old" ]; then
+		echo "FAIL: real run should exit 1 and keep old files when the scan fails ($scanfail)"
+		fail=1
+	fi
+	rm -rf "$fresh" "$cfg/scan.conf"
+	status=0
+	shim env "$scanfail" TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --check "$dir/old.txt" >/dev/null 2>&1 || status=$?
+	if [ "$status" -ne 2 ] || [ ! -e "$dir/old.txt" ]; then
+		echo "FAIL: --check should exit 2 and keep the file when the scan fails ($scanfail)"
+		fail=1
+	fi
+done
 fresh2=$(mktemp -d "$dir/scan.XXXXXX")
 touch "$fresh2/old"
 old "$fresh2/old"
@@ -706,14 +730,7 @@ if ! TMPCLEANER_CONF="$cfg/scan2.conf" sh "$here/tmpcleaner" >/dev/null 2>&1 || 
 	echo "FAIL: positive control fixture should remove the old file when the scan succeeds"
 	fail=1
 fi
-rm -rf "$fresh" "$fresh2" "$cfg/scan.conf" "$cfg/scan2.conf"
-status=0
-PATH="$cfg/shim:$PATH" TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --check "$dir/old.txt" >/dev/null 2>&1 || status=$?
-if [ "$status" -ne 2 ] || [ ! -e "$dir/old.txt" ]; then
-	echo "FAIL: --check should exit 2 and keep the file when the scan fails"
-	fail=1
-fi
-rm -rf "$cfg/shim"
+rm -rf "$fresh2" "$cfg/scan2.conf"
 [ "$fail" = 0 ] || exit 1
 
 run_log=$(env -u LC_ALL LANG=C.UTF-8 TMPCLEANER_LIST=1 TMPCLEANER_CONF="$conf" sh "$here/tmpcleaner" 2>&1 >/dev/null)

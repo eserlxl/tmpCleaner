@@ -168,20 +168,22 @@ control_escapes=$(
 [ -e /proc/self/mountinfo ] || { echo "tmpcleaner: /proc is not available" >&2; exit "$errstatus"; }
 
 # Match targets by device and inode: link texts can outlive their bind mounts.
+# Every find and stat batch starts with a known-good target after a marker so
+# awk can distinguish a tool failure from vanished-PID errors.
 in_use() {
 	tmpdev=$(stat -c %d /tmp) || return 1
 	devhex=$(printf '%02x:%02x' "$(((tmpdev >> 8) & 0xfff))" "$(((tmpdev & 0xff) | ((tmpdev >> 12) & 0xfff00)))")
 	# The builtin printf expands the globs without exec, so thousands of
 	# processes never exceed ARG_MAX; xargs runs find in order on batches.
 	{
-		printf '%s\0' /proc/self/ns/mnt /proc/[0-9]*/ns/mnt /proc/[0-9]*/root /proc/[0-9]*/ns/net |
-			LC_ALL=C xargs -0 sh -c 'exec find "$@" -maxdepth 0 -type l -printf "%p\0%l\0" 2>/dev/null' sh || :
+		printf '%s\0' /proc/[0-9]*/ns/mnt /proc/[0-9]*/root /proc/[0-9]*/ns/net |
+			LC_ALL=C xargs -0 sh -c 'printf "/\0/\0"; exec find /proc/self/ns/mnt "$@" -maxdepth 0 -type l -printf "%p\0%l\0" 2>/dev/null' sh || :
 		printf 'inodes\0'
 		# One stat per target; a socket fd stats as a socket with the socket
 		# inode. Cached attributes only: an fd on a hung network filesystem must
 		# not stall the run.
 		printf '%s\0' /proc/[0-9]*/root /proc/[0-9]*/exe /proc/[0-9]*/cwd /proc/[0-9]*/fd/* |
-			LC_ALL=C xargs -0 sh -c 'exec stat -L --cached=always --printf "%d %i %n %F\0" -- "$@" 2>/dev/null' sh
+			LC_ALL=C xargs -0 sh -c 'printf "batch\0"; exec stat -L --cached=always --printf "%d %i %n %F\0" -- / "$@" 2>/dev/null' sh || :
 	} | LC_ALL=C awk -v tmpdev="$tmpdev" -v devhex="$devhex" '
 		BEGIN {
 			RS = "\0"
@@ -267,17 +269,31 @@ in_use() {
 		}
 		# Keep the sockets on the /tmp filesystem among the quoted paths in
 		# args (one stat for many: a process per name would cost seconds).
-		function verify(args, cmd, line, saved) {
-			cmd = "stat -L --cached=always --printf \"%d %i %F\\0\" --" args " 2>/dev/null"
+		function verify(args, cmd, line, saved, ok) {
+			cmd = "stat -L --cached=always --printf \"%d %i %F\\0\" -- /" args " 2>/dev/null"
 			saved = RS
 			RS = "\0"
-			while ((cmd | getline line) > 0)
+			while ((cmd | getline line) > 0) {
+				if (!ok++) continue
 				if (split(line, id, " ") == 3 && id[1] == tmpdev && id[3] == "socket") want(id[2])
+			}
 			close(cmd)
 			RS = saved
+			if (!ok) failed = 1
 		}
 		NR % 2 && $0 == "inodes" { inodes = 1; next }
 		inodes {
+			if ($0 == "batch") {
+				if (expect) failed = 1
+				expect = 1
+				batches++
+				next
+			}
+			if (expect) {
+				if (split($0, id, " ") < 4 || id[3] != "/") failed = 1
+				expect = 0
+				next
+			}
 			if (split($0, id, " ") < 4) next
 			if (id[1] == tmpdev) want(id[2])
 			else if ($0 ~ / socket$/ && split(id[3], parts, "/") == 5 && parts[4] == "fd") {
@@ -290,7 +306,22 @@ in_use() {
 			}
 			next
 		}
-		NR % 2 { split($0, parts, "/"); pid = parts[3]; next }
+		NR % 2 {
+			if ($0 == "/") {
+				if (expect_ns) failed = 1
+				expect_ns = 1
+				# The second marker record must not reuse the fields of the last link.
+				split("", parts)
+				next
+			}
+			if (expect_ns) {
+				if ($0 != "/proc/self/ns/mnt") failed = 1
+				expect_ns = 0
+			}
+			split($0, parts, "/")
+			pid = parts[3]
+			next
+		}
 		parts[5] == "net" { if (!($0 in netns)) netns[$0] = pid; next }
 		parts[4] == "ns" { namespace[pid] = $0; next }
 		parts[4] == "root" {
@@ -302,14 +333,19 @@ in_use() {
 		# One walk of /tmp finds every file looked up by inode; a hard link
 		# or bind alias only keeps another name of a file in use.
 		END {
+			if (failed || expect || expect_ns || !batches || !("self" in namespace)) exit 1
 			for (ns in netns) sockets(netns[ns])
+			if (failed) exit 1
 			if (!nwanted) exit
 			cmd = "find /tmp -xdev -printf \"%i %p\\0\" 2>/dev/null"
 			while ((cmd | getline line) > 0) {
 				n = index(line, " ")
-				if (substr(line, 1, n - 1) in wanted) emit(substr(line, n + 1))
+				path = substr(line, n + 1)
+				if (path == "/tmp") walked = 1
+				if (substr(line, 1, n - 1) in wanted) emit(path)
 			}
 			close(cmd)
+			if (!walked) exit 1
 		}'
 }
 
