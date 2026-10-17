@@ -38,6 +38,9 @@ Never deleted:
   `/tmp/.X0-lock`, ...)
 - systemd `PrivateTmp` dirs of running services (`/tmp/systemd-private-*`)
 - Kerberos ticket caches (`/tmp/krb5cc_*`)
+- Any other `/tmp` exclusion (`x` or `X` rule, except a bare `/tmp`) shipped by
+  installed packages or local overrides in `tmpfiles.d` (read from
+  `systemd-tmpfiles --cat-config`)
 - Unix sockets that are still in use (listed in `/proc/net/unix` of any
   network namespace). Not recognized: a socket bound by a relative name in
   another network namespace, one whose own name forges a line of that table,
@@ -151,7 +154,9 @@ run starts normally.
 
 Anything that must survive even while no program uses it goes into the
 exclusion list in `/etc/tmpcleaner/tmpcleaner.conf` (format: `man tmpfiles.d`);
-the age is set there too:
+the age is set there too (`x` and `X` rules for paths under `/tmp` from the
+distribution's `tmpfiles.d` files are appended automatically via
+`systemd-tmpfiles --cat-config`, except a bare `/tmp`):
 
 ```text
 x /tmp/my-long-job-*

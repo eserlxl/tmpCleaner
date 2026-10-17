@@ -396,6 +396,19 @@ rules() {
 		cat "$conf" || return 1
 	fi
 	echo
+	# Packages ship their own /tmp exclusions in tmpfiles.d (display-manager
+	# X auth files, PrivateTmp). Keep the lines verbatim so specifiers and X
+	# keep their meaning; skip a bare /tmp so no rule can exclude the whole tree.
+	systemd-tmpfiles --cat-config > "$scratch/cat" || return 1
+	LC_ALL=C awk '
+		$1 ~ /^[xX][!-]*$/ {
+			path = $2
+			if (path ~ /^["\047].*["\047]$/) path = substr(path, 2, length(path) - 2)
+			gsub(/\/+/, "/", path)
+			sub(/\/$/, "", path)
+			if (index(path, "/tmp/") == 1 && length(path) > 5) print
+		}
+	' "$scratch/cat" || return 1
 	# File names are untrusted (any user can hold a file open), so each must
 	# match only itself. NUL-separated, so a newline in a name cannot start a
 	# new rule. tmpfiles treats a path with * ? [ as a glob: there, escape the

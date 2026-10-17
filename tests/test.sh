@@ -21,9 +21,10 @@ awk '$1 == "d" { gsub(/[bcBC]/, "", $6) } { print }' "$here/tmpcleaner.conf" |
 	sed "s#/tmp#$dir#" > "$conf"
 printf '%s' "$(cat "$conf")" > "$conf"
 
-# df, stat, and find shims: every pressure or scan-failure test runs with
-# $shimdir first on PATH. DF_SHIM_OUT holds the data line, DF_SHIM_STATUS the
-# exit; STAT_SHIM_FAIL and FIND_SHIM_FAIL select which scan step fails.
+# df, stat, find, and systemd-tmpfiles shims: every pressure or scan-failure
+# test runs with $shimdir first on PATH. DF_SHIM_OUT holds the data line,
+# DF_SHIM_STATUS the exit; STAT_SHIM_FAIL, FIND_SHIM_FAIL, and CAT_SHIM_FAIL
+# select which scan step fails; CAT_SHIM_OUT answers --cat-config from a file.
 cat > "$shimdir/df" <<'SHIM'
 #!/bin/sh
 [ "$*" = "--output=pcent,ipcent /tmp" ] || { echo "df shim: unexpected arguments: $*" >&2; exit 64; }
@@ -45,10 +46,23 @@ case "\${FIND_SHIM_FAIL:-}:\$*" in
 esac
 exec "$(command -v find)" "\$@"
 SHIM
-chmod +x "$shimdir/df" "$shimdir/stat" "$shimdir/find"
+cat > "$shimdir/systemd-tmpfiles" <<SHIM
+#!/bin/sh
+if [ "\$*" = --cat-config ]; then
+	[ -z "\${CAT_SHIM_FAIL:-}" ] || exit 1
+	cat "\$CAT_SHIM_OUT"
+	exit 0
+fi
+exec "$(command -v systemd-tmpfiles)" "\$@"
+SHIM
+chmod +x "$shimdir/df" "$shimdir/stat" "$shimdir/find" "$shimdir/systemd-tmpfiles"
 dfout=$shimdir/out
+catout=$shimdir/cat
 printf ' 50%%     -\n' > "$dfout"
-export DF_SHIM_OUT=$dfout
+printf 'X %s/distro-*\nx /tmp\nx /tmp/\nx /var/tmp/other\n' "$dir" > "$catout"
+export DF_SHIM_OUT="$dfout" CAT_SHIM_OUT="$catout"
+PATH=$shimdir:$PATH
+export PATH
 shim() { PATH=$shimdir:$PATH "$@"; }
 setdf() { printf '%s\n' "$1" > "$dfout"; DF_SHIM_STATUS=${2:-0}; export DF_SHIM_STATUS; }
 
@@ -56,9 +70,9 @@ old() { touch -d '13 hours ago' "$@"; }
 mkdir -p "$dir/emptydir" "$dir/freshdir" "$dir/olddir" "$dir/.X11-unix" "$dir/systemd-private-abc/tmp" "$dir/workdir"
 touch "$dir/old.txt" "$dir/new.txt" "$dir/olddir/f" "$dir/.X11-unix/X0" \
       "$dir/.X0-lock" "$dir/systemd-private-abc/tmp/f" "$dir/open a%b.txt" \
-      "$dir/workdir/f" "$dir/krb5cc_1000"
+      "$dir/workdir/f" "$dir/krb5cc_1000" "$dir/distro-auth"
 old "$dir/old.txt" "$dir/olddir/f" "$dir/.X11-unix/X0" "$dir/.X0-lock" \
-    "$dir/systemd-private-abc/tmp/f" "$dir/open a%b.txt" "$dir/workdir/f" "$dir/krb5cc_1000"
+    "$dir/systemd-private-abc/tmp/f" "$dir/open a%b.txt" "$dir/workdir/f" "$dir/krb5cc_1000" "$dir/distro-auth"
 old "$dir/olddir" "$dir/.X11-unix" "$dir/systemd-private-abc/tmp" \
     "$dir/systemd-private-abc" "$dir/workdir"
 
@@ -455,10 +469,14 @@ empty_list_rules=$(TMPCLEANER_LIST='' TMPCLEANER_CONF=$conf sh "$here/tmpcleaner
 	echo "FAIL: empty TMPCLEANER_LIST should leave rules unchanged"
 	fail=1
 }
-if printf '%s\n' "$rules" | grep -Eq '^x "/tmp/*"$'; then
-	echo "FAIL: generated rules must not exclude /tmp itself"
+if printf '%s\n' "$rules" | grep -Eq '^[xX][!-]*[[:space:]]+"/tmp/*"$|^[xX][!-]*[[:space:]]+/tmp/*$|/var/tmp/other'; then
+	echo "FAIL: generated rules must not exclude /tmp itself or non-/tmp paths"
 	fail=1
 fi
+printf '%s\n' "$rules" | grep -Fxq "X $dir/distro-*" || {
+	echo "FAIL: --print-rules should import /tmp X rules from --cat-config"
+	fail=1
+}
 configured_age=$(printf '%s\n' "$rules" | grep '^d ')
 pr() { shim env TMPCLEANER_FULL_PERCENT=90 TMPCLEANER_FULL_AGE=30m TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --print-rules; }
 setdf ' 50%     -'
@@ -744,7 +762,7 @@ if [ "$status" -ne 2 ]; then
 	echo "FAIL: --check with invalid TMPCLEANER_LIST should exit 2"
 	fail=1
 fi
-for scanfail in STAT_SHIM_FAIL=tmp STAT_SHIM_FAIL=cached FIND_SHIM_FAIL=walk; do
+for scanfail in STAT_SHIM_FAIL=tmp STAT_SHIM_FAIL=cached FIND_SHIM_FAIL=walk CAT_SHIM_FAIL=1; do
 	status=0
 	shim_rules=$(shim env "$scanfail" TMPCLEANER_CONF="$conf" sh "$here/tmpcleaner" --print-rules 2>/dev/null) || status=$?
 	if [ "$status" -ne 1 ] || [ -n "$shim_rules" ]; then
@@ -883,7 +901,7 @@ gone "old${nl}<0>forged"
 kept freshdir
 kept "*"; kept "we[i]rd?"; kept "back\\slash*"; kept "new${nl}line"
 kept "c${cr}d"; kept "t${tab}b"; kept "q\"uote"
-kept new.txt; kept krb5cc_1000; kept .X11-unix/X0; kept .X0-lock; kept systemd-private-abc/tmp/f
+kept new.txt; kept krb5cc_1000; kept distro-auth; kept .X11-unix/X0; kept .X0-lock; kept systemd-private-abc/tmp/f
 kept "open a%b.txt"; kept workdir/f; kept sleep; kept libm.so.6; kept "${utf8#"$dir"/}"
 if [ "$sock_running" = 1 ]; then
 	kept sock; kept "${nlsock#"$dir"/}"; kept sockdir/s; kept dotsock; gone victim/f
