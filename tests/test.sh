@@ -766,6 +766,45 @@ if [ "$status" -ne 1 ] || [ "$check_out" != "kept: $dir/workdir/f" ] || [ "$chec
 	echo "FAIL: --check should explain a file inside an in-use directory"
 	fail=1
 fi
+# Control bytes in held children and in-use ancestors are replaced with "?" on stderr.
+ctrl_name=$(printf 'c\001\t\r\033\177z')
+mkdir "$dir/ctrlparent" "$dir/$ctrl_name"
+touch "$dir/ctrlparent/$ctrl_name" "$dir/$ctrl_name/f"
+old "$dir/ctrlparent/$ctrl_name" "$dir/ctrlparent" "$dir/$ctrl_name/f" "$dir/$ctrl_name"
+# shellcheck disable=SC2217 # sleep only holds the control-byte file open for --check
+sleep 60 < "$dir/ctrlparent/$ctrl_name" &
+ctrl_fd_pid=$!
+pids="$pids $ctrl_fd_pid"
+(cd "$dir/$ctrl_name" && exec sleep 60) &
+ctrl_cwd_pid=$!
+pids="$pids $ctrl_cwd_pid"
+waited=0
+until [ "$(readlink "/proc/$ctrl_fd_pid/fd/0" 2>/dev/null)" = "$dir/ctrlparent/$ctrl_name" ] && \
+      [ "$(readlink "/proc/$ctrl_cwd_pid/cwd" 2>/dev/null)" = "$dir/$ctrl_name" ]; do
+	if [ "$waited" -ge 100 ]; then
+		echo "FAIL: timed out waiting for control-byte holders"
+		exit 1
+	fi
+	waited=$((waited + 1))
+	sleep 0.1
+done
+status=0
+check_out=$(TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --check "$dir/ctrlparent" 2>"$cfg/check.err") || status=$?
+check_err=$(cat "$cfg/check.err")
+if [ "$status" -ne 1 ] || [ "$check_out" != "kept: $dir/ctrlparent" ] || [ "$check_err" != "tmpcleaner: holds an in-use path: $dir/ctrlparent/c?????z" ]; then
+	echo "FAIL: --check should sanitize control bytes in a held child path"
+	fail=1
+fi
+status=0
+check_out=$(TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --check "$dir/$ctrl_name/f" 2>"$cfg/check.err") || status=$?
+check_err=$(cat "$cfg/check.err")
+if [ "$status" -ne 1 ] || [ "$check_out" != "kept: $dir/$ctrl_name/f" ] || [ "$check_err" != "tmpcleaner: inside an in-use directory: $dir/c?????z" ]; then
+	echo "FAIL: --check should sanitize control bytes in an in-use ancestor directory"
+	fail=1
+fi
+kill "$ctrl_fd_pid" "$ctrl_cwd_pid" 2>/dev/null || :
+wait "$ctrl_fd_pid" "$ctrl_cwd_pid" 2>/dev/null || :
+rm -rf "$dir/ctrlparent" "$dir/${ctrl_name:?}" "$cfg/check.err"
 # The caller's systemd log settings must not hide or reshape the preview lines.
 plain_summary=$(TMPCLEANER_CONF="$conf" sh "$here/tmpcleaner" --dry-run 2>&1 | grep '^tmpcleaner: would remove') || :
 for log_env in SYSTEMD_LOG_LEVEL=warning SYSTEMD_LOG_LEVEL=err SYSTEMD_LOG_TARGET=journal \
