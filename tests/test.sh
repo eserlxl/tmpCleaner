@@ -708,12 +708,18 @@ if [ "$status" -ne 1 ] || [ "$check_out" != "kept: $dir/workdir/f" ] || [ "$chec
 	fail=1
 fi
 # The caller's systemd log settings must not hide or reshape the preview lines.
+plain_summary=$(TMPCLEANER_CONF="$conf" sh "$here/tmpcleaner" --dry-run 2>&1 | grep '^tmpcleaner: would remove') || :
 for log_env in SYSTEMD_LOG_LEVEL=warning SYSTEMD_LOG_LEVEL=err SYSTEMD_LOG_TARGET=journal \
 	SYSTEMD_LOG_COLOR=1 SYSTEMD_LOG_LOCATION=1 SYSTEMD_LOG_TIME=1 SYSTEMD_LOG_TID=1; do
 	status=0
 	check_out=$(env "$log_env" TMPCLEANER_CONF="$conf" sh "$here/tmpcleaner" --check "$dir/old.txt") || status=$?
 	if [ "$status" -ne 0 ] || [ "$check_out" != "would be removed: $dir/old.txt" ]; then
 		echo "FAIL: --check should ignore $log_env"
+		fail=1
+	fi
+	dry_summary=$(env "$log_env" TMPCLEANER_CONF="$conf" sh "$here/tmpcleaner" --dry-run 2>&1 | grep '^tmpcleaner: would remove') || :
+	if [ "$dry_summary" != "$plain_summary" ]; then
+		echo "FAIL: --dry-run summary should ignore $log_env"
 		fail=1
 	fi
 done

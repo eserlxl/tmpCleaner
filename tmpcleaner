@@ -544,7 +544,10 @@ for arg do
 	if [ "$arg" = --dry-run ]; then
 		generate_rules
 		status=0
-		systemd-tmpfiles --clean "$@" - < "$scratch/rules" 2> "$scratch/stderr" || status=$?
+		# The summary reads info-level lines verbatim, as the --check preview does.
+		SYSTEMD_LOG_LEVEL=info SYSTEMD_LOG_TARGET=console SYSTEMD_LOG_COLOR=0 \
+			SYSTEMD_LOG_LOCATION=0 SYSTEMD_LOG_TIME=0 SYSTEMD_LOG_TID=0 \
+			systemd-tmpfiles --clean "$@" - < "$scratch/rules" 2> "$scratch/stderr" || status=$?
 		cat "$scratch/stderr" >&2
 		# Preview lines are text a crafted name could inflate, so the count is an
 		# estimate, like the --check preview parser.
