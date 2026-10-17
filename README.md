@@ -155,6 +155,16 @@ textfile collector. Preview modes (`--dry-run`, `--print-rules`, `--check`)
 never touch the file, and a write failure logs one line to stderr without
 changing the run's exit status.
 
+The service runs with `ProtectSystem=strict`, which leaves only `/tmp`
+writable, so the drop-in must also allow the collector directory
+(`sudo systemctl edit tmpcleaner.service`):
+
+```ini
+[Service]
+Environment=TMPCLEANER_METRICS=/var/lib/node_exporter/textfile_collector/tmpcleaner.prom
+ReadWritePaths=/var/lib/node_exporter/textfile_collector
+```
+
 Change the interval with `sudo systemctl edit tmpcleaner.timer`. A run that
 takes longer than ten minutes is stopped and logged as failed; the next timer
 run starts normally.
