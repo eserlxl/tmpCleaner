@@ -216,6 +216,33 @@ else
 	echo "SKIP: chrooted socket protection (python3 or unshare -rmn is unavailable)"
 fi
 
+# Host-namespace sockets cover quote() on "'" and the 200-path verify() batch
+# plus remainder even when unshare -rmn is refused.
+python3 -c '
+import socket, sys, time
+root = sys.argv[1]
+paths = [f"{root}/s\x271"] + [f"{root}/b{i}" for i in range(1, 206)]
+socks = []
+for path in paths:
+    sock = socket.socket(socket.AF_UNIX)
+    sock.bind(path)
+    sock.listen()
+    socks.append(sock)
+time.sleep(60)
+' "$dir" &
+sockbatch_pid=$!
+pids="$pids $sockbatch_pid"
+waited=0
+until [ -S "$dir/s'1" ] && [ -S "$dir/b205" ]; do
+	if [ "$waited" -ge 100 ]; then
+		echo "FAIL: timed out waiting for the host-namespace socket batch"
+		exit 1
+	fi
+	waited=$((waited + 1))
+	sleep 0.1
+done
+touch -h -d '13 hours ago' "$dir/s'1" "$dir"/b[0-9]*
+
 # A name holding an invalid UTF-8 byte and a space, held open: under a UTF-8
 # locale the escaping must still quote all of it (the run below uses one).
 utf8="$dir/u$(printf '\377') x"
@@ -608,6 +635,11 @@ printf '%s\n' "$rules" | grep -Fxq "x \"$dir/open a%%b.txt\"" || {
 	echo "FAIL: printed rules should exclude the held file"
 	fail=1
 }
+if ! printf '%s\n' "$rules" | grep -Fxq "x \"$dir/s'1\"" ||
+	! printf '%s\n' "$rules" | grep -Fxq "x \"$dir/b205\""; then
+	echo "FAIL: printed rules should exclude the single-quoted socket and a socket past the 200-path flush"
+	fail=1
+fi
 [ -e "$dir/old.txt" ] || {
 	echo "FAIL: printing rules should keep old.txt"
 	fail=1
@@ -994,6 +1026,7 @@ fi
 if [ "$chrootsock_running" = 1 ]; then
 	kept chrootsock
 fi
+kept "s'1"; kept b1; kept b200; kept b205
 if [ "$detached_running" = 1 ]; then
 	kept detached/f
 fi
