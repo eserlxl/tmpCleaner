@@ -80,14 +80,26 @@ if [ "\$*" = --cat-config ]; then
 	exit 0
 fi
 [ -z "\${CLEAN_SHIM_MARKER:-}" ] || printf '%s\n' "\$*" >> "\$CLEAN_SHIM_MARKER"
+[ -z "\${CLEAN_SHIM_DELAY:-}" ] || sleep "\$CLEAN_SHIM_DELAY"
+[ -z "\${CLEAN_SHIM_STATUS:-}" ] || exit "\$CLEAN_SHIM_STATUS"
 exec "$(command -v systemd-tmpfiles)" "\$@"
 SHIM
 cat > "$shimdir/date" <<SHIM
 #!/bin/sh
 [ -z "\${DATE_SHIM_FAIL:-}" ] || exit 1
+[ -z "\${DATE_SHIM_VALUE:-}" ] || { printf '%s\n' "\$DATE_SHIM_VALUE"; exit 0; }
 exec "$(command -v date)" "\$@"
 SHIM
-chmod +x "$shimdir/df" "$shimdir/stat" "$shimdir/find" "$shimdir/mktemp" "$shimdir/systemd-tmpfiles" "$shimdir/date"
+cat > "$shimdir/awk" <<SHIM
+#!/bin/sh
+case "\$*" in
+	*'elapsed = finish - start'*)
+		[ -z "\${DURATION_SHIM_MARKER:-}" ] || : > "\$DURATION_SHIM_MARKER"
+		[ -z "\${DURATION_SHIM_FAIL:-}" ] || exit 1 ;;
+esac
+exec "$(command -v awk)" "\$@"
+SHIM
+chmod +x "$shimdir/df" "$shimdir/stat" "$shimdir/find" "$shimdir/mktemp" "$shimdir/systemd-tmpfiles" "$shimdir/date" "$shimdir/awk"
 dfout=$shimdir/out
 catout=$shimdir/cat
 printf ' 50%%     -\n' > "$dfout"
@@ -104,6 +116,7 @@ failure_metrics_ok() {
 	grep -Fxq 'tmpcleaner_removed_directories 0' "$cfg/failure.prom" &&
 	grep -Fxq 'tmpcleaner_last_exit_status 1' "$cfg/failure.prom" &&
 	grep -Fxq "tmpcleaner_pressure_mode_active ${1:-0}" "$cfg/failure.prom" &&
+	grep -Eq '^tmpcleaner_last_run_duration_seconds (NaN|[0-9]+[.][0-9][0-9])$' "$cfg/failure.prom" &&
 	grep -Eq '^tmpcleaner_last_run_timestamp_seconds [1-9][0-9]*$' "$cfg/failure.prom"
 }
 mkdir -p "$dir/emptydir" "$dir/freshdir" "$dir/olddir" "$dir/.X11-unix" "$dir/systemd-private-abc/tmp" "$dir/workdir" "$dir/quoted dir"
@@ -1266,12 +1279,13 @@ for mode in --print-rules --print-in-use0 --dry-run --check; do
 	[ "$mode" != --check ] || set -- --check "$dir/old.txt"
 	for previewfail in '' CAT_SHIM_FAIL=1; do
 		cp "$cfg/metrics.expected" "$cfg/metrics.prom"
+		rm -f "$cfg/duration.called"
 		status=0
 		# An empty value is accepted as an unset shim failure flag.
 		shim env "${previewfail:-CAT_SHIM_FAIL=}" TMPCLEANER_FULL_PERCENT=50 TMPCLEANER_FULL_AGE=30m \
-			TMPCLEANER_METRICS=$cfg/metrics.prom TMPCLEANER_CONF="$conf" \
+			DURATION_SHIM_MARKER=$cfg/duration.called TMPCLEANER_METRICS=$cfg/metrics.prom TMPCLEANER_CONF="$conf" \
 			sh "$here/tmpcleaner" "$@" >/dev/null 2>&1 || status=$?
-		if ! cmp -s "$cfg/metrics.expected" "$cfg/metrics.prom"; then
+		if ! cmp -s "$cfg/metrics.expected" "$cfg/metrics.prom" || [ -e "$cfg/duration.called" ]; then
 			echo "FAIL: preview must preserve existing metrics ($mode $previewfail, status $status)"
 			fail=1
 		fi
@@ -1290,6 +1304,42 @@ if [ "$status" -ne 1 ] || ! cmp -s "$cfg/metrics.expected" "$cfg/invalid${nl}.pr
 	echo 'FAIL: an invalid metrics path must leave existing metrics untouched'
 	fail=1
 fi
+# Uptime duration covers the delayed backend even with frozen/reversed date
+# values, and preserves both successful and failed cleanup statuses.
+mkdir "$dir/duration"
+printf 'd %s/duration - - - amM:12h\n' "$dir" > "$cfg/duration.conf"
+for duration_case in 2000000000:0 2000000000:0 1000000000:42; do
+	status=0
+	shim env DATE_SHIM_VALUE=${duration_case%:*} CLEAN_SHIM_DELAY=0.2 CLEAN_SHIM_STATUS=${duration_case#*:} \
+		TMPCLEANER_CONF=$cfg/duration.conf TMPCLEANER_METRICS=$cfg/duration.prom \
+		sh "$here/tmpcleaner" >/dev/null 2> "$cfg/duration.err" || status=$?
+	if [ "$status" -ne "${duration_case#*:}" ] ||
+		! grep -Fxq "tmpcleaner_last_run_timestamp_seconds ${duration_case%:*}" "$cfg/duration.prom" ||
+		! grep -Fxq "tmpcleaner_last_exit_status ${duration_case#*:}" "$cfg/duration.prom" ||
+		! LC_ALL=C awk '$1 == "tmpcleaner_last_run_duration_seconds" { found++; if ($2 !~ /^[0-9]+[.][0-9][0-9]$/ || $2 + 0 < 0.20) exit 1 } END { if (found != 1) exit 1 }' "$cfg/duration.prom"; then
+		echo 'FAIL: run duration must cover backend delay independently of wall-clock changes'
+		fail=1
+	fi
+done
+status=0
+shim env DURATION_SHIM_FAIL=1 CLEAN_SHIM_STATUS=42 TMPCLEANER_CONF=$cfg/duration.conf TMPCLEANER_METRICS=$cfg/duration.prom \
+	sh "$here/tmpcleaner" >/dev/null 2> "$cfg/duration.err" || status=$?
+if [ "$status" -ne 42 ] || ! grep -Fxq 'tmpcleaner_last_run_duration_seconds NaN' "$cfg/duration.prom" ||
+	! grep -Fxq 'tmpcleaner_last_exit_status 42' "$cfg/duration.prom" ||
+	! grep -Fxq 'tmpcleaner_removed_files 0' "$cfg/duration.prom" ||
+	! grep -Fxq 'tmpcleaner_removed_directories 0' "$cfg/duration.prom" ||
+	grep -Fq 'cannot write metrics' "$cfg/duration.err"; then
+	echo 'FAIL: duration calculation failure must retain other gauges and status without a warning'
+	fail=1
+fi
+rm -f "$cfg/duration.called"
+shim env DURATION_SHIM_MARKER=$cfg/duration.called CLEAN_SHIM_STATUS=0 TMPCLEANER_CONF=$cfg/duration.conf \
+	sh "$here/tmpcleaner" >/dev/null 2>&1
+if [ -e "$cfg/duration.called" ]; then
+	echo 'FAIL: metrics-disabled run must not invoke the duration calculation'
+	fail=1
+fi
+rm -rf "$dir/duration"
 [ "$fail" = 0 ] || exit 1
 
 run_log=$(env -u LC_ALL LANG=C.UTF-8 TMPCLEANER_LIST=1 TMPCLEANER_METRICS="$cfg/metrics.prom" TMPCLEANER_CONF="$conf" sh "$here/tmpcleaner" 2>&1 >/dev/null)
@@ -1311,7 +1361,10 @@ if ! { [ -f "$cfg/metrics.prom" ] &&
 	grep -Fxq 'tmpcleaner_last_exit_status 0' "$cfg/metrics.prom" &&
 	grep -Fxq '# HELP tmpcleaner_pressure_mode_active Whether the pressure age override was selected in the last run.' "$cfg/metrics.prom" &&
 	grep -Fxq '# TYPE tmpcleaner_pressure_mode_active gauge' "$cfg/metrics.prom" &&
-	grep -Fxq 'tmpcleaner_pressure_mode_active 0' "$cfg/metrics.prom"; }; then
+	grep -Fxq 'tmpcleaner_pressure_mode_active 0' "$cfg/metrics.prom" &&
+	grep -Fxq '# HELP tmpcleaner_last_run_duration_seconds Elapsed seconds from metrics initialization to publication.' "$cfg/metrics.prom" &&
+	grep -Fxq '# TYPE tmpcleaner_last_run_duration_seconds gauge' "$cfg/metrics.prom" &&
+	grep -Eq '^tmpcleaner_last_run_duration_seconds [0-9]+[.][0-9][0-9]$' "$cfg/metrics.prom"; }; then
 	echo "FAIL: real run should write all gauges matching the summary counts and pressure decision"
 	fail=1
 fi

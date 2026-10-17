@@ -28,7 +28,8 @@ When `TMPCLEANER_METRICS` is set to the absolute path of a `*.prom` file (for
 example `/var/lib/node_exporter/textfile_collector/tmpcleaner.prom`), each real
 run atomically writes `tmpcleaner_removed_files`,
 `tmpcleaner_removed_directories`, `tmpcleaner_last_run_timestamp_seconds`,
-`tmpcleaner_last_exit_status`, and `tmpcleaner_pressure_mode_active` gauges for the Prometheus `node_exporter`
+`tmpcleaner_last_exit_status`, `tmpcleaner_pressure_mode_active`, and
+`tmpcleaner_last_run_duration_seconds` gauges for the Prometheus `node_exporter`
 textfile collector. Preview modes (`--dry-run`, `--print-rules`, `--print-in-use0`, `--check`)
 never touch the file, and a write failure logs one line to stderr without
 changing the run's exit status.
@@ -37,6 +38,14 @@ changing the run's exit status.
 override, including when a later step failed. It is `0` when no override was
 selected, including disabled pressure mode and failures before that decision.
 This records the decision, not whether any paths were removed.
+
+`tmpcleaner_last_run_duration_seconds` uses `/proc/uptime` to measure elapsed
+time from metrics initialization to publication, including failed attempts.
+It excludes writing the metrics file and scratch teardown. Values have two
+decimal places and are independent of wall-clock changes; unavailable or
+invalid timing produces `NaN` while other gauges are still published.
+Previews and runs without metrics do not sample duration. This interval does
+not exactly match the service's `TimeoutStartSec` interval.
 
 Metrics publication is armed after CLI and metrics-path validation and preview
 classification, before scratch creation. Real runs that fail after that point

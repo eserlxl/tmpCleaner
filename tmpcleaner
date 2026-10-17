@@ -136,6 +136,16 @@ esac
 [ -z "$check" ] || previewing=1
 write_metrics() {
 	mtmp=
+	metric_duration=$(START=$metric_started LC_ALL=C awk '
+		NR == 1 { finish = $1 }
+		END {
+			start = ENVIRON["START"]
+			if (NR != 1 || start !~ /^[0-9]+([.][0-9]+)?$/ || finish !~ /^[0-9]+([.][0-9]+)?$/ || finish + 0 < start + 0) exit 1
+			elapsed = finish - start
+			formatted = sprintf("%.2f", elapsed)
+			if (formatted !~ /^[0-9]+[.][0-9][0-9]$/) exit 1
+			print formatted
+		}' /proc/uptime 2>/dev/null) || metric_duration=NaN
 	mdir=${TMPCLEANER_METRICS%/*}
 	# A metrics failure is logged, never turned into the run's exit status.
 	if now=$(date +%s 2>/dev/null) && mtmp=$(mktemp "${mdir:-/}/.tmpcleaner.XXXXXX" 2>/dev/null) && {
@@ -155,6 +165,9 @@ tmpcleaner_last_exit_status $exit_status
 # HELP tmpcleaner_pressure_mode_active Whether the pressure age override was selected in the last run.
 # TYPE tmpcleaner_pressure_mode_active gauge
 tmpcleaner_pressure_mode_active $metric_pressure_active
+# HELP tmpcleaner_last_run_duration_seconds Elapsed seconds from metrics initialization to publication.
+# TYPE tmpcleaner_last_run_duration_seconds gauge
+tmpcleaner_last_run_duration_seconds $metric_duration
 EOF
 	} 2>/dev/null; then
 		:
@@ -174,6 +187,10 @@ finish() {
 	exit "$exit_status"
 }
 trap finish EXIT
+metric_started=
+if [ "$previewing" = 0 ] && [ -n "${TMPCLEANER_METRICS:-}" ]; then
+	read -r metric_started _ 2>/dev/null < /proc/uptime || metric_started=
+fi
 
 # A full /tmp may still hold a new directory but no data: when the default
 # location cannot store a byte, retry once in /dev/shm before aborting.
