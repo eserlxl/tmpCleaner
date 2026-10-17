@@ -6,6 +6,7 @@ Every `tmpcleaner` option, what `--check` reports, and its exit statuses.
 
 - `-h`, `--help`: Show help and exit (exits 0 even when configuration is missing).
 - `--print-rules`: Print the configured rules and generated in-use exclusions without deleting anything (`sudo tmpcleaner --print-rules`).
+- `--print-in-use0`: Export unique in-use `/tmp` paths, byte-sorted in the C locale and terminated by NUL, preserving filename bytes. This standalone option rejects every extra argument (exit 2).
 - `--check PATH`: Report whether an existing absolute `/tmp` path would be removed without deleting anything (`sudo tmpcleaner --check /tmp/my-job/file`).
 - `--dry-run`, `--prefix=PATH`, `--exclude-prefix=PATH`: `--dry-run` previews what would be removed without deleting and prints a summary (`tmpcleaner: would remove N files and M directories`) to stderr; `--prefix=PATH` only applies rules with that prefix (passed to `systemd-tmpfiles`); `--exclude-prefix=PATH` (absolute path, `=` form only; parent directories are canonicalized so `..` components and symlinked parents still match) keeps PATH and everything below it, in addition to the in-use protection, and never lets a path that is in use be removed (`sudo tmpcleaner --dry-run --exclude-prefix=/tmp/my-job`); any other argument (for example `--remove`, `--create`, `--purge`, `--boot`, `--root=...`, `--replace=...`, or a positional config file) exits 2 before any config is read or anything is cleaned.
 
@@ -40,6 +41,16 @@ glob patterns in glob-capable rule types stop the run before cleaning (exit 1,
 or 2 with `--check`). Directory-root types `d`, `D`, `v`, `q`, `Q`, and `C` may
 contain literal glob characters. Existing `x`/`X` rules are preserved.
 
-A failed in-use scan stops every mode before `systemd-tmpfiles` runs
-(`--print-rules` prints nothing to stdout; `--dry-run` and the real run exit
+A raw inventory can be consumed without decoding tmpfiles rules, for example
+`sudo tmpcleaner --print-in-use0 | xargs -0 -r stat --`.
+It reports process-held paths, including working directories; configured `x`/`X`
+exclusions are not added, and the command's own scratch directory and descendants are omitted.
+It validates configuration (including the supported root grammar above) and
+`TMPCLEANER_*` values just like `--print-rules`, but never cleans or writes metrics.
+Use sufficient privileges to inspect the relevant processes. This is a snapshot
+of visible processes and paths, not a promise that they will remain in use.
+Scan, filtering or sorting failures exit nonzero with empty stdout.
+
+A failed in-use scan stops every mode before cleaning
+(`--print-rules` and `--print-in-use0` print nothing to stdout; `--dry-run` and the real run exit
 non-zero and nothing is removed).

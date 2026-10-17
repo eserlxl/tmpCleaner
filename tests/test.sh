@@ -582,6 +582,54 @@ if TMPCLEANER_AGE='1h; x' TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --print-ru
 	fail=1
 fi
 rules=$(TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --print-rules)
+# Raw inventory preserves filename bytes and excludes its own physical scratch
+# paths even when TMPDIR reaches them through a symlinked parent.
+raw_root=$dir/raw-export
+raw_open="$raw_root/open[*]?${nl}"
+raw_cwd=$raw_root/cwd
+raw_tmp="$raw_root/tmp${nl}"
+mkdir -p "$raw_cwd" "$raw_tmp"
+printf 'unchanged\n' > "$raw_open"
+printf 'unchanged\n' > "$raw_root/closed"
+printf 'unchanged\n' > "$raw_root/static"
+printf 'd %s - - - 12h\nx %s/static\n' "$raw_root" "$raw_root" > "$cfg/raw.conf"
+ln -s "$raw_tmp" "$cfg/raw-tmp"
+# shellcheck disable=SC2217 # sleep holds the file open for the in-use scan
+(cd "$raw_cwd" && exec sleep infinity < "$raw_open") & raw_pid=$!; pids="$pids $raw_pid"
+tries=0
+until [ "$(readlink "/proc/$raw_pid/cwd")" = "$raw_cwd" ] && [ "/proc/$raw_pid/fd/0" -ef "$raw_open" ]; do
+	tries=$((tries + 1)); [ "$tries" -lt 100 ] || { echo 'FAIL: raw inventory holder did not start'; exit 1; }
+	sleep 0.01
+done
+status=0
+TMPDIR=$cfg/raw-tmp TMPCLEANER_CONF=$cfg/raw.conf TMPCLEANER_LIST=1 TMPCLEANER_METRICS=$cfg/raw.prom \
+	CLEAN_SHIM_MARKER=$cfg/raw.clean sh "$here/tmpcleaner" --print-in-use0 > "$cfg/raw.out" 2> "$cfg/raw.err" || status=$?
+if [ "$status" -ne 0 ] || [ -s "$cfg/raw.err" ] || [ -e "$cfg/raw.prom" ] || [ -e "$cfg/raw.clean" ] ||
+	! RAW_OPEN=$raw_open RAW_CWD=$raw_cwd RAW_ROOT=$raw_root LC_ALL=C awk '
+		BEGIN { RS = "\0" }
+		$0 == ENVIRON["RAW_OPEN"] { opened++ }
+		$0 == ENVIRON["RAW_CWD"] { cwd++ }
+		$0 == ENVIRON["RAW_ROOT"] "/closed" || $0 == ENVIRON["RAW_ROOT"] "/static" ||
+		index($0, ENVIRON["RAW_ROOT"] "/tmp") == 1 { bad++ }
+		END { exit !(opened == 1 && cwd == 1 && !bad) }
+	' "$cfg/raw.out" || ! LC_ALL=C sort -zcu "$cfg/raw.out" ||
+	[ "$(tail -c 1 "$cfg/raw.out" | od -An -tu1 | tr -d ' ')" != 0 ]; then
+	echo 'FAIL: raw inventory must be unique sorted NUL records with exact held paths and no synthetic exclusions'
+	fail=1
+fi
+for raw_file in "$raw_open" "$raw_root/closed" "$raw_root/static"; do
+	[ "$(cat "$raw_file")" = unchanged ] || { echo 'FAIL: raw inventory changed a fixture file'; fail=1; }
+done
+kill "$raw_pid"; wait "$raw_pid" 2>/dev/null || :
+rm -rf "$raw_root" "$cfg/raw-tmp"
+for extra in --dry-run --prefix=/tmp --exclude-prefix=/tmp --print-rules --print-in-use0 --help '' positional; do
+	status=0
+	TMPCLEANER_CONF=$cfg/missing.conf sh "$here/tmpcleaner" --print-in-use0 "$extra" > "$cfg/raw.out" 2> "$cfg/raw.err" || status=$?
+	if [ "$status" -ne 2 ] || [ -s "$cfg/raw.out" ] || ! grep -Fq 'accepts no other arguments' "$cfg/raw.err"; then
+		echo 'FAIL: raw inventory must reject extra arguments before reading configuration'
+		fail=1
+	fi
+done
 for list in 0 2 yes "1${nl}"; do
 	status=0
 	TMPCLEANER_LIST="$list" TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --print-rules >/dev/null 2>&1 || status=$?
@@ -1107,6 +1155,12 @@ for scanfail in STAT_SHIM_FAIL=tmp STAT_SHIM_FAIL=cached STAT_SHIM_FAIL=verify S
 		fail=1
 	fi
 	status=0
+	shim env "$scanfail" TMPCLEANER_CONF="$conf" sh "$here/tmpcleaner" --print-in-use0 > "$cfg/raw.out" 2>/dev/null || status=$?
+	if [ "$status" -ne 1 ] || [ -s "$cfg/raw.out" ]; then
+		echo "FAIL: --print-in-use0 should exit 1 with empty stdout when the scan fails ($scanfail)"
+		fail=1
+	fi
+	status=0
 	shim env "$scanfail" TMPCLEANER_CONF="$conf" sh "$here/tmpcleaner" --dry-run >/dev/null 2>&1 || status=$?
 	if [ "$status" -ne 1 ]; then
 		echo "FAIL: --dry-run should exit 1 when the scan fails ($scanfail)"
@@ -1238,6 +1292,10 @@ if ! TMPCLEANER_CONF=$dir/missing.conf sh "$here/tmpcleaner" -h >/dev/null; then
 fi
 printf '%s\n' "$help_out" | grep -Fq -- '--print-rules' || {
 	echo "FAIL: help should mention --print-rules"
+	fail=1
+}
+printf '%s\n' "$help_out" | grep -Fq -- '--print-in-use0' || {
+	echo "FAIL: help should mention --print-in-use0"
 	fail=1
 }
 printf '%s\n' "$help_out" | grep -Fq -- '--check PATH' || {

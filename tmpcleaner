@@ -19,6 +19,8 @@ in use by running processes.
 Options:
   -h, --help       Show this help message and exit
   --print-rules    Print generated tmpfiles rules and exit
+  --print-in-use0  Print unique in-use paths as NUL-separated records and exit
+                   Standalone option; accepts no other arguments
   --check PATH     Report whether an existing absolute /tmp path would be removed
                    Accepts trailing --exclude-prefix=PATH filters
                    Exit 0 if removed, 1 if kept (only), 2 for an error (invalid
@@ -57,6 +59,7 @@ if [ "${1:-}" != --check ]; then
 		case "$arg" in
 			--dry-run|--prefix=?*|--exclude-prefix=/*) ;;
 			--print-rules) [ "$arg" = "$1" ] || { echo "tmpcleaner: unsupported argument: $arg" >&2; exit 2; } ;;
+			--print-in-use0) [ "$#" -eq 1 ] || { echo "tmpcleaner: --print-in-use0 accepts no other arguments" >&2; exit 2; } ;;
 			*) echo "tmpcleaner: unsupported argument: $arg" >&2; exit 2 ;;
 		esac
 	done
@@ -173,7 +176,7 @@ if [ "${TMPCLEANER_AGE+x}" ]; then
 fi
 previewing=0
 case "${1:-}" in
-	--print-rules|--check) previewing=1 ;;
+	--print-rules|--print-in-use0|--check) previewing=1 ;;
 	*)
 		for arg do
 			[ "$arg" = --dry-run ] && previewing=1
@@ -518,6 +521,27 @@ generate_rules() {
 		exit "$errstatus"
 	}
 }
+
+if [ "${1:-}" = --print-in-use0 ]; then
+	generate_rules
+	canonical_scratch=$(realpath -e -- "$scratch" 2>/dev/null && printf x) || {
+		echo "tmpcleaner: cannot canonicalize scratch directory" >&2
+		exit 1
+	}
+	canonical_scratch=${canonical_scratch%x}
+	canonical_scratch=${canonical_scratch%"$nl"}
+	SCRATCH=$scratch CANONICAL_SCRATCH=$canonical_scratch LC_ALL=C awk '
+		BEGIN { RS = "\0"; lexical = ENVIRON["SCRATCH"]; canonical = ENVIRON["CANONICAL_SCRATCH"] }
+		$0 != lexical && index($0, lexical "/") != 1 &&
+		$0 != canonical && index($0, canonical "/") != 1 { printf "%s%c", $0, 0 }
+	' "$scratch/inuse" > "$scratch/export" &&
+		LC_ALL=C sort -zu "$scratch/export" > "$scratch/export-sorted" || {
+		echo "tmpcleaner: cannot export in-use paths" >&2
+		exit 1
+	}
+	cat "$scratch/export-sorted"
+	exit
+fi
 
 if [ "${1:-}" = --print-rules ]; then
 	generate_rules
