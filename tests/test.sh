@@ -587,7 +587,13 @@ printf '%s\n' "$rules" | grep -Fxq "x \"$dir/open a%%b.txt\"" || {
 }
 [ "$fail" = 0 ] || exit 1
 
-preview=$(TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --dry-run 2>&1)
+status=0
+preview=$(TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --dry-run 2>&1) || status=$?
+if [ "$status" -ne 0 ] || ! { [ "$(printf '%s\n' "$preview" | grep -c '^tmpcleaner: would remove [0-9]')" = 1 ] &&
+	printf '%s\n' "$preview" | grep -Fxq "tmpcleaner: would remove $(printf '%s\n' "$preview" | grep -c '^Would remove "') files and $(printf '%s\n' "$preview" | grep -c '^Would remove directory "') directories"; }; then
+	echo "FAIL: preview should exit 0 and announce removal counts"
+	fail=1
+fi
 echo "$preview" | grep -q 'Would remove.*old\.txt' || {
 	echo "FAIL: preview should announce removal of old.txt"
 	fail=1

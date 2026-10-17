@@ -544,7 +544,17 @@ for arg do
 	if [ "$arg" = --dry-run ]; then
 		generate_rules
 		status=0
-		systemd-tmpfiles --clean "$@" - < "$scratch/rules" || status=$?
+		systemd-tmpfiles --clean "$@" - < "$scratch/rules" 2> "$scratch/stderr" || status=$?
+		cat "$scratch/stderr" >&2
+		# Preview lines are text a crafted name could inflate, so the count is an
+		# estimate, like the --check preview parser.
+		LC_ALL=C awk '
+		/^Would remove directory "/ { directories++; next }
+		/^Would remove "/ { files++; next }
+		END {
+			printf "tmpcleaner: would remove %d files and %d directories\n", files, directories
+		}
+		' "$scratch/stderr" >&2
 		exit "$status"
 	fi
 done
