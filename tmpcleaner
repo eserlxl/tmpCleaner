@@ -111,7 +111,23 @@ if [ "${1:-}" != --check ]; then
 		shift
 		n=$((n - 1))
 		case "$arg" in
-			--exclude-prefix=*) printf '%s\0' "${arg#--exclude-prefix=}" >> "$scratch/excludes" ;;
+			--exclude-prefix=*)
+				path=${arg#--exclude-prefix=}
+				while [ "$path" != / ] && [ "${path%/}" != "$path" ]; do path=${path%/}; done
+				base=${path##*/}
+				case "$base" in
+					.|..) parent=$path base= ;;
+					*) parent=${path%/*} ;;
+				esac
+				excl=$(realpath -m -- "${parent:-/}" 2>/dev/null && printf x) || {
+					echo "tmpcleaner: cannot canonicalize --exclude-prefix: $path" >&2
+					exit "$errstatus"
+				}
+				excl=${excl%x}
+				excl=${excl%"$nl"}
+				[ -z "$base" ] || excl=${excl%/}/$base
+				printf '%s\0' "$excl" >> "$scratch/excludes"
+				;;
 			*) set -- "$@" "$arg" ;;
 		esac
 	done

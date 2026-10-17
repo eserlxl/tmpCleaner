@@ -582,6 +582,16 @@ if [ "$status" -ne 0 ] || printf '%s\n' "$excl_preview" | grep -Fq "$dir/old.txt
 	echo "FAIL: --dry-run --exclude-prefix should exit 0 and omit excluded path"
 	fail=1
 fi
+ln -s "$dir" "$dir/excllink"
+for excl_arg in "$dir/nonexistent/../old.txt" "$dir/excllink/old.txt"; do
+	status=0
+	excl_preview=$(TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --dry-run --exclude-prefix="$excl_arg" 2>&1) || status=$?
+	if [ "$status" -ne 0 ] || printf '%s\n' "$excl_preview" | grep -Fq "$dir/old.txt"; then
+		echo "FAIL: --dry-run --exclude-prefix=$excl_arg should canonicalize and omit old.txt"
+		fail=1
+	fi
+done
+rm -f "$dir/excllink"
 status=0
 held_preview=$(TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --dry-run 2>&1) || status=$?
 if [ "$status" -ne 0 ] || printf '%s\n' "$held_preview" | grep -Fq "$argdir/held.txt"; then
