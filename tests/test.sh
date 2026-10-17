@@ -703,13 +703,13 @@ if [ "$status" -ne 2 ]; then
 fi
 for scanfail in STAT_SHIM_FAIL=tmp STAT_SHIM_FAIL=cached FIND_SHIM_FAIL=walk; do
 	status=0
-	shim_rules=$(shim env "$scanfail" TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --print-rules 2>/dev/null) || status=$?
+	shim_rules=$(shim env "$scanfail" TMPCLEANER_CONF="$conf" sh "$here/tmpcleaner" --print-rules 2>/dev/null) || status=$?
 	if [ "$status" -ne 1 ] || [ -n "$shim_rules" ]; then
 		echo "FAIL: --print-rules should exit 1 with empty stdout when the scan fails ($scanfail)"
 		fail=1
 	fi
 	status=0
-	shim env "$scanfail" TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --dry-run >/dev/null 2>&1 || status=$?
+	shim env "$scanfail" TMPCLEANER_CONF="$conf" sh "$here/tmpcleaner" --dry-run >/dev/null 2>&1 || status=$?
 	if [ "$status" -ne 1 ]; then
 		echo "FAIL: --dry-run should exit 1 when the scan fails ($scanfail)"
 		fail=1
@@ -726,7 +726,7 @@ for scanfail in STAT_SHIM_FAIL=tmp STAT_SHIM_FAIL=cached FIND_SHIM_FAIL=walk; do
 	fi
 	rm -rf "$fresh" "$cfg/scan.conf"
 	status=0
-	shim env "$scanfail" TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --check "$dir/old.txt" >/dev/null 2>&1 || status=$?
+	shim env "$scanfail" TMPCLEANER_CONF="$conf" sh "$here/tmpcleaner" --check "$dir/old.txt" >/dev/null 2>&1 || status=$?
 	if [ "$status" -ne 2 ] || [ ! -e "$dir/old.txt" ]; then
 		echo "FAIL: --check should exit 2 and keep the file when the scan fails ($scanfail)"
 		fail=1
