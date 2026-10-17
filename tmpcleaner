@@ -150,8 +150,8 @@ write_metrics() {
 		}' /proc/uptime 2>/dev/null) || metric_duration=NaN
 	mdir=${TMPCLEANER_METRICS%/*}
 	# A metrics failure is logged, never turned into the run's exit status.
-	if now=$(date +%s 2>/dev/null) && mtmp=$(mktemp "${mdir:-/}/.tmpcleaner.XXXXXX" 2>/dev/null) && {
-		cat > "$mtmp" <<EOF && chmod a+r "$mtmp" && mv -f "$mtmp" "$TMPCLEANER_METRICS"
+	if [ ! -d "$TMPCLEANER_METRICS" ] && now=$(date +%s 2>/dev/null) && mtmp=$(mktemp "${mdir:-/}/.tmpcleaner.XXXXXX" 2>/dev/null) && {
+		cat > "$mtmp" <<EOF && chmod a+r "$mtmp" && mv -fT -- "$mtmp" "$TMPCLEANER_METRICS"
 # HELP tmpcleaner_removed_files Number of files removed in the last run.
 # TYPE tmpcleaner_removed_files gauge
 tmpcleaner_removed_files $metric_files

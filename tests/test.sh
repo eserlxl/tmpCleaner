@@ -1853,6 +1853,29 @@ for writefail in destination timestamp; do
 	done
 done
 
+# A .prom directory or directory symlink is never a publication destination.
+metric_dest=$cfg/metrics-dest
+mkdir -p "$metric_dest/directory.prom"
+printf 'retained\n' > "$metric_dest/directory.prom/sentinel"
+ln -s directory.prom "$metric_dest/symlink.prom"
+cp -a "$metric_dest" "$cfg/metrics-dest.expected"
+for metric_target in "$metric_dest/directory.prom" "$metric_dest/symlink.prom"; do
+	for backend_status in 0 42; do
+		status=0
+		mfail_log=$(CLEAN_SHIM_STATUS=$backend_status TMPCLEANER_METRICS=$metric_target TMPCLEANER_CONF=$conf2 \
+			sh "$here/tmpcleaner" 2>&1 >/dev/null) || status=$?
+		if [ "$status" -ne "$backend_status" ] ||
+			[ "$(printf '%s\n' "$mfail_log" | grep -c 'tmpcleaner: cannot write metrics')" -ne 1 ] ||
+			[ ! -d "$metric_dest/directory.prom" ] || [ ! -L "$metric_dest/symlink.prom" ] ||
+			[ "$(readlink "$metric_dest/symlink.prom")" != directory.prom ] ||
+			! diff -r "$cfg/metrics-dest.expected" "$metric_dest" >/dev/null ||
+			[ -n "$(find "$metric_dest" -name '.tmpcleaner.*' -print -quit)" ]; then
+			echo 'FAIL: directory metrics targets must warn once, preserve status/structure and leave no temporary files'
+			fail=1
+		fi
+	done
+done
+
 [ -e "$dir2/extracted.txt" ] || { echo "FAIL: extracted.txt should be kept"; fail=1; }
 
 # The three-way config upgrade that decides whether a reinstall keeps or replaces
