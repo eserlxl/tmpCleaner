@@ -1716,6 +1716,15 @@ SHIM
 	rm -rf "$uninstall_root"
 done
 
+PATH="$staged/fakes:$PATH" make -s -C "$here" install ENABLE_TIMER=0 \
+	DESTDIR="$staged_dest" PREFIX=/usr UNITDIR="$staged_units" >/dev/null
+if [ ! -x "$staged_dest/usr/bin/tmpcleaner" ] || [ ! -f "$staged_dest$staged_units/tmpcleaner.service" ] ||
+	[ ! -f "$staged_dest$staged_units/tmpcleaner.timer" ] || [ ! -f "$staged_dest/etc/tmpcleaner/tmpcleaner.conf" ] ||
+	[ -e "$staged/systemctl.log" ]; then
+	echo 'FAIL: staged install with ENABLE_TIMER=0 must install files without service actions'
+	fail=1
+fi
+
 # Invalid executable paths fail generation before installing binary or units.
 for bad_bin in "$staged/bad'quote" "$staged/bad\"quote" "$staged/bad\\slash" \
 	"$staged/bad${tab}tab" "$staged/bad$(printf '\001')control" "$staged/bad$(printf '\177')delete" \
@@ -1791,7 +1800,38 @@ if [ ! -f "$staged/systemctl.log" ] ||
 	fail=1
 fi
 : > "$staged/systemctl.log"
+PATH="$staged/fakes:$PATH" make -s -C "$here" install ENABLE_TIMER=1 \
+	BINDIR="$make_bin" CONFDIR="$make_conf" UNITDIR="$make_units" >/dev/null
+if [ "$(cat "$staged/systemctl.log")" != "$(printf 'daemon-reload\nenable --now tmpcleaner.timer')" ]; then
+	echo 'FAIL: ENABLE_TIMER=1 must retain default activation calls'
+	fail=1
+fi
+printf 'x /tmp/local-install-rule\n' >> "$custom_conf/tmpcleaner.conf"
+cp "$custom_conf/tmpcleaner.conf" "$staged/edited.conf"
+: > "$staged/systemctl.log"
+PATH="$staged/fakes:$PATH" make -s -C "$here" install ENABLE_TIMER=0 \
+	BINDIR="$make_bin" CONFDIR="$make_conf" UNITDIR="$make_units" >/dev/null
+if [ "$(cat "$staged/systemctl.log")" != daemon-reload ] ||
+	[ ! -x "$custom_bin/tmpcleaner" ] || [ ! -f "$custom_units/tmpcleaner.service" ] || [ ! -f "$custom_units/tmpcleaner.timer" ] ||
+	! cmp -s "$staged/edited.conf" "$custom_conf/tmpcleaner.conf" ||
+	! cmp -s "$here/tmpcleaner.conf" "$custom_conf/tmpcleaner.conf.new"; then
+	echo 'FAIL: ENABLE_TIMER=0 must install files, preserve edited config and only reload systemd'
+	fail=1
+fi
+for invalid_timer in '' 2 yes '0 1' '1 0' 00; do
+	: > "$staged/systemctl.log"
+	status=0
+	PATH="$staged/fakes:$PATH" make -s -C "$here" install "ENABLE_TIMER=$invalid_timer" \
+		BINDIR="$make_bin" CONFDIR="$make_conf" UNITDIR="$make_units" > "$staged/invalid-timer.log" 2>&1 || status=$?
+	if [ "$status" -eq 0 ] || [ -s "$staged/systemctl.log" ] ||
+		! grep -Fq 'ENABLE_TIMER must be 0 or 1' "$staged/invalid-timer.log"; then
+		echo 'FAIL: invalid ENABLE_TIMER must fail before service actions'
+		fail=1
+	fi
+done
+: > "$staged/systemctl.log"
 PATH="$staged/fakes:$PATH" make -s -C "$here" uninstall \
+	ENABLE_TIMER=0 \
 	PREFIX="$staged/prefix" \
 	BINDIR="$make_bin" \
 	CONFDIR="$make_conf" \

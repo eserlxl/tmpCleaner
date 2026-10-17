@@ -3,6 +3,12 @@ BINDIR ?= $(PREFIX)/bin
 CONFDIR ?= /etc/tmpcleaner
 UNITDIR ?= /etc/systemd/system
 DESTDIR ?=
+ENABLE_TIMER ?= 1
+ifneq ($(ENABLE_TIMER),0)
+ifneq ($(ENABLE_TIMER),1)
+$(error ENABLE_TIMER must be 0 or 1)
+endif
+endif
 define newline
 
 
@@ -27,7 +33,9 @@ install: install-conf
 	install -Dm644 -- tmpcleaner.timer $(call shell_quote,$(DESTDIR)$(UNITDIR)/tmpcleaner.timer)
 ifeq ($(DESTDIR),)
 	systemctl daemon-reload
+ifeq ($(ENABLE_TIMER),1)
 	systemctl enable --now tmpcleaner.timer
+endif
 endif
 
 install-conf:

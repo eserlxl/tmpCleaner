@@ -43,11 +43,24 @@ Add any needed exclusions to `tmpcleaner.conf` (see [Configuration](configuratio
 sudo make install
 ```
 
+For an install-then-preview sequence, defer activation:
+
+```sh
+sudo make install ENABLE_TIMER=0
+sudo /usr/local/bin/tmpcleaner --dry-run
+sudo systemctl enable --now tmpcleaner.timer
+```
+
+`ENABLE_TIMER` accepts only `0` or `1` (default `1`). Value `0` still reloads
+systemd after installation but does not stop an already running timer.
+Staged installs skip all service actions with either value; uninstall still
+disables and stops the timer when `DESTDIR` is empty.
+
 `install` runs `install-conf` first: reinstalling upgrades an unedited `/etc/tmpcleaner/tmpcleaner.conf` in place, or keeps an edited config and writes new defaults to `/etc/tmpcleaner/tmpcleaner.conf.new` (using `tmpcleaner.conf.default` to compare; an install from before `.default` existed gets a `.new` once). Run `sudo make install-conf` to update the config alone.
 
 #### Makefile variables and targets
 
-Variables: `PREFIX=/usr/local`, `BINDIR=$(PREFIX)/bin`, `CONFDIR=/etc/tmpcleaner`, `UNITDIR=/etc/systemd/system`, and `DESTDIR=` (staged install; skips `systemctl` calls when non-empty). `install` rewrites `ExecStart=` in the installed service to `$(BINDIR)/tmpcleaner`. `CONFDIR` does not change the wrapper's built-in default path (`/etc/tmpcleaner/tmpcleaner.conf`); if you install with a different `CONFDIR`, set `TMPCLEANER_CONF` in a service drop-in (`sudo systemctl edit tmpcleaner.service`).
+Variables: `PREFIX=/usr/local`, `BINDIR=$(PREFIX)/bin`, `CONFDIR=/etc/tmpcleaner`, `UNITDIR=/etc/systemd/system`, `ENABLE_TIMER=1`, and `DESTDIR=` (staged install; skips `systemctl` calls when non-empty). `install` rewrites `ExecStart=` in the installed service to `$(BINDIR)/tmpcleaner`. `CONFDIR` does not change the wrapper's built-in default path (`/etc/tmpcleaner/tmpcleaner.conf`); if you install with a different `CONFDIR`, set `TMPCLEANER_CONF` in a service drop-in (`sudo systemctl edit tmpcleaner.service`).
 
 Quote shell arguments when setting paths containing spaces or punctuation.
 Source-install paths cannot contain newlines. `BINDIR` must be absolute and

@@ -47,6 +47,11 @@ sudo make preview
 sudo make install
 ```
 
+To install before activation, run `sudo make install ENABLE_TIMER=0`, preview
+the installed configuration with `sudo /usr/local/bin/tmpcleaner --dry-run`,
+then run `sudo systemctl enable --now tmpcleaner.timer` when ready.
+Value `0` does not stop an already running timer; the default remains `1`.
+
 Linux with systemd >= 249 (>= 256 for `--dry-run` and `--check`) and GNU
 coreutils >= 8.32 are required. Requirements, Makefile variables, migrating
 from a source install to the package, and uninstalling are in
