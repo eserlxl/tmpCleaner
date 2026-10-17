@@ -3,19 +3,35 @@ BINDIR ?= $(PREFIX)/bin
 CONFDIR ?= /etc/tmpcleaner
 UNITDIR ?= /etc/systemd/system
 DESTDIR ?=
+define newline
+
+
+endef
+shell_quote = $(if $(findstring $(newline),$(1)),$(error source-install paths cannot contain newlines),'$(subst ','"'"',$(1))')
 
 install: install-conf
-	install -Dm755 tmpcleaner $(DESTDIR)$(BINDIR)/tmpcleaner
-	install -Dm644 tmpcleaner.service $(DESTDIR)$(UNITDIR)/tmpcleaner.service
-	sed -i 's|^ExecStart=/usr/local/bin/tmpcleaner$$|ExecStart=$(BINDIR)/tmpcleaner|' $(DESTDIR)$(UNITDIR)/tmpcleaner.service
-	install -Dm644 tmpcleaner.timer $(DESTDIR)$(UNITDIR)/tmpcleaner.timer
+	@unit=$$(TMPCLEANER_EXEC=$(call shell_quote,$(BINDIR)/tmpcleaner) LC_ALL=C awk '\
+		BEGIN { \
+			path = ENVIRON["TMPCLEANER_EXEC"]; \
+			if (substr(path, 1, 1) != "/" || path ~ /[[:cntrl:]\\\042\047]/) { \
+				print "make install: BINDIR must be absolute and contain no quotes, backslashes or control bytes" > "/dev/stderr"; exit 1 \
+			} \
+		} \
+		/^ExecStart=\/usr\/local\/bin\/tmpcleaner$$/ { \
+			encoded = path; gsub(/%/, "%%", encoded); \
+			$$0 = "ExecStart=\"" encoded "\""; found = 1 \
+		} \
+		{ print } END { if (!found) exit 1 }' tmpcleaner.service && printf x) && \
+		install -Dm755 -- tmpcleaner $(call shell_quote,$(DESTDIR)$(BINDIR)/tmpcleaner) && \
+		printf '%s' "$${unit%x}" | install -Dm644 -- /dev/stdin $(call shell_quote,$(DESTDIR)$(UNITDIR)/tmpcleaner.service)
+	install -Dm644 -- tmpcleaner.timer $(call shell_quote,$(DESTDIR)$(UNITDIR)/tmpcleaner.timer)
 ifeq ($(DESTDIR),)
 	systemctl daemon-reload
 	systemctl enable --now tmpcleaner.timer
 endif
 
 install-conf:
-	@c="$(DESTDIR)$(CONFDIR)/tmpcleaner.conf"; \
+	@c=$(call shell_quote,$(DESTDIR)$(CONFDIR)/tmpcleaner.conf); \
 	if [ ! -e "$$c" ] || cmp -s "$$c" "$$c.default" || cmp -s tmpcleaner.conf "$$c"; then \
 		install -Dm644 tmpcleaner.conf "$$c" && \
 		install -Dm644 tmpcleaner.conf "$$c.default"; \
@@ -30,9 +46,9 @@ uninstall:
 ifeq ($(DESTDIR),)
 	-systemctl disable --now tmpcleaner.timer
 endif
-	rm -f -- "$(DESTDIR)$(UNITDIR)/tmpcleaner.service" "$(DESTDIR)$(UNITDIR)/tmpcleaner.timer"
-	rm -rf -- "$(DESTDIR)$(CONFDIR)"
-	rm -f -- "$(DESTDIR)$(BINDIR)/tmpcleaner"
+	rm -f -- $(call shell_quote,$(DESTDIR)$(UNITDIR)/tmpcleaner.service) $(call shell_quote,$(DESTDIR)$(UNITDIR)/tmpcleaner.timer)
+	rm -rf -- $(call shell_quote,$(DESTDIR)$(CONFDIR))
+	rm -f -- $(call shell_quote,$(DESTDIR)$(BINDIR)/tmpcleaner)
 ifeq ($(DESTDIR),)
 	systemctl daemon-reload
 endif

@@ -1634,24 +1634,26 @@ rm -rf "$confdir"
 # ExecStart in the installed unit, and never invokes systemctl.
 staged=$(mktemp -d /tmp/tmpcleaner-test.XXXXXX)
 trap 'kill $pids 2>/dev/null || :; rm -rf "$dir" "$cfg" "$dir2" "$staged" "$bindpoint" "$detachpoint" "$sockalias"' EXIT
+staged_dest="$staged/root safe"
+staged_units="/usr/lib/systemd units"
 mkdir "$staged/fakes"
 printf '#!/bin/sh\nprintf "%%s\\n" "$*" >> "%s/systemctl.log"\n' "$staged" > "$staged/fakes/systemctl"
 chmod +x "$staged/fakes/systemctl"
-PATH="$staged/fakes:$PATH" make -s -C "$here" install DESTDIR="$staged/root" PREFIX=/usr UNITDIR=/usr/lib/systemd/system >/dev/null
-[ -x "$staged/root/usr/bin/tmpcleaner" ] || {
+PATH="$staged/fakes:$PATH" make -s -C "$here" install DESTDIR="$staged_dest" PREFIX=/usr UNITDIR="$staged_units" >/dev/null
+[ -x "$staged_dest/usr/bin/tmpcleaner" ] || {
 	echo "FAIL: staged install should install executable /usr/bin/tmpcleaner"
 	fail=1
 }
-if ! grep -Fxq 'ExecStart=/usr/bin/tmpcleaner' "$staged/root/usr/lib/systemd/system/tmpcleaner.service" ||
-	grep -Fq '/usr/local' "$staged/root/usr/lib/systemd/system/tmpcleaner.service"; then
+if ! grep -Fxq 'ExecStart="/usr/bin/tmpcleaner"' "$staged_dest$staged_units/tmpcleaner.service" ||
+	grep -Fq '/usr/local' "$staged_dest$staged_units/tmpcleaner.service"; then
 	echo "FAIL: staged install should rewrite ExecStart to /usr/bin/tmpcleaner"
 	fail=1
 fi
-[ -f "$staged/root/usr/lib/systemd/system/tmpcleaner.timer" ] || {
+[ -f "$staged_dest$staged_units/tmpcleaner.timer" ] || {
 	echo "FAIL: staged install should install tmpcleaner.timer"
 	fail=1
 }
-[ -f "$staged/root/etc/tmpcleaner/tmpcleaner.conf" ] || {
+[ -f "$staged_dest/etc/tmpcleaner/tmpcleaner.conf" ] || {
 	echo "FAIL: staged install should install /etc/tmpcleaner/tmpcleaner.conf"
 	fail=1
 }
@@ -1659,11 +1661,11 @@ fi
 	echo "FAIL: staged install must not call systemctl"
 	fail=1
 }
-PATH="$staged/fakes:$PATH" make -s -C "$here" uninstall DESTDIR="$staged/root" PREFIX=/usr UNITDIR=/usr/lib/systemd/system >/dev/null
-if [ -e "$staged/root/usr/bin/tmpcleaner" ] ||
-	[ -e "$staged/root/usr/lib/systemd/system/tmpcleaner.service" ] ||
-	[ -e "$staged/root/usr/lib/systemd/system/tmpcleaner.timer" ] ||
-	[ -e "$staged/root/etc/tmpcleaner" ]; then
+PATH="$staged/fakes:$PATH" make -s -C "$here" uninstall DESTDIR="$staged_dest" PREFIX=/usr UNITDIR="$staged_units" >/dev/null
+if [ -e "$staged_dest/usr/bin/tmpcleaner" ] ||
+	[ -e "$staged_dest$staged_units/tmpcleaner.service" ] ||
+	[ -e "$staged_dest$staged_units/tmpcleaner.timer" ] ||
+	[ -e "$staged_dest/etc/tmpcleaner" ]; then
 	echo "FAIL: staged uninstall should remove binary, units, and CONFDIR"
 	fail=1
 fi
@@ -1714,27 +1716,72 @@ SHIM
 	rm -rf "$uninstall_root"
 done
 
+# Invalid executable paths fail generation before installing binary or units.
+for bad_bin in "$staged/bad'quote" "$staged/bad\"quote" "$staged/bad\\slash" \
+	"$staged/bad${tab}tab" "$staged/bad$(printf '\001')control" "$staged/bad$(printf '\177')delete" \
+	"$staged/bad${nl}newline" relative/bin; do
+	status=0
+	PATH="$staged/fakes:$PATH" make -s -C "$here" install DESTDIR="$staged/refused" BINDIR="$bad_bin" \
+		CONFDIR=/conf UNITDIR=/units > "$staged/refused.log" 2>&1 || status=$?
+	if [ "$status" -eq 0 ] || [ -e "$staged/refused$bad_bin/tmpcleaner" ] ||
+		[ -e "$staged/refused/units/tmpcleaner.service" ] || [ -e "$staged/systemctl.log" ] ||
+		! grep -Eq 'BINDIR must be absolute|paths cannot contain newlines' "$staged/refused.log"; then
+		echo 'FAIL: unsupported executable path must fail clearly before binary/unit installation'
+		fail=1
+	fi
+done
+mkdir "$staged/failing-tools"
+printf '#!/bin/sh\nexit 17\n' > "$staged/failing-tools/awk"
+chmod +x "$staged/failing-tools/awk"
+status=0
+PATH="$staged/failing-tools:$staged/fakes:$PATH" make -s -C "$here" install DESTDIR="$staged/generator-failed" \
+	BINDIR=/bin CONFDIR=/conf UNITDIR=/units > "$staged/generator-failed.log" 2>&1 || status=$?
+if [ "$status" -eq 0 ] || [ -e "$staged/generator-failed/bin/tmpcleaner" ] ||
+	[ -e "$staged/generator-failed/units/tmpcleaner.service" ] || [ -e "$staged/systemctl.log" ]; then
+	echo 'FAIL: failed unit generator must stop installation before binary/units and service actions'
+	fail=1
+fi
+
 # Unstaged install/uninstall (empty DESTDIR): invokes systemctl in order and
 # honors custom PREFIX, BINDIR, CONFDIR, and UNITDIR without touching source files.
+custom_suffix=" '\"\\ %n \$HOME &|;${tab}$(printf '\001')"
+custom_bin="$staged/bin %n \$HOME &|;"
+custom_conf=$staged/conf$custom_suffix
+custom_units=$staged/units$custom_suffix
+# GNU make command-line values need each literal dollar doubled.
+make_bin=$(printf '%s' "$custom_bin" | sed 's/\$/$$/g')
+make_conf=$(printf '%s' "$custom_conf" | sed 's/\$/$$/g')
+make_units=$(printf '%s' "$custom_units" | sed 's/\$/$$/g')
 PATH="$staged/fakes:$PATH" make -s -C "$here" install \
 	PREFIX="$staged/prefix" \
-	BINDIR="$staged/bin" \
-	CONFDIR="$staged/conf" \
-	UNITDIR="$staged/units" >/dev/null
-[ -x "$staged/bin/tmpcleaner" ] || {
+	BINDIR="$make_bin" \
+	CONFDIR="$make_conf" \
+	UNITDIR="$make_units" >/dev/null
+[ -x "$custom_bin/tmpcleaner" ] || {
 	echo "FAIL: unstaged install should install executable in custom BINDIR"
 	fail=1
 }
-if ! grep -Fxq "ExecStart=$staged/bin/tmpcleaner" "$staged/units/tmpcleaner.service" ||
-	grep -Fq '/usr/local' "$staged/units/tmpcleaner.service"; then
-	echo "FAIL: unstaged install should rewrite ExecStart to custom BINDIR"
+if command -v systemd-analyze >/dev/null; then
+	if ! systemd-analyze verify --man=no "$custom_units/tmpcleaner.service" > "$staged/verify.log" 2>&1; then
+		echo 'FAIL: generated service must resolve the literal installed executable'
+		cat "$staged/verify.log"
+		fail=1
+	fi
+else
+	echo 'SKIP: generated service verification (systemd-analyze unavailable)'
+fi
+grep -v '^ExecStart=' "$here/tmpcleaner.service" > "$staged/unit.expected"
+grep -v '^ExecStart=' "$custom_units/tmpcleaner.service" > "$staged/unit.actual"
+if ! cmp -s "$staged/unit.expected" "$staged/unit.actual" ||
+	[ "$(stat -c %a "$custom_units/tmpcleaner.service")" != 644 ]; then
+	echo 'FAIL: service generation must preserve other lines and installation mode'
 	fail=1
 fi
-[ -f "$staged/units/tmpcleaner.timer" ] || {
+[ -f "$custom_units/tmpcleaner.timer" ] || {
 	echo "FAIL: unstaged install should install tmpcleaner.timer in custom UNITDIR"
 	fail=1
 }
-[ -f "$staged/conf/tmpcleaner.conf" ] || {
+[ -f "$custom_conf/tmpcleaner.conf" ] || {
 	echo "FAIL: unstaged install should install tmpcleaner.conf in custom CONFDIR"
 	fail=1
 }
@@ -1746,13 +1793,13 @@ fi
 : > "$staged/systemctl.log"
 PATH="$staged/fakes:$PATH" make -s -C "$here" uninstall \
 	PREFIX="$staged/prefix" \
-	BINDIR="$staged/bin" \
-	CONFDIR="$staged/conf" \
-	UNITDIR="$staged/units" >/dev/null
-if [ -e "$staged/bin/tmpcleaner" ] ||
-	[ -e "$staged/units/tmpcleaner.service" ] ||
-	[ -e "$staged/units/tmpcleaner.timer" ] ||
-	[ -e "$staged/conf" ]; then
+	BINDIR="$make_bin" \
+	CONFDIR="$make_conf" \
+	UNITDIR="$make_units" >/dev/null
+if [ -e "$custom_bin/tmpcleaner" ] ||
+	[ -e "$custom_units/tmpcleaner.service" ] ||
+	[ -e "$custom_units/tmpcleaner.timer" ] ||
+	[ -e "$custom_conf" ]; then
 	echo "FAIL: unstaged uninstall should remove binary, units, and custom CONFDIR"
 	fail=1
 fi

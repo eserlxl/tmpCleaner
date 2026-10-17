@@ -49,6 +49,14 @@ sudo make install
 
 Variables: `PREFIX=/usr/local`, `BINDIR=$(PREFIX)/bin`, `CONFDIR=/etc/tmpcleaner`, `UNITDIR=/etc/systemd/system`, and `DESTDIR=` (staged install; skips `systemctl` calls when non-empty). `install` rewrites `ExecStart=` in the installed service to `$(BINDIR)/tmpcleaner`. `CONFDIR` does not change the wrapper's built-in default path (`/etc/tmpcleaner/tmpcleaner.conf`); if you install with a different `CONFDIR`, set `TMPCLEANER_CONF` in a service drop-in (`sudo systemctl edit tmpcleaner.service`).
 
+Quote shell arguments when setting paths containing spaces or punctuation.
+Source-install paths cannot contain newlines. `BINDIR` must be absolute and
+cannot contain quotes, backslashes or control bytes, which systemd rejects in
+executable paths; installation refuses these before copying the binary or units.
+Spaces, percent signs and literal dollar signs are supported. GNU make requires
+literal dollars in command-line variable values to be doubled, for example
+`make install 'BINDIR=/opt/my $$tools/bin'` installs under `/opt/my $tools/bin`.
+
 Targets: `preview` (dry-run to `preview.txt`), `install`, `install-conf`, `uninstall`, `test`;
 for maintainers, `srcinfo` regenerates `.SRCINFO` from `PKGBUILD` and `check-srcinfo` fails when it is stale; `lint` runs shellcheck at warning level.
 
