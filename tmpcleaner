@@ -103,7 +103,12 @@ if [ "${1:-}" = --check ]; then
 	esac
 fi
 
-scratch=$(mktemp -d) || { echo "tmpcleaner: cannot create a scratch directory" >&2; exit "$errstatus"; }
+# A full /tmp may still hold a new directory but no data: when the default
+# location cannot store a byte, retry once in /dev/shm before aborting.
+scratch=$(mktemp -d 2>/dev/null) && { printf x > "$scratch/excludes"; } 2>/dev/null || {
+	[ -z "$scratch" ] || rm -rf "$scratch"
+	scratch=$(mktemp -d -p /dev/shm 2>/dev/null)
+} || { echo "tmpcleaner: cannot create a scratch directory" >&2; exit "$errstatus"; }
 trap 'rm -rf "$scratch"' EXIT
 : > "$scratch/excludes"
 if [ "${1:-}" != --check ]; then

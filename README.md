@@ -165,6 +165,11 @@ Environment=TMPCLEANER_METRICS=/var/lib/node_exporter/textfile_collector/tmpclea
 ReadWritePaths=/var/lib/node_exporter/textfile_collector
 ```
 
+The service sets `RuntimeDirectory=tmpcleaner` and `Environment=TMPDIR=/run/tmpcleaner`
+so its scratch files live outside `/tmp` and a full `/tmp` still gets cleaned.
+For manual runs where `TMPDIR` is unset, `tmpcleaner` falls back to a private
+scratch directory under `/dev/shm` when `/tmp` is full.
+
 Change the interval with `sudo systemctl edit tmpcleaner.timer`. A run that
 takes longer than ten minutes is stopped and logged as failed; the next timer
 run starts normally.

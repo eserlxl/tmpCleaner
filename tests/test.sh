@@ -15,7 +15,8 @@ pids=
 bindpoint=
 detachpoint=
 sockalias=
-trap 'kill $pids 2>/dev/null || :; rm -rf "$dir" "$cfg" "$shimdir" "$bindpoint" "$detachpoint" "$sockalias"' EXIT
+shmdir=
+trap 'kill $pids 2>/dev/null || :; rm -rf "$dir" "$cfg" "$shimdir" "$bindpoint" "$detachpoint" "$sockalias" "$shmdir"' EXIT
 
 awk '$1 == "d" { gsub(/[bcBC]/, "", $6) } { print }' "$here/tmpcleaner.conf" |
 	sed "s#/tmp#$dir#" > "$conf"
@@ -421,6 +422,30 @@ if [ "$bind_running" = 1 ]; then
 	' sh "$here/tmpcleaner" || status=$?
 	if [ "$status" -ne 0 ]; then
 		echo "FAIL: a full /tmp should still be cleaned when TMPDIR lies elsewhere"
+		fail=1
+	fi
+fi
+# With TMPDIR unset, a full /tmp still gets cleaned by falling back to /dev/shm.
+if [ "$bind_running" = 1 ]; then
+	status=0
+	shmdir=$(mktemp -d -p /dev/shm)
+	# shellcheck disable=SC2016 # $1 and $2 are expanded by the inner sh
+	# The script is copied first: the new tmpfs hides it when the tree lies in /tmp (a makepkg build dir).
+	(unset TMPDIR; unshare -rm sh -c '
+		cp "$1" "$2/tmpcleaner"
+		mount -t tmpfs -o size=64k,nr_inodes=16 tmpfs /tmp
+		touch /tmp/stale
+		touch -d "13 hours ago" /tmp/stale
+		i=0
+		while touch "/tmp/f$i" 2>/dev/null; do i=$((i + 1)); done
+		printf "d /tmp - - - amM:6h\n" > "$2/full.conf"
+		unset TMPDIR
+		TMPCLEANER_CONF=$2/full.conf sh "$2/tmpcleaner" 2>/dev/null && [ ! -e /tmp/stale ]
+	' sh "$here/tmpcleaner" "$shmdir") || status=$?
+	rm -rf "$shmdir"
+	shmdir=
+	if [ "$status" -ne 0 ]; then
+		echo "FAIL: a full /tmp should still be cleaned when TMPDIR is unset"
 		fail=1
 	fi
 fi
