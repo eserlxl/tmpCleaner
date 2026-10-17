@@ -16,6 +16,13 @@ An exclusion applies while a parent cleanup rule traverses the tree. A
 separately configured cleanup root at or below the excluded directory can still
 clean its contents; remove the conflicting cleanup rule. See [how to keep something](what-gets-deleted.md#how-to-keep-something).
 
+Cleanup roots must remain under `/tmp`: both the normalized literal path and
+its resolved target must stay in that tree. Outside roots, `..` escapes and
+symlinks leading outside `/tmp` stop every mode before cleanup; custom configs
+cannot extend the process scanner's `/tmp` protection to other directories.
+Existing `x`/`X` exclusion lines are preserved.
+`/tmp` itself must not be a symlink, matching the scanner's literal `/tmp` scope.
+
 Cleanup rule paths must be literal absolute paths, plain or simply quoted;
 `%%` represents a literal percent. Backslash encodings, other `%` specifiers,
 and ambiguous glob-capable roots stop every run before cleaning, including

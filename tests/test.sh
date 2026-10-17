@@ -16,7 +16,8 @@ bindpoint=
 detachpoint=
 sockalias=
 shmdir=
-trap 'kill $pids 2>/dev/null || :; rm -rf "$dir" "$cfg" "$shimdir" "$bindpoint" "$detachpoint" "$sockalias" "$shmdir"' EXIT
+scope_outside=
+trap 'kill $pids 2>/dev/null || :; rm -rf "$dir" "$cfg" "$shimdir" "$bindpoint" "$detachpoint" "$sockalias" "$shmdir" "$scope_outside"' EXIT
 trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
@@ -1033,29 +1034,49 @@ if printf '%s\n' "$filter_rules" | grep -Eq '^[DevqQCRf] ' ||
 	echo "FAIL: explicit exclusions must filter every non-x/X root type"
 	fail=1
 fi
-for bad_root in "$filter_root/encoded\\x20root" "$filter_root/%T" "$filter_root/glob*"; do
-	printf 'e %s - - - 12h\n' "$bad_root" > "$cfg/root-filter.conf"
-	for filter_mode in real dry check rules unfiltered; do
+# Outside fixtures are never passed to a real cleanup backend, even if validation regresses.
+scope_base=$here
+case "$scope_base" in /tmp|/tmp/*) scope_base=/dev/shm ;; esac
+scope_outside=$(mktemp -d "$scope_base/.tmpcleaner-scope.XXXXXX")
+printf 'untouched\n' > "$scope_outside/sentinel"
+ln -s "$scope_outside" "$filter_root/outside"
+for bad_root in "$filter_root/encoded\\x20root" "$filter_root/%T" "$filter_root/glob*" \
+	"$scope_outside" "/tmp/..$scope_outside" "$filter_root/outside"; do
+	printf 'e "%s" - - - 12h\n' "$bad_root" > "$cfg/root-filter.conf"
+	for filter_mode in real dry check rules unfiltered export prefix; do
 		case "$filter_mode" in
 			real) set -- ;;
 			dry) set -- --dry-run ;;
 			check) set -- --check "$dir/old.txt" ;;
 			rules|unfiltered) set -- --print-rules ;;
+			export) set -- --print-in-use0 ;;
+			prefix) set -- "--prefix=$bad_root" ;;
 		esac
-		[ "$filter_mode" = unfiltered ] || set -- "$@" "--exclude-prefix=$filter_root/keep"
+		case "$filter_mode" in unfiltered|export) ;; *) set -- "$@" "--exclude-prefix=$filter_root/keep" ;; esac
 		status=0
-		filter_out=$(CLEAN_SHIM_MARKER=$cfg/filter.clean TMPCLEANER_CONF=$cfg/root-filter.conf sh "$here/tmpcleaner" "$@" \
-			2>"$cfg/filter.err") || status=$?
+		CLEAN_SHIM_STATUS=99 CLEAN_SHIM_MARKER=$cfg/filter.clean TMPCLEANER_CONF=$cfg/root-filter.conf sh "$here/tmpcleaner" "$@" \
+			>"$cfg/filter.out" 2>"$cfg/filter.err" || status=$?
 		expected_status=1
 		[ "$filter_mode" != check ] || expected_status=2
-		if [ "$status" -ne "$expected_status" ] || [ -n "$filter_out" ] || [ -e "$cfg/filter.clean" ] ||
-			! grep -Fq 'cannot safely interpret rule' "$cfg/filter.err"; then
-			echo "FAIL: $filter_mode must refuse unsupported rule paths before cleaning"
+		if [ "$status" -ne "$expected_status" ] || [ -s "$cfg/filter.out" ] || [ -e "$cfg/filter.clean" ] ||
+			! grep -Fq 'cannot safely interpret rule' "$cfg/filter.err" ||
+			[ "$(cat "$scope_outside/sentinel")" != untouched ]; then
+			echo "FAIL: $filter_mode must refuse unsafe rule paths before cleaning ($bad_root)"
 			fail=1
 		fi
 	done
 done
-rm -rf "$filter_root" "$cfg/root-filter.conf" "$cfg/filter.err" "$cfg/filter.clean"
+mkdir "$filter_root/inside"
+ln -s "$filter_root/inside" "$filter_root/alias"
+printf 'd /tmp - - - 12h\nd %s/inside/../inside - - - 12h\nd %s/alias - - - 12h\nx %s\nX %s/*\n' \
+	"$filter_root" "$filter_root" "$scope_outside" "$scope_outside" > "$cfg/root-filter.conf"
+if ! TMPCLEANER_CONF=$cfg/root-filter.conf sh "$here/tmpcleaner" --print-rules > "$cfg/filter.out" ||
+	! grep -Fxq "x $scope_outside" "$cfg/filter.out" || ! grep -Fxq "X $scope_outside/*" "$cfg/filter.out"; then
+	echo 'FAIL: valid /tmp roots and outside x/X exclusions must remain accepted'
+	fail=1
+fi
+rm -rf "$scope_outside" "$filter_root" "$cfg/root-filter.conf" "$cfg/filter.err" "$cfg/filter.out" "$cfg/filter.clean"
+scope_outside=
 mkdir "$dir/heldparent"
 ln "$dir/open a%b.txt" "$dir/heldparent/open a%b.txt"
 old "$dir/heldparent"

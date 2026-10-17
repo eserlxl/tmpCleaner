@@ -40,6 +40,10 @@ must be literal absolute paths, unquoted or simply single/double quoted;
 glob patterns in glob-capable rule types stop the run before cleaning (exit 1,
 or 2 with `--check`). Directory-root types `d`, `D`, `v`, `q`, `Q`, and `C` may
 contain literal glob characters. Existing `x`/`X` rules are preserved.
+Every non-`x`/`X` root must normalize under `/tmp` and resolve inside `/tmp`'s
+canonical tree. Outside roots and lexical or symlink escapes stop all modes
+before cleanup, including with `--prefix` (exit 1, or 2 with `--check`).
+`/tmp` itself must not be a symlink.
 
 A raw inventory can be consumed without decoding tmpfiles rules, for example
 `sudo tmpcleaner --print-in-use0 | xargs -0 -r stat --`.

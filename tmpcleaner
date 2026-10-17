@@ -541,8 +541,8 @@ generate_rules() {
 			return result
 		}
 		function under(path, prefix) { return prefix == "/" || path == prefix || index(path, prefix "/") == 1 }
-		function refuse() {
-			print "tmpcleaner: cannot safely interpret rule with in-use protection: " $0 > "/dev/stderr"
+		function refuse(reason) {
+			print "tmpcleaner: cannot safely interpret rule with in-use protection: " (reason ? reason ": " : "") $0 > "/dev/stderr"
 			exit 1
 		}
 		BEGIN {
@@ -550,6 +550,9 @@ generate_rules() {
 			while ((got = (getline prefix < ENVIRON["PROTECTED"])) > 0) prefixes[++count] = prefix
 			if (got < 0 || !count) refuse()
 			close(ENVIRON["PROTECTED"]); RS = "\n"
+			canonical_tmp = normalize("/tmp", "-ez")
+			if (failed) refuse()
+			if (canonical_tmp != "/tmp") refuse("/tmp must not be a symlink")
 		}
 		/^[[:space:]]*(#|$)/ { print; next }
 		{
@@ -572,6 +575,7 @@ generate_rules() {
 			if (type !~ /^[dDvqQC]$/ && path ~ /[[*?]/) refuse()
 			lexical = normalize(path, "-msz"); canonical = normalize(path, "-mz")
 			if (failed) refuse()
+			if (!under(lexical, "/tmp") || !under(canonical, canonical_tmp)) refuse("cleanup root is outside /tmp")
 			for (i = 1; i <= count; i++) if (under(lexical, prefixes[i]) || under(canonical, prefixes[i])) next
 			print
 		}' "$scratch/rules" > "$scratch/filtered" && mv "$scratch/filtered" "$scratch/rules" || {
