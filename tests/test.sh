@@ -17,6 +17,9 @@ detachpoint=
 sockalias=
 shmdir=
 trap 'kill $pids 2>/dev/null || :; rm -rf "$dir" "$cfg" "$shimdir" "$bindpoint" "$detachpoint" "$sockalias" "$shmdir"' EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 awk '$1 == "d" { gsub(/[bcBC]/, "", $6) } { print }' "$here/tmpcleaner.conf" |
 	sed "s#/tmp#$dir#" > "$conf"
@@ -123,7 +126,7 @@ old "$star" "$glob" "$bs" "$newline" "$carriage" "$tabbed" "$quote" "$dir/weirdX
 # Long-running jobs: one holds files open, one works inside a directory,
 # one is an executable started from the directory, one memory-maps a file.
 cp /usr/bin/sleep "$dir"
-"$dir/sleep" 60 & pids="$pids $!"
+"$dir/sleep" infinity & pids="$pids $!"
 # Sockets listening in another network namespace, which systemd-tmpfiles
 # cannot see, are still reached through their paths: one with a newline in
 # its name, one bound through ".." and one through a bind mount outside /tmp
@@ -150,7 +153,7 @@ if command -v python3 >/dev/null && unshare -rmn true 2>/dev/null; then
 	# bind mount is, while the parent, scanned first, leaves for a mount
 	# namespace without it.
 	cat > "$cfg/listen.py" <<'PY'
-import os, socket, subprocess, sys, time
+import os, signal, socket, subprocess, sys, time
 socks = []
 for path in sys.argv[1:]:
     sock = socket.socket(socket.AF_UNIX)
@@ -165,7 +168,7 @@ if os.fork() == 0:
 os.unshare(os.CLONE_NEWNS)
 subprocess.run(["umount", os.environ["MOUNTPOINT"]], check=True)
 open(os.environ["MARKER"], "w").close()
-time.sleep(60)
+signal.pause()
 PY
 	# The namespace's first process stays in our mount namespace; only the
 	# binder, started after it, sees the bind mount.
@@ -202,7 +205,7 @@ chrootsock_running=0
 if command -v python3 >/dev/null && unshare -rmn true 2>/dev/null; then
 	mkdir "$dir/sockjail"
 	unshare -rmn python3 -c '
-import os, socket, sys, time
+import os, signal, socket, sys, time
 sock = socket.socket(socket.AF_UNIX)
 sock.bind(sys.argv[1])
 sock.listen()
@@ -214,7 +217,7 @@ if os.fork() == 0:
     sys.exit()
 os.chroot(sys.argv[2])
 os.chdir("/")
-time.sleep(60)
+signal.pause()
 ' "$dir/chrootsock" "$dir/sockjail" &
 	chrootsock_pid=$!
 	pids="$pids $chrootsock_pid"
@@ -239,7 +242,7 @@ fi
 sockbatch_running=0
 if command -v python3 >/dev/null; then
 	python3 -c '
-import socket, sys, time
+import signal, socket, sys
 root = sys.argv[1]
 paths = [f"{root}/s\x271"] + [f"{root}/b{i}" for i in range(1, 206)]
 socks = []
@@ -248,7 +251,7 @@ for path in paths:
     sock.bind(path)
     sock.listen()
     socks.append(sock)
-time.sleep(60)
+signal.pause()
 	' "$dir" &
 	sockbatch_pid=$!
 	pids="$pids $sockbatch_pid"
@@ -273,13 +276,13 @@ utf8="$dir/u$(printf '\377') x"
 touch "$utf8"
 old "$utf8"
 # shellcheck disable=SC2217 # sleep only holds these files open for the in-use scan
-sleep 60 < "$utf8" & pids="$pids $!"
+sleep infinity < "$utf8" & pids="$pids $!"
 # shellcheck disable=SC2217 # sleep only holds these files open for the in-use scan
-sleep 60 < "$dir/open a%b.txt" 3<"$star" 4<"$glob" 5<"$bs" 6<"$newline" 7<"$carriage" 8<"$tabbed" 9<"$quote" & pids="$pids $!"
-(cd "$dir/workdir" && exec sleep 60) & pids="$pids $!"
+sleep infinity < "$dir/open a%b.txt" 3<"$star" 4<"$glob" 5<"$bs" 6<"$newline" 7<"$carriage" 8<"$tabbed" 9<"$quote" & pids="$pids $!"
+(cd "$dir/workdir" && exec sleep infinity) & pids="$pids $!"
 libm=$(ldconfig -p | awk '/libm\.so\.6/ { print $NF; exit }')
 cp "$libm" "$dir"
-LD_PRELOAD="$dir/libm.so.6" sleep 60 & pids="$pids $!"
+LD_PRELOAD="$dir/libm.so.6" sleep infinity & pids="$pids $!"
 waited=0
 until [ -n "$(find /proc/[0-9]*/cwd -maxdepth 0 -lname "$dir/workdir" 2>/dev/null)" ] && \
       [ -n "$(find /proc/[0-9]*/fd -maxdepth 1 -lname "$dir/open a%b.txt" 2>/dev/null)" ] && \
@@ -309,7 +312,7 @@ if unshare -rm true 2>/dev/null; then
 		done
 	touch "$dir/rootfs/data/state"
 	old "$dir/rootfs/data/state"
-	unshare -rm chroot "$dir/rootfs" /bin/env -C /bin /bin/sleep 60 &
+	unshare -rm chroot "$dir/rootfs" /bin/env -C /bin /bin/sleep infinity &
 	rootfs_pid=$!
 	pids="$pids $rootfs_pid"
 	waited=0
@@ -340,7 +343,7 @@ if unshare -rm true 2>/dev/null; then
 	unshare -rm sh -ec '
 		mount --bind "$1/work" "$2"
 		cd "$2/cwd"
-		LD_PRELOAD="$2/libm.so.6" exec "$2/sleep" 60 < "$2/f"
+		LD_PRELOAD="$2/libm.so.6" exec "$2/sleep" infinity < "$2/f"
 	' sh "$dir" "$bindpoint" &
 	bind_pid=$!
 	pids="$pids $bind_pid"
@@ -375,7 +378,7 @@ if unshare -rm true 2>/dev/null; then
 		exec 0< "$2/f"
 		umount -l "$2"
 		touch "$3/detached"
-		exec sleep 60
+		exec sleep infinity
 	' sh "$dir" "$detachpoint" "$cfg" &
 	detached_pid=$!
 	pids="$pids $detached_pid"
@@ -405,7 +408,7 @@ if [ "$rootfs_running" = 1 ] && [ "$bind_running" = 1 ]; then
 	# shellcheck disable=SC2016 # $1 and $2 are expanded by the inner sh
 	unshare -rm sh -ec '
 		mount --bind "$1/jail" "$2"
-		exec chroot "$2" /bin/env -C /bin /bin/sleep 60
+		exec chroot "$2" /bin/env -C /bin /bin/sleep infinity
 	' sh "$dir" "$bindpoint/jail" &
 	jail_pid=$!
 	pids="$pids $jail_pid"
@@ -428,7 +431,7 @@ if [ "$rootfs_running" = 1 ] && [ "$bind_running" = 1 ]; then
 	# shellcheck disable=SC2016 # $1 and $2 are expanded by the inner sh
 	unshare -rm sh -ec '
 		mount --bind "$1/alias" "$2"
-		exec chroot "$2/jail" /bin/env -C /bin /bin/sleep 60
+		exec chroot "$2/jail" /bin/env -C /bin /bin/sleep infinity
 	' sh "$dir" "$dir/aliasview" &
 	alias_pid=$!
 	pids="$pids $alias_pid"
@@ -735,7 +738,7 @@ argdir=$(mktemp -d "$dir/args.XXXXXX")
 touch "$argdir/old.txt" "$argdir/held.txt"
 old "$argdir/old.txt" "$argdir/held.txt"
 # shellcheck disable=SC2217 # sleep only holds held.txt open for the in-use scan
-sleep 300 3<"$argdir/held.txt" & held_pid=$!
+sleep infinity 3<"$argdir/held.txt" & held_pid=$!
 pids="$pids $held_pid"
 cp "$conf" "$cfg/other.conf"
 for arg in --remove --create --purge --boot --root=/ --prefix --prefix= --exclude-prefix --exclude-prefix= --exclude-prefix=old.txt "$cfg/other.conf"; do
@@ -840,10 +843,10 @@ mkdir "$dir/ctrlparent" "$dir/$ctrl_name"
 touch "$dir/ctrlparent/$ctrl_name" "$dir/$ctrl_name/f"
 old "$dir/ctrlparent/$ctrl_name" "$dir/ctrlparent" "$dir/$ctrl_name/f" "$dir/$ctrl_name"
 # shellcheck disable=SC2217 # sleep only holds the control-byte file open for --check
-sleep 60 < "$dir/ctrlparent/$ctrl_name" &
+sleep infinity < "$dir/ctrlparent/$ctrl_name" &
 ctrl_fd_pid=$!
 pids="$pids $ctrl_fd_pid"
-(cd "$dir/$ctrl_name" && exec sleep 60) &
+(cd "$dir/$ctrl_name" && exec sleep infinity) &
 ctrl_cwd_pid=$!
 pids="$pids $ctrl_cwd_pid"
 waited=0
@@ -1166,11 +1169,11 @@ if [ "$bind_running" = 1 ]; then
 		unshare -rm sh -ec '
 			if [ "$3" = direct ]; then
 				mount --bind "$1/held" "$1/big"
-				exec sleep 60 < "$1/big/f"
+				exec sleep infinity < "$1/big/f"
 			else
 				mount --bind "$1" "$2"
 				mount --bind "$1/held" "$2/big"
-				exec sleep 60 < "$2/big/f"
+				exec sleep infinity < "$2/big/f"
 			fi
 		' sh "$dir" "$bindpoint" "$mode" &
 		alias_pid=$!
