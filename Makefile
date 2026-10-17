@@ -53,4 +53,8 @@ srcinfo:
 check-srcinfo:
 	@makepkg --printsrcinfo | diff -u .SRCINFO - || { echo ".SRCINFO is stale; run make srcinfo" >&2; exit 1; }
 
-.PHONY: install install-conf uninstall test preview srcinfo check-srcinfo
+# Warning level and above; notes and style hints stay advisory.
+lint:
+	shellcheck -s sh -S warning tmpcleaner tests/test.sh
+
+.PHONY: install install-conf uninstall test preview srcinfo check-srcinfo lint

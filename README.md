@@ -98,7 +98,7 @@ sudo make install
 Variables: `PREFIX=/usr/local`, `BINDIR=$(PREFIX)/bin`, `CONFDIR=/etc/tmpcleaner`, `UNITDIR=/etc/systemd/system`, and `DESTDIR=` (staged install; skips `systemctl` calls when non-empty). `install` rewrites `ExecStart=` in the installed service to `$(BINDIR)/tmpcleaner`. `CONFDIR` does not change the wrapper's built-in default path (`/etc/tmpcleaner/tmpcleaner.conf`); if you install with a different `CONFDIR`, set `TMPCLEANER_CONF` in a service drop-in (`sudo systemctl edit tmpcleaner.service`).
 
 Targets: `preview` (dry-run to `preview.txt`), `install`, `install-conf`, `uninstall`, `test`;
-for maintainers, `srcinfo` regenerates `.SRCINFO` from `PKGBUILD` and `check-srcinfo` fails when it is stale.
+for maintainers, `srcinfo` regenerates `.SRCINFO` from `PKGBUILD` and `check-srcinfo` fails when it is stale; `lint` runs shellcheck at warning level.
 
 ## Usage
 
