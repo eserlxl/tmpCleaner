@@ -103,6 +103,7 @@ failure_metrics_ok() {
 	grep -Fxq 'tmpcleaner_removed_files 0' "$cfg/failure.prom" &&
 	grep -Fxq 'tmpcleaner_removed_directories 0' "$cfg/failure.prom" &&
 	grep -Fxq 'tmpcleaner_last_exit_status 1' "$cfg/failure.prom" &&
+	grep -Fxq "tmpcleaner_pressure_mode_active ${1:-0}" "$cfg/failure.prom" &&
 	grep -Eq '^tmpcleaner_last_run_timestamp_seconds [1-9][0-9]*$' "$cfg/failure.prom"
 }
 mkdir -p "$dir/emptydir" "$dir/freshdir" "$dir/olddir" "$dir/.X11-unix" "$dir/systemd-private-abc/tmp" "$dir/workdir" "$dir/quoted dir"
@@ -695,20 +696,31 @@ shim env TMPCLEANER_FULL_PERCENT=90 TMPCLEANER_FULL_AGE=30m TMPCLEANER_CONF="$co
 }
 lowscratch=$(mktemp -d /tmp/tmpcleaner-low.XXXXXX)
 sed "s#$dir#$lowscratch#" "$conf" > "$cfg/low.conf"
-low_err=$(shim env TMPCLEANER_FULL_PERCENT=90 TMPCLEANER_FULL_AGE=30m TMPCLEANER_CONF="$cfg/low.conf" sh "$here/tmpcleaner" 2>&1 >/dev/null)
-[ "$low_err" = 'tmpcleaner: removed 0 files and 0 directories' ] || {
+low_err=$(shim env TMPCLEANER_METRICS=$cfg/pressure.prom TMPCLEANER_FULL_PERCENT=90 TMPCLEANER_FULL_AGE=30m TMPCLEANER_CONF="$cfg/low.conf" sh "$here/tmpcleaner" 2>&1 >/dev/null)
+[ "$low_err" = 'tmpcleaner: removed 0 files and 0 directories' ] &&
+	grep -Fxq 'tmpcleaner_pressure_mode_active 0' "$cfg/pressure.prom" || {
 	echo "FAIL: a real run below the pressure threshold must not log the below-threshold line"
 	fail=1
 }
-rm -rf "$lowscratch" "$cfg/low.conf"
-for case_ in ' 95%     -' ' 50%   95%' ' 95%   50%'; do
+for case_ in ' 90%     -' ' 95%     -' ' 50%   95%' ' 95%   50%'; do
 	setdf "$case_"
 	status=0; high=$(pr 2>/dev/null) || status=$?
 	[ "$status" = 0 ] && printf '%s\n' "$high" | grep -Eq "^d $dir - - - amM:30m$" || {
 		echo "FAIL: pressure mode should switch to 30m for df line '$case_'"
 		fail=1
 	}
+	status=0
+	shim env TMPCLEANER_METRICS=$cfg/pressure.prom TMPCLEANER_FULL_PERCENT=90 TMPCLEANER_FULL_AGE=30m \
+		TMPCLEANER_CONF="$cfg/low.conf" sh "$here/tmpcleaner" >/dev/null 2>&1 || status=$?
+	if [ "$status" -ne 0 ] || ! grep -Fxq 'tmpcleaner_pressure_mode_active 1' "$cfg/pressure.prom" ||
+		! grep -Fxq 'tmpcleaner_last_exit_status 0' "$cfg/pressure.prom" ||
+		! grep -Fxq 'tmpcleaner_removed_files 0' "$cfg/pressure.prom" ||
+		! grep -Fxq 'tmpcleaner_removed_directories 0' "$cfg/pressure.prom"; then
+		echo "FAIL: pressure metrics must record the selected override ($case_)"
+		fail=1
+	fi
 done
+rm -rf "$lowscratch" "$cfg/low.conf"
 setdf ' 50%   95%'
 pr 2>&1 >/dev/null | grep -Fxq 'tmpcleaner: /tmp is 95% full (blocks 50%, inodes 95%), using age 30m' || {
 	echo "FAIL: pressure message should report both values"
@@ -1194,9 +1206,12 @@ for scanfail in STAT_SHIM_FAIL=tmp STAT_SHIM_FAIL=cached STAT_SHIM_FAIL=verify S
 	sed "s#$dir#$fresh#" "$conf" > "$cfg/scan.conf"
 	printf 'tmpcleaner_last_exit_status 0\n' > "$cfg/failure.prom"
 	rm -f "$cfg/failed-clean"
+	scan_threshold=90 scan_pressure=0
+	if [ "$scanfail" = CAT_SHIM_FAIL=1 ]; then scan_threshold=50 scan_pressure=1; fi
 	status=0
-	shim env "$scanfail" TMPCLEANER_METRICS=$cfg/failure.prom CLEAN_SHIM_MARKER=$cfg/failed-clean TMPCLEANER_CONF="$cfg/scan.conf" sh "$here/tmpcleaner" >/dev/null 2>&1 || status=$?
-	if [ "$status" -ne 1 ] || [ ! -e "$fresh/old" ] || [ -e "$cfg/failed-clean" ] || ! failure_metrics_ok; then
+	shim env "$scanfail" TMPCLEANER_FULL_PERCENT=$scan_threshold TMPCLEANER_FULL_AGE=30m \
+		TMPCLEANER_METRICS=$cfg/failure.prom CLEAN_SHIM_MARKER=$cfg/failed-clean TMPCLEANER_CONF="$cfg/scan.conf" sh "$here/tmpcleaner" >/dev/null 2>&1 || status=$?
+	if [ "$status" -ne 1 ] || [ ! -e "$fresh/old" ] || [ -e "$cfg/failed-clean" ] || ! failure_metrics_ok "$scan_pressure"; then
 		echo "FAIL: real run should exit 1 and keep old files when the scan fails ($scanfail)"
 		fail=1
 	fi
@@ -1253,7 +1268,8 @@ for mode in --print-rules --print-in-use0 --dry-run --check; do
 		cp "$cfg/metrics.expected" "$cfg/metrics.prom"
 		status=0
 		# An empty value is accepted as an unset shim failure flag.
-		shim env "${previewfail:-CAT_SHIM_FAIL=}" TMPCLEANER_METRICS=$cfg/metrics.prom TMPCLEANER_CONF="$conf" \
+		shim env "${previewfail:-CAT_SHIM_FAIL=}" TMPCLEANER_FULL_PERCENT=50 TMPCLEANER_FULL_AGE=30m \
+			TMPCLEANER_METRICS=$cfg/metrics.prom TMPCLEANER_CONF="$conf" \
 			sh "$here/tmpcleaner" "$@" >/dev/null 2>&1 || status=$?
 		if ! cmp -s "$cfg/metrics.expected" "$cfg/metrics.prom"; then
 			echo "FAIL: preview must preserve existing metrics ($mode $previewfail, status $status)"
@@ -1292,8 +1308,11 @@ if ! { [ -f "$cfg/metrics.prom" ] &&
 	grep -Eq '^tmpcleaner_last_run_timestamp_seconds [1-9][0-9]*$' "$cfg/metrics.prom" &&
 	grep -Fxq '# HELP tmpcleaner_last_exit_status Exit status of the last run.' "$cfg/metrics.prom" &&
 	grep -Fxq '# TYPE tmpcleaner_last_exit_status gauge' "$cfg/metrics.prom" &&
-	grep -Fxq 'tmpcleaner_last_exit_status 0' "$cfg/metrics.prom"; }; then
-	echo "FAIL: real run should write all four gauges matching the summary counts"
+	grep -Fxq 'tmpcleaner_last_exit_status 0' "$cfg/metrics.prom" &&
+	grep -Fxq '# HELP tmpcleaner_pressure_mode_active Whether the pressure age override was selected in the last run.' "$cfg/metrics.prom" &&
+	grep -Fxq '# TYPE tmpcleaner_pressure_mode_active gauge' "$cfg/metrics.prom" &&
+	grep -Fxq 'tmpcleaner_pressure_mode_active 0' "$cfg/metrics.prom"; }; then
+	echo "FAIL: real run should write all gauges matching the summary counts and pressure decision"
 	fail=1
 fi
 rm -f "$cfg/metrics.prom"

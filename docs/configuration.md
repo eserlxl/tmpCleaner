@@ -87,6 +87,10 @@ modes (`--print-rules`, `--print-in-use0`, `--check`, `--dry-run`) report
 `tmpcleaner: /tmp is N% full (blocks B%, inodes I%), below T%; keeping the configured age`
 on stderr, while a real run prints nothing extra.
 
+With `TMPCLEANER_METRICS` enabled, `tmpcleaner_pressure_mode_active` records this
+decision: `1` if the pressure age override was selected, even if a later step
+failed; `0` if no override was selected before exit. See [run metrics](status-and-logs.md).
+
 If `df` fails or its output cannot be parsed, tmpcleaner aborts: it prints `tmpcleaner: cannot read /tmp usage` and exits 1 (2 with `--check`) in every
 mode, and nothing is removed.
 

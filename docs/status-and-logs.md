@@ -27,11 +27,16 @@ the journal as usual, so warnings keep their severity.
 When `TMPCLEANER_METRICS` is set to the absolute path of a `*.prom` file (for
 example `/var/lib/node_exporter/textfile_collector/tmpcleaner.prom`), each real
 run atomically writes `tmpcleaner_removed_files`,
-`tmpcleaner_removed_directories`, `tmpcleaner_last_run_timestamp_seconds`, and
-`tmpcleaner_last_exit_status` gauges for the Prometheus `node_exporter`
+`tmpcleaner_removed_directories`, `tmpcleaner_last_run_timestamp_seconds`,
+`tmpcleaner_last_exit_status`, and `tmpcleaner_pressure_mode_active` gauges for the Prometheus `node_exporter`
 textfile collector. Preview modes (`--dry-run`, `--print-rules`, `--print-in-use0`, `--check`)
 never touch the file, and a write failure logs one line to stderr without
 changing the run's exit status.
+
+`tmpcleaner_pressure_mode_active` is `1` when the run selected the pressure age
+override, including when a later step failed. It is `0` when no override was
+selected, including disabled pressure mode and failures before that decision.
+This records the decision, not whether any paths were removed.
 
 Metrics publication is armed after CLI and metrics-path validation and preview
 classification, before scratch creation. Real runs that fail after that point

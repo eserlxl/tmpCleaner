@@ -152,6 +152,9 @@ tmpcleaner_last_run_timestamp_seconds $now
 # HELP tmpcleaner_last_exit_status Exit status of the last run.
 # TYPE tmpcleaner_last_exit_status gauge
 tmpcleaner_last_exit_status $exit_status
+# HELP tmpcleaner_pressure_mode_active Whether the pressure age override was selected in the last run.
+# TYPE tmpcleaner_pressure_mode_active gauge
+tmpcleaner_pressure_mode_active $metric_pressure_active
 EOF
 	} 2>/dev/null; then
 		:
@@ -160,7 +163,7 @@ EOF
 		echo "tmpcleaner: cannot write metrics to $TMPCLEANER_METRICS" >&2
 	fi
 }
-scratch='' metric_files=0 metric_directories=0
+scratch='' metric_files=0 metric_directories=0 metric_pressure_active=0
 finish() {
 	exit_status=$?
 	trap - EXIT
@@ -242,6 +245,7 @@ if [ "${TMPCLEANER_FULL_PERCENT+x}" ] && [ "${TMPCLEANER_FULL_AGE+x}" ]; then
 	[ "$inode_use" -le "$usage" ] || usage=$inode_use
 	if [ "$usage" -ge "$TMPCLEANER_FULL_PERCENT" ]; then
 		TMPCLEANER_AGE=$TMPCLEANER_FULL_AGE
+		metric_pressure_active=1
 		echo "tmpcleaner: /tmp is $usage% full (blocks $block_use%, inodes $inode_use%), using age $TMPCLEANER_AGE" >&2
 	elif [ "$previewing" = 1 ]; then
 		echo "tmpcleaner: /tmp is $usage% full (blocks $block_use%, inodes $inode_use%), below $TMPCLEANER_FULL_PERCENT%; keeping the configured age" >&2
