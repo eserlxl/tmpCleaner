@@ -72,6 +72,7 @@ errstatus=1
 check=
 if [ "${1:-}" = --check ]; then
 	errstatus=2
+	cr=$(printf '\r')
 	[ "$#" -ge 2 ] || { echo "tmpcleaner: --check requires one absolute path under /tmp" >&2; exit 2; }
 	requested=$2
 	shift 2
@@ -108,7 +109,7 @@ if [ "${1:-}" = --check ]; then
 		exit 2
 	}
 	case "$check" in
-		*"$nl"*) echo "tmpcleaner: --check cannot match a path that contains a newline" >&2; exit 2 ;;
+		*"$nl"*|*"$cr"*) echo "tmpcleaner: --check cannot match a path that contains a newline or carriage return" >&2; exit 2 ;;
 	esac
 	case "$check" in
 		/tmp/*) ;;
@@ -646,7 +647,7 @@ if [ -n "$check" ]; then
 	# Preview lines are text a crafted name can forge, so errors may only lean
 	# towards "would be removed" (a false alarm), never towards a false "kept":
 	# a directory counts as removable once its lines cover all its entries, and
-	# entries whose names hold a newline (their lines cannot be read) stop the check.
+	# entries with newlines or carriage returns (their lines cannot be read) stop the check.
 	dir=${check%/*}
 	while [ -n "$dir" ]; do
 		[ -r "$dir" ] || { echo "tmpcleaner: --check cannot read $requested" >&2; exit 2; }
@@ -655,8 +656,8 @@ if [ -n "$check" ]; then
 	done
 	entries=0
 	if [ -d "$check" ] && [ ! -L "$check" ]; then
-		if [ -n "$(find "$check" -mindepth 1 -name "*$nl*" -print -quit 2>/dev/null)" ]; then
-			echo "tmpcleaner: --check cannot judge a directory holding names with newlines" >&2
+		if [ -n "$(find "$check" -mindepth 1 \( -name "*$nl*" -o -name "*$cr*" \) -print -quit 2>/dev/null)" ]; then
+			echo "tmpcleaner: --check cannot judge a directory holding names with newlines or carriage returns" >&2
 			exit 2
 		fi
 		entries=$(find "$check" -mindepth 1 -printf . 2>/dev/null) || {

@@ -23,8 +23,9 @@ paths or missing arguments, unreadable configuration, invalid `TMPCLEANER_*`
 values, missing `/proc`, a failed in-use scan, and a `systemd-tmpfiles` failure
 other than 73. Each prints a message. Exit 1 therefore always means "kept". It reads the preview's text, which a
 crafted file name can imitate, so it may raise a false "would be removed" but
-never a false "kept"; a directory holding names with newlines, or a path whose
-directories cannot be read, cannot be judged and exits 2.
+never a false "kept"; paths containing newlines (LF) or carriage returns (CR),
+directories holding such names, and paths whose directories cannot be read
+cannot be judged and exit 2.
 
 Append repeated `--exclude-prefix=PATH` options to check a path with the same
 temporary exclusions as a real run, for example

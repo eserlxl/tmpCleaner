@@ -1185,7 +1185,7 @@ if [ "$status" -ne 1 ] || [ "$check_out" != "kept: $dir/workdir/f" ] || [ "$chec
 	fail=1
 fi
 # Control bytes in held children and in-use ancestors are replaced with "?" on stderr.
-ctrl_name=$(printf 'c\001\t\r\033\177z')
+ctrl_name=$(printf 'c\001\t\002\033\177z')
 mkdir "$dir/ctrlparent" "$dir/$ctrl_name"
 touch "$dir/ctrlparent/$ctrl_name" "$dir/$ctrl_name/f"
 old "$dir/ctrlparent/$ctrl_name" "$dir/ctrlparent" "$dir/$ctrl_name/f" "$dir/$ctrl_name"
@@ -1262,6 +1262,25 @@ if [ "$status" -ne 2 ]; then
 	echo "FAIL: --check should refuse a directory holding names with newlines"
 	fail=1
 fi
+# CR is rewritten as a line break by the backend, so it cannot yield a verdict.
+mkdir "$dir/check${cr}root" "$dir/check-cr-child"
+touch "$dir/check${cr}file" "$dir/check-cr-child/child${cr}name"
+old "$dir/check${cr}file" "$dir/check${cr}root" "$dir/check-cr-child/child${cr}name" "$dir/check-cr-child"
+for target in "$dir/check${cr}file" "$dir/check${cr}root" "$dir/check-cr-child"; do
+	status=0
+	TMPCLEANER_CONF=$conf CLEAN_SHIM_MARKER=$cfg/check-cr.calls sh "$here/tmpcleaner" --check "$target" \
+		> "$cfg/check-cr.out" 2> "$cfg/check-cr.err" || status=$?
+	if [ "$status" -ne 2 ] || [ -s "$cfg/check-cr.out" ] ||
+		! grep -Fq 'carriage return' "$cfg/check-cr.err" || [ ! -e "$target" ]; then
+		echo 'FAIL: --check must reject CR paths and descendants without a verdict or deletion'
+		fail=1
+	fi
+done
+if [ ! -e "$dir/check-cr-child/child${cr}name" ] || grep -v -- --dry-run "$cfg/check-cr.calls"; then
+	echo 'FAIL: CR checks must preserve descendants and invoke only backend previews'
+	fail=1
+fi
+rm -rf "$dir/check${cr}file" "$dir/check${cr}root" "$dir/check-cr-child" "$cfg/check-cr.calls"
 mkdir -p "$dir/unreadable" "$dir/unreadable_parent/sub" "$dir/xonly"
 touch "$dir/xonly/old.txt"
 old "$dir/unreadable" "$dir/unreadable_parent/sub" "$dir/unreadable_parent" "$dir/xonly/old.txt" "$dir/xonly"
