@@ -46,4 +46,11 @@ preview:
 	if [ $$rc -ne 0 ] && [ $$rc -ne 73 ]; then cat preview.txt >&2; exit $$rc; fi; \
 	echo "$$(grep -c 'Would remove' preview.txt) entries would be removed; see preview.txt"
 
-.PHONY: install install-conf uninstall test preview
+# Maintainer helpers for the AUR package: makepkg is only needed here, not by test.
+srcinfo:
+	makepkg --printsrcinfo > .SRCINFO
+
+check-srcinfo:
+	@makepkg --printsrcinfo | diff -u .SRCINFO - || { echo ".SRCINFO is stale; run make srcinfo" >&2; exit 1; }
+
+.PHONY: install install-conf uninstall test preview srcinfo check-srcinfo
