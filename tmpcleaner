@@ -20,6 +20,7 @@ Options:
   -h, --help       Show this help message and exit
   --print-rules    Print generated tmpfiles rules and exit
   --check PATH     Report whether an existing absolute /tmp path would be removed
+                   Accepts trailing --exclude-prefix=PATH filters
                    Exit 0 if removed, 1 if kept (only), 2 for an error (invalid
                    path or usage, unreadable config, invalid TMPCLEANER_* value,
                    missing /proc, a failed in-use scan, or a systemd-tmpfiles
@@ -67,8 +68,16 @@ errstatus=1
 check=
 if [ "${1:-}" = --check ]; then
 	errstatus=2
-	[ "$#" -eq 2 ] || { echo "tmpcleaner: --check requires one absolute path under /tmp" >&2; exit 2; }
-	case "$2" in
+	[ "$#" -ge 2 ] || { echo "tmpcleaner: --check requires one absolute path under /tmp" >&2; exit 2; }
+	requested=$2
+	shift 2
+	for arg do
+		case "$arg" in
+			--exclude-prefix=/*) ;;
+			*) echo "tmpcleaner: unsupported argument: $arg" >&2; exit 2 ;;
+		esac
+	done
+	case "$requested" in
 		/tmp/*) ;;
 		*) echo "tmpcleaner: --check requires an absolute path under /tmp" >&2; exit 2 ;;
 	esac
@@ -76,7 +85,7 @@ if [ "${1:-}" = --check ]; then
 	# Resolve symlinked parent directories (the preview prints real paths) but
 	# keep the last component itself, which systemd-tmpfiles handles as is.
 	# The sentinel keeps trailing newlines that command substitution would strip.
-	path=$2
+	path=$requested
 	while [ "$path" != / ] && [ "${path%/}" != "$path" ]; do path=${path%/}; done
 	base=${path##*/}
 	case "$base" in
@@ -84,14 +93,14 @@ if [ "${1:-}" = --check ]; then
 		*) parent=${path%/*} ;;
 	esac
 	check=$(realpath -e -- "${parent:-/}" 2>/dev/null && printf x) || {
-		echo "tmpcleaner: --check path does not exist: $2" >&2
+		echo "tmpcleaner: --check path does not exist: $requested" >&2
 		exit 2
 	}
 	check=${check%x}
 	check=${check%"$nl"}
 	[ -z "$base" ] || check=${check%/}/$base
 	[ -e "$check" ] || [ -L "$check" ] || {
-		echo "tmpcleaner: --check path does not exist: $2" >&2
+		echo "tmpcleaner: --check path does not exist: $requested" >&2
 		exit 2
 	}
 	case "$check" in
@@ -99,7 +108,7 @@ if [ "${1:-}" = --check ]; then
 	esac
 	case "$check" in
 		/tmp/*) ;;
-		*) echo "tmpcleaner: --check path must be under /tmp: $2" >&2; exit 2 ;;
+		*) echo "tmpcleaner: --check path must be under /tmp: $requested" >&2; exit 2 ;;
 	esac
 fi
 
@@ -111,7 +120,7 @@ scratch=$(mktemp -d 2>/dev/null) && { printf x > "$scratch/excludes"; } 2>/dev/n
 } || { echo "tmpcleaner: cannot create a scratch directory" >&2; exit "$errstatus"; }
 trap 'rm -rf "$scratch"' EXIT
 printf '%s\0' "$scratch" > "$scratch/excludes"
-if [ "${1:-}" != --check ]; then
+if [ "$#" -gt 0 ]; then
 	n=$#
 	while [ "$n" -gt 0 ]; do
 		arg=$1
@@ -171,6 +180,7 @@ case "${1:-}" in
 		done
 		;;
 esac
+[ -z "$check" ] || previewing=1
 if [ "${TMPCLEANER_FULL_PERCENT+x}" ] && [ "${TMPCLEANER_FULL_AGE+x}" ]; then
 	printf '%s\0' "$TMPCLEANER_FULL_PERCENT" | LC_ALL=C grep -zEq '^([1-9][0-9]?|100)$' || {
 		echo "tmpcleaner: invalid TMPCLEANER_FULL_PERCENT: $TMPCLEANER_FULL_PERCENT" >&2
@@ -442,8 +452,7 @@ rules() {
 	# LC_ALL=C: names are bytes, not text. In a UTF-8 locale "." skips invalid
 	# bytes, so a name holding one would leave its rule half quoted.
 	in_use > "$scratch/inuse" || return 1
-	cat "$scratch/excludes" >> "$scratch/inuse" || return 1
-	LC_ALL=C sort -zu "$scratch/inuse" > "$scratch/sorted" || return 1
+	LC_ALL=C sort -zu "$scratch/inuse" "$scratch/excludes" > "$scratch/sorted" || return 1
 	LC_ALL=C sed -z -e '/[[*?]/s/[][*?\\]/\\&/g' -e 's/[\\"]/\\&/g' \
 		-e "$control_escapes" -e 's/%/%%/g' -e 's/.*/x "&"/' \
 		"$scratch/sorted" > "$scratch/excl" || return 1
@@ -484,7 +493,7 @@ if [ -n "$check" ]; then
 	# entries whose names hold a newline (their lines cannot be read) stop the check.
 	dir=${check%/*}
 	while [ -n "$dir" ]; do
-		[ -r "$dir" ] || { echo "tmpcleaner: --check cannot read $2" >&2; exit 2; }
+		[ -r "$dir" ] || { echo "tmpcleaner: --check cannot read $requested" >&2; exit 2; }
 		[ "$dir" = /tmp ] && break
 		dir=${dir%/*}
 	done
@@ -495,7 +504,7 @@ if [ -n "$check" ]; then
 			exit 2
 		fi
 		entries=$(find "$check" -mindepth 1 -printf . 2>/dev/null) || {
-			echo "tmpcleaner: --check cannot read $2" >&2
+			echo "tmpcleaner: --check cannot read $requested" >&2
 			exit 2
 		}
 		entries=${#entries}
@@ -518,7 +527,7 @@ if [ -n "$check" ]; then
 		END { exit !(found_file || (found_directory && inside >= ENVIRON["ENTRIES"] + 0)) }
 		' "$scratch/preview" || verdict=$?
 	# The checked name may come from /tmp too: mask control bytes like the reasons.
-	shown=$(printf '%s' "$2" | LC_ALL=C tr '\001-\037\177' '[?*]')
+	shown=$(printf '%s' "$requested" | LC_ALL=C tr '\001-\037\177' '[?*]')
 	case "$verdict" in
 		0)
 			printf 'would be removed: %s\n' "$shown"
@@ -531,6 +540,10 @@ if [ -n "$check" ]; then
 					path = ENVIRON["CHECK"]
 					prefix = path "/"
 				}
+				FILENAME == ARGV[2] {
+					if ($0 == path || $0 == "/" || index(path, $0 "/") == 1) excluded = 1
+					next
+				}
 				$0 == path { exact = 1; exit }
 				# A file name is untrusted: no control bytes reach the terminal.
 				index($0, prefix) == 1 && held == "" { held = $0; gsub(/[\001-\037\177]/, "?", held) }
@@ -539,9 +552,10 @@ if [ -n "$check" ]; then
 					if (exact) print "tmpcleaner: in use by a running process"
 					else if (held != "") print "tmpcleaner: holds an in-use path: " held
 					else if (ancestor != "") print "tmpcleaner: inside an in-use directory: " ancestor
+					else if (excluded) print "tmpcleaner: kept by an explicit --exclude-prefix"
 					else print "tmpcleaner: not old enough, or kept by a configuration rule"
 				}
-				' "$scratch/sorted" >&2
+				' "$scratch/inuse" "$scratch/excludes" >&2
 			printf 'kept: %s\n' "$shown"
 			exit 1
 			;;

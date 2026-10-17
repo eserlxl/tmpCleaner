@@ -820,6 +820,43 @@ for name in old.txt 'open a%b.txt' new.txt; do
 		fail=1
 	fi
 done
+# A path check can evaluate the same temporary exclusions as a real run.
+for exclusion_case in exact ancestor multiple symlink dotdot unrelated in-use; do
+	target=$dir/old.txt
+	set -- "--exclude-prefix=$target"
+	expected_status=1
+	expected_err='tmpcleaner: kept by an explicit --exclude-prefix'
+	case "$exclusion_case" in
+		ancestor) target=$dir/olddir/f; set -- "--exclude-prefix=$dir/olddir" ;;
+		multiple) set -- "--exclude-prefix=$dir/new.txt" "--exclude-prefix=$target" ;;
+		symlink) set -- "--exclude-prefix=$dir/selflink/old.txt" ;;
+		dotdot) set -- "--exclude-prefix=$dir/nonexistent/../old.txt" ;;
+		unrelated) set -- "--exclude-prefix=$dir/new.txt"; expected_status=0; expected_err= ;;
+		in-use)
+			target=$dir/'open a%b.txt'
+			set -- "--exclude-prefix=$target"
+			expected_err='tmpcleaner: in use by a running process'
+			;;
+	esac
+	status=0
+	check_out=$(TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --check "$target" "$@" 2>"$cfg/check.err") || status=$?
+	check_err=$(cat "$cfg/check.err")
+	if [ "$expected_status" = 0 ]; then expected="would be removed: $target"; else expected="kept: $target"; fi
+	if [ "$status" -ne "$expected_status" ] || [ "$check_out" != "$expected" ] ||
+		[ "$check_err" != "$expected_err" ] || [ ! -e "$target" ]; then
+		echo "FAIL: --check should honor $exclusion_case exclusions without deleting the path or misreporting its holder"
+		fail=1
+	fi
+done
+for arg in --prefix=/tmp --dry-run --remove --help --exclude-prefix --exclude-prefix= --exclude-prefix=relative extra; do
+	status=0
+	check_err=$(TMPCLEANER_CONF=$dir/missing.conf sh "$here/tmpcleaner" --check "$dir/old.txt" \
+		"--exclude-prefix=$dir/old.txt" "$arg" 2>&1) || status=$?
+	if [ "$status" -ne 2 ] || [ "$check_err" != "tmpcleaner: unsupported argument: $arg" ] || [ ! -e "$dir/old.txt" ]; then
+		echo "FAIL: --check should reject $arg before reading configuration or cleaning"
+		fail=1
+	fi
+done
 mkdir "$dir/heldparent"
 ln "$dir/open a%b.txt" "$dir/heldparent/open a%b.txt"
 old "$dir/heldparent"

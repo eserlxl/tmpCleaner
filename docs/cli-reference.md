@@ -14,7 +14,8 @@ Every `tmpcleaner` option, what `--check` reports, and its exit statuses.
 same age, pressure and in-use rules as a real run; when a path is kept, it also
 prints one reason line to stderr (`tmpcleaner: in use by a running process`,
 `tmpcleaner: holds an in-use path: ...`,
-`tmpcleaner: inside an in-use directory: ...`, or
+`tmpcleaner: inside an in-use directory: ...`,
+`tmpcleaner: kept by an explicit --exclude-prefix`, or
 `tmpcleaner: not old enough, or kept by a configuration rule`). Control bytes in
 these paths are printed as `?`. Every error exits 2: invalid
 paths or missing arguments, unreadable configuration, invalid `TMPCLEANER_*`
@@ -23,6 +24,13 @@ other than 73. Each prints a message. Exit 1 therefore always means "kept". It r
 crafted file name can imitate, so it may raise a false "would be removed" but
 never a false "kept"; a directory holding names with newlines, or a path whose
 directories cannot be read, cannot be judged and exits 2.
+
+Append repeated `--exclude-prefix=PATH` options to check a path with the same
+temporary exclusions as a real run, for example
+`sudo tmpcleaner --check /tmp/my-job/file --exclude-prefix=/tmp/my-job`.
+Exclusions use the same canonicalized, literal paths as other modes. Actual
+in-use protection keeps its own reason. Other trailing options, including
+`--prefix` and `--dry-run`, are rejected before configuration is read.
 
 A failed in-use scan stops every mode before `systemd-tmpfiles` runs
 (`--print-rules` prints nothing to stdout; `--dry-run` and the real run exit
