@@ -1715,7 +1715,7 @@ rm -rf "$list_root"
 # (birth and ctime stay current even when atime and mtime are backdated).
 dir2=$(mktemp -d /tmp/tmpcleaner-test.XXXXXX)
 conf2=$cfg/conf2
-trap 'kill $pids 2>/dev/null || :; rm -rf "$dir" "$cfg" "$dir2" "$bindpoint" "$detachpoint" "$sockalias"' EXIT
+trap 'kill $pids 2>/dev/null || :; rm -rf "$dir" "$cfg" "$dir2" "$shimdir" "$bindpoint" "$detachpoint" "$sockalias"' EXIT
 
 sed "s#/tmp#$dir2#" "$here/tmpcleaner.conf" > "$conf2"
 touch "$dir2/extracted.txt"
@@ -1756,7 +1756,7 @@ done
 # The three-way config upgrade that decides whether a reinstall keeps or replaces
 # an admin's exclusions.
 confdir=$(mktemp -d /tmp/tmpcleaner-test.XXXXXX)
-trap 'kill $pids 2>/dev/null || :; rm -rf "$dir" "$cfg" "$dir2" "$confdir" "$bindpoint" "$detachpoint" "$sockalias"' EXIT
+trap 'kill $pids 2>/dev/null || :; rm -rf "$dir" "$cfg" "$dir2" "$confdir" "$shimdir" "$bindpoint" "$detachpoint" "$sockalias"' EXIT
 confsource=$confdir/source
 confdest="$confdir/stage safe"
 confpath="$confdest/target [safe]"
@@ -1804,7 +1804,7 @@ rm -rf "$confdir"
 # Staged install (package build): honors DESTDIR, PREFIX and UNITDIR, rewrites
 # ExecStart in the installed unit, and never invokes systemctl.
 staged=$(mktemp -d /tmp/tmpcleaner-test.XXXXXX)
-trap 'kill $pids 2>/dev/null || :; rm -rf "$dir" "$cfg" "$dir2" "$staged" "$bindpoint" "$detachpoint" "$sockalias"' EXIT
+trap 'kill $pids 2>/dev/null || :; rm -rf "$dir" "$cfg" "$dir2" "$staged" "$shimdir" "$bindpoint" "$detachpoint" "$sockalias"' EXIT
 staged_dest="$staged/root safe"
 staged_units="/usr/lib/systemd units"
 mkdir "$staged/fakes"
