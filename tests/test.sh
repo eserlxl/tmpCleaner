@@ -1424,7 +1424,7 @@ printf 'x %s/e/kept\n' "$count_root" >> "$cfg/count.conf"
 mkdir -p "$count_root/overlap/nested"
 touch "$count_root/overlap/nested/old"
 old "$count_root/overlap/nested/old"
-printf 'd %s/overlap - - - amM:12h\nD %s/overlap/nested - - - amM:12h\n' "$count_root" "$count_root" >> "$cfg/count.conf"
+printf 'd %s/overlap//. - - - amM:12h\nD %s/overlap//nested/. - - - amM:12h\n' "$count_root" "$count_root" >> "$cfg/count.conf"
 printf 'tmpcleaner: removed: %s/overlap/nested/old\n' "$count_root" >> "$cfg/count.expected"
 count_files=8 count_dirs=0
 backend_major=$(systemd-tmpfiles --version | awk 'NR == 1 { print $2 + 0 }')

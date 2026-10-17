@@ -683,6 +683,8 @@ LC_ALL=C awk 'substr($1, 1, 1) ~ /^[dDevqQCrR]$/ {
 	"$scratch/rules" > "$scratch/roots"
 snapshot() {
 	while IFS= read -r root; do
+		# Keep overlapping walks identical without following root symlinks.
+		root=$(realpath -ms -- "$root" 2>/dev/null) || continue
 		find "$root" -xdev -samefile "$scratch" -prune -o -printf '%y %p\0' 2>/dev/null || :
 	done < "$scratch/roots" | LC_ALL=C sort -zu > "$1"
 }
