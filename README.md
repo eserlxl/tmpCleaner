@@ -215,7 +215,10 @@ filesystem without inode accounting (such as btrfs) prints `-` for inodes, which
 counts as 0. At or above the threshold, it overrides every `d` rule's duration,
 including `TMPCLEANER_AGE`, and reports
 `tmpcleaner: /tmp is N% full (blocks B%, inodes I%), using age X` on stderr.
-Below the threshold, the configured age or `TMPCLEANER_AGE` applies.
+Below the threshold, the configured age or `TMPCLEANER_AGE` applies; preview
+modes (`--print-rules`, `--check`, `--dry-run`) report
+`tmpcleaner: /tmp is N% full (blocks B%, inodes I%), below T%; keeping the configured age`
+on stderr, while a real run prints nothing extra.
 
 If `df` fails or its output cannot be parsed, tmpcleaner aborts: it prints `tmpcleaner: cannot read /tmp usage` and exits 1 (2 with `--check`) in every
 mode, and nothing is removed.

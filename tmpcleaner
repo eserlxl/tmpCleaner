@@ -146,6 +146,15 @@ if [ "${TMPCLEANER_AGE+x}" ]; then
 		exit "$errstatus"
 	}
 fi
+previewing=0
+case "${1:-}" in
+	--print-rules|--check) previewing=1 ;;
+	*)
+		for arg do
+			[ "$arg" = --dry-run ] && previewing=1
+		done
+		;;
+esac
 if [ "${TMPCLEANER_FULL_PERCENT+x}" ] && [ "${TMPCLEANER_FULL_AGE+x}" ]; then
 	printf '%s\0' "$TMPCLEANER_FULL_PERCENT" | LC_ALL=C grep -zEq '^([1-9][0-9]?|100)$' || {
 		echo "tmpcleaner: invalid TMPCLEANER_FULL_PERCENT: $TMPCLEANER_FULL_PERCENT" >&2
@@ -168,6 +177,8 @@ if [ "${TMPCLEANER_FULL_PERCENT+x}" ] && [ "${TMPCLEANER_FULL_AGE+x}" ]; then
 	if [ "$usage" -ge "$TMPCLEANER_FULL_PERCENT" ]; then
 		TMPCLEANER_AGE=$TMPCLEANER_FULL_AGE
 		echo "tmpcleaner: /tmp is $usage% full (blocks $block_use%, inodes $inode_use%), using age $TMPCLEANER_AGE" >&2
+	elif [ "$previewing" = 1 ]; then
+		echo "tmpcleaner: /tmp is $usage% full (blocks $block_use%, inodes $inode_use%), below $TMPCLEANER_FULL_PERCENT%; keeping the configured age" >&2
 	fi
 fi
 

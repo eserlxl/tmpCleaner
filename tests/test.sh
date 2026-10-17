@@ -462,11 +462,26 @@ fi
 configured_age=$(printf '%s\n' "$rules" | grep '^d ')
 pr() { shim env TMPCLEANER_FULL_PERCENT=90 TMPCLEANER_FULL_AGE=30m TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --print-rules; }
 setdf ' 50%     -'
-status=0; low=$(pr 2>/dev/null) || status=$?
-[ "$status" = 0 ] && [ "$(printf '%s\n' "$low" | grep '^d ')" = "$configured_age" ] || {
-	echo "FAIL: 50% blocks and '-' inodes should keep the configured age"
+status=0; low=$(pr 2>"$cfg/pr.err") || status=$?
+[ "$status" = 0 ] && [ "$(printf '%s\n' "$low" | grep '^d ')" = "$configured_age" ] &&
+	[ "$(cat "$cfg/pr.err")" = 'tmpcleaner: /tmp is 50% full (blocks 50%, inodes 0%), below 90%; keeping the configured age' ] || {
+	echo "FAIL: 50% blocks and '-' inodes should keep the configured age and report usage in --print-rules"
 	fail=1
 }
+rm -f "$cfg/pr.err"
+shim env TMPCLEANER_FULL_PERCENT=90 TMPCLEANER_FULL_AGE=30m TMPCLEANER_CONF="$conf" sh "$here/tmpcleaner" --dry-run 2>&1 >/dev/null |
+	grep -Fxq 'tmpcleaner: /tmp is 50% full (blocks 50%, inodes 0%), below 90%; keeping the configured age' || {
+	echo "FAIL: --dry-run should report below-threshold usage"
+	fail=1
+}
+lowscratch=$(mktemp -d /tmp/tmpcleaner-low.XXXXXX)
+sed "s#$dir#$lowscratch#" "$conf" > "$cfg/low.conf"
+low_err=$(shim env TMPCLEANER_FULL_PERCENT=90 TMPCLEANER_FULL_AGE=30m TMPCLEANER_CONF="$cfg/low.conf" sh "$here/tmpcleaner" 2>&1 >/dev/null)
+[ "$low_err" = 'tmpcleaner: removed 0 files and 0 directories' ] || {
+	echo "FAIL: a real run below the pressure threshold must not log the below-threshold line"
+	fail=1
+}
+rm -rf "$lowscratch" "$cfg/low.conf"
 for case_ in ' 95%     -' ' 50%   95%' ' 95%   50%'; do
 	setdf "$case_"
 	status=0; high=$(pr 2>/dev/null) || status=$?
