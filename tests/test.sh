@@ -625,19 +625,37 @@ if [ "$status" -ne 0 ]; then
 fi
 for name in old.txt 'open a%b.txt' new.txt; do
 	status=0
-	check_out=$(TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --check "$dir/$name") || status=$?
+	check_out=$(TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --check "$dir/$name" 2>"$cfg/check.err") || status=$?
+	check_err=$(cat "$cfg/check.err")
 	if [ "$name" = old.txt ]; then
 		expected="would be removed: $dir/$name"
+		expected_err=
 		expected_status=0
+	elif [ "$name" = 'open a%b.txt' ]; then
+		expected="kept: $dir/$name"
+		expected_err='tmpcleaner: in use by a running process'
+		expected_status=1
 	else
 		expected="kept: $dir/$name"
+		expected_err='tmpcleaner: not old enough, or kept by a configuration rule'
 		expected_status=1
 	fi
-	if [ "$status" -ne "$expected_status" ] || [ "$check_out" != "$expected" ] || [ ! -e "$dir/$name" ]; then
+	if [ "$status" -ne "$expected_status" ] || [ "$check_out" != "$expected" ] || [ "$check_err" != "$expected_err" ] || [ ! -e "$dir/$name" ]; then
 		echo "FAIL: --check should report $name without deleting it"
 		fail=1
 	fi
 done
+mkdir "$dir/heldparent"
+ln "$dir/open a%b.txt" "$dir/heldparent/open a%b.txt"
+old "$dir/heldparent"
+status=0
+check_out=$(TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --check "$dir/heldparent" 2>"$cfg/check.err") || status=$?
+check_err=$(cat "$cfg/check.err")
+rm -rf "$dir/heldparent" "$cfg/check.err"
+if [ "$status" -ne 1 ] || [ "$check_out" != "kept: $dir/heldparent" ] || [ "$check_err" != "tmpcleaner: holds an in-use path: $dir/heldparent/open a%b.txt" ]; then
+	echo "FAIL: --check should explain an old directory holding an in-use file"
+	fail=1
+fi
 # The caller's systemd log settings must not hide or reshape the preview lines.
 for log_env in SYSTEMD_LOG_LEVEL=warning SYSTEMD_LOG_LEVEL=err SYSTEMD_LOG_TARGET=journal \
 	SYSTEMD_LOG_COLOR=1 SYSTEMD_LOG_LOCATION=1 SYSTEMD_LOG_TIME=1 SYSTEMD_LOG_TID=1; do
@@ -649,8 +667,10 @@ for log_env in SYSTEMD_LOG_LEVEL=warning SYSTEMD_LOG_LEVEL=err SYSTEMD_LOG_TARGE
 	fi
 done
 status=0
-check_out=$(TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --check "$dir/mixed") || status=$?
-if [ "$status" -ne 1 ] || [ "$check_out" != "kept: $dir/mixed" ]; then
+check_out=$(TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --check "$dir/mixed" 2>"$cfg/check.err") || status=$?
+check_err=$(cat "$cfg/check.err")
+rm -f "$cfg/check.err"
+if [ "$status" -ne 1 ] || [ "$check_out" != "kept: $dir/mixed" ] || [ "$check_err" != 'tmpcleaner: not old enough, or kept by a configuration rule' ]; then
 	echo "FAIL: --check should keep an old directory that still holds a fresh file"
 	fail=1
 fi

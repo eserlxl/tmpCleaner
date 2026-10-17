@@ -106,8 +106,11 @@ Targets: `preview` (dry-run to `preview.txt`), `install`, `install-conf`, `unins
 - `--dry-run`, `--prefix=PATH`, `--exclude-prefix=PATH`: `--dry-run` previews; `--prefix=PATH` only applies rules with that prefix (passed to `systemd-tmpfiles`); `--exclude-prefix=PATH` (absolute path, `=` form only; parent directories are canonicalized so `..` components and symlinked parents still match) keeps PATH and everything below it, in addition to the in-use protection, and never lets a path that is in use be removed (`sudo tmpcleaner --dry-run --exclude-prefix=/tmp/my-job`); any other argument (for example `--remove`, `--create`, `--purge`, `--boot`, `--root=...`, `--replace=...`, or a positional config file) exits 2 before any config is read or anything is cleaned.
 
 `--check PATH` requires an existing absolute path under `/tmp`. It prints
-`would be removed: PATH` (exit 0) or `kept: PATH` (exit 1, only), using the
-same age, pressure and in-use rules as a real run. Every error exits 2: invalid
+`would be removed: PATH` (exit 0) or `kept: PATH` (exit 1, only) on stdout, using the
+same age, pressure and in-use rules as a real run; when a path is kept, it also
+prints one reason line to stderr (`tmpcleaner: in use by a running process`,
+`tmpcleaner: holds an in-use path: ...`, or
+`tmpcleaner: not old enough, or kept by a configuration rule`). Every error exits 2: invalid
 paths or missing arguments, unreadable configuration, invalid `TMPCLEANER_*`
 values, missing `/proc`, a failed in-use scan, and a `systemd-tmpfiles` failure
 other than 73. Each prints a message. Exit 1 therefore always means "kept". It reads the preview's text, which a
