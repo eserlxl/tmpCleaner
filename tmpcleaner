@@ -356,7 +356,7 @@ in_use() {
 		# name before it; each name is resolved as every process holding the
 		# socket sees it (one per mount namespace and root), and only a real
 		# socket on /tmp is kept, so a forged record can keep no other file.
-		function sockets(pid, file, line, n, k, inode, name, who, count, h, args, queued, saved, ns, path) {
+		function sockets(pid, file, line, n, k, inode, name, who, count, h, args, queued, saved, ns, path, real) {
 			file = "/proc/" pid "/net/unix"
 			saved = RS
 			RS = "\n"
@@ -372,9 +372,12 @@ in_use() {
 			RS = saved
 			for (k = 1; k <= n; k++) {
 				if (substr(name[k], 1, 1) != "/") continue
-				count = split((inode[k] in holders) ? holders[inode[k]] : pid, who, " ")
+				real = (inode[k] in holders)
+				count = split(real ? holders[inode[k]] : pid, who, " ")
 				for (h = 1; h <= count; h++) {
-					args = args " " quote("/proc/" who[h] "/root" name[k])
+					path = "/proc/" who[h] "/root" name[k]
+					if (real) sock_holder[path] = who[h]
+					args = args " " quote(path)
 					queued++
 					# A socket may have been bound before its holder chrooted.
 					ns = namespace[who[h]]
@@ -404,13 +407,17 @@ in_use() {
 		}
 		# Keep the sockets on the /tmp filesystem among the quoted paths in
 		# args (one stat for many: a process per name would cost seconds).
-		function verify(args, cmd, line, saved, ok, status) {
-			cmd = "stat -L --cached=always --printf \"%d %i %F\\0\" -- /" args " 2>/dev/null"
+		function verify(args, cmd, line, saved, ok, status, path) {
+			cmd = "stat -L --cached=always --printf \"%d %i %F %n\\0\" -- /" args " 2>/dev/null"
 			saved = RS
 			RS = "\0"
 			while ((cmd | getline line) > 0) {
 				if (!ok++) continue
-				if (split(line, id, " ") == 3 && id[1] == tmpdev && id[3] == "socket") want(id[2])
+				if (split(line, id, " ") >= 4 && id[1] == tmpdev && id[3] == "socket") {
+					path = line
+					sub(/^[^ ]+ +[^ ]+ +[^ ]+ /, "", path)
+					want(id[2], sock_holder[path])
+				}
 			}
 			status = close(cmd)
 			RS = saved

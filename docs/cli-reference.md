@@ -14,9 +14,9 @@ Every `tmpcleaner` option, what `--check` reports, and its exit statuses.
 `would be removed: PATH` (exit 0) or `kept: PATH` (exit 1, only) on stdout, using the
 same age, pressure and in-use rules as a real run; when a path is kept, it also
 prints one reason line to stderr (`tmpcleaner: in use by a running process: PID ... (...)`
-(or without `: PID ...` when only a socket inode was matched),
+(or without `: PID ...` when no holder PID is known),
 `tmpcleaner: holds an in-use path: ...; used by PID ... (...)`
-(or without `; used by PID ...` when only a socket inode was matched),
+(or without `; used by PID ...` when no holder PID is known),
 `tmpcleaner: inside an in-use directory: ...; used by PID ... (...)`,
 `tmpcleaner: kept by an explicit --exclude-prefix`, or
 `tmpcleaner: not old enough, or kept by a configuration rule`). Control bytes in

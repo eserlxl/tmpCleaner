@@ -1282,7 +1282,7 @@ if [ "$sockbatch_running" = 1 ]; then
 	check_out=$(TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --check "$dir/b205" 2>"$cfg/check.err") || status=$?
 	check_err=$(cat "$cfg/check.err")
 	rm -f "$cfg/check.err"
-	if [ "$status" -ne 1 ] || [ "$check_out" != "kept: $dir/b205" ] || [ "$check_err" != "tmpcleaner: in use by a running process" ] || [ ! -e "$dir/b205" ]; then
+	if [ "$status" -ne 1 ] || [ "$check_out" != "kept: $dir/b205" ] || [ "$check_err" != "tmpcleaner: in use by a running process: PID $sockbatch_pid (python3)" ] || [ ! -e "$dir/b205" ]; then
 		echo "FAIL: --check should explain a live socket without deleting it"
 		fail=1
 	fi
