@@ -838,10 +838,37 @@ for arg do
 		# Preview lines are text a crafted name could inflate, so the count is an
 		# estimate, like the --check preview parser.
 		LC_ALL=C awk '
-		/^Would remove directory "/ { directories++; next }
-		/^Would remove "/ { files++; next }
+		function track(path, rest, slash) {
+			if (index(path, "/tmp/") != 1) return
+			rest = substr(path, 6)
+			if (rest == "") return
+			slash = index(rest, "/")
+			group[slash ? "/tmp/" substr(rest, 1, slash - 1) : path]++
+		}
+		# Only a line that closes its quote names a whole path for the breakdown.
+		/^Would remove directory "/ {
+			directories++
+			if (/"$/) track(substr($0, 25, length($0) - 25))
+			next
+		}
+		/^Would remove "/ {
+			files++
+			if (/"$/) track(substr($0, 15, length($0) - 15))
+			next
+		}
 		END {
 			printf "tmpcleaner: would remove %d files and %d directories\n", files, directories
+			for (i = 1; i <= 10; i++) {
+				best = ""
+				for (g in group) {
+					if (best == "" || group[g] > group[best] || (group[g] == group[best] && g < best)) best = g
+				}
+				if (best == "") break
+				shown = best
+				gsub(/[\001-\037\177]/, "?", shown)
+				printf "tmpcleaner:   %d under %s\n", group[best], shown
+				delete group[best]
+			}
 		}
 		' "$scratch/stderr" >&2
 		exit "$status"

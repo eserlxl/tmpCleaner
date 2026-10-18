@@ -17,7 +17,8 @@ detachpoint=
 sockalias=
 shmdir=
 scope_outside=
-trap 'kill $pids 2>/dev/null || :; rm -rf "$dir" "$cfg" "$shimdir" "$bindpoint" "$detachpoint" "$sockalias" "$shmdir" "$scope_outside"' EXIT
+ctrl_top=
+trap 'kill $pids 2>/dev/null || :; rm -rf "$dir" "$cfg" "$shimdir" "$bindpoint" "$detachpoint" "$sockalias" "$shmdir" "$scope_outside" "$ctrl_top"' EXIT
 trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
@@ -837,8 +838,11 @@ fi
 
 status=0
 preview=$(TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --dry-run 2>&1) || status=$?
+preview_files=$(printf '%s\n' "$preview" | grep -c '^Would remove ".*"$')
+preview_dirs=$(printf '%s\n' "$preview" | grep -c '^Would remove directory ".*"$')
 if [ "$status" -ne 0 ] || ! { [ "$(printf '%s\n' "$preview" | grep -c '^tmpcleaner: would remove [0-9]')" = 1 ] &&
-	printf '%s\n' "$preview" | grep -Fxq "tmpcleaner: would remove $(printf '%s\n' "$preview" | grep -c '^Would remove "') files and $(printf '%s\n' "$preview" | grep -c '^Would remove directory "') directories"; }; then
+	printf '%s\n' "$preview" | grep -Fxq "tmpcleaner: would remove $(printf '%s\n' "$preview" | grep -c '^Would remove "') files and $(printf '%s\n' "$preview" | grep -c '^Would remove directory "') directories" &&
+	printf '%s\n' "$preview" | grep -Fxq "tmpcleaner:   $((preview_files + preview_dirs)) under $dir"; }; then
 	echo "FAIL: preview should exit 0 and announce removal counts"
 	fail=1
 fi
@@ -850,6 +854,23 @@ echo "$preview" | grep -q 'Would remove.*old\.txt' || {
 	echo "FAIL: old.txt should still exist"
 	fail=1
 }
+ctrl_top=$(mktemp -d "$(printf '/tmp/tmpcleaner-ctrl-\001\t\177-XXXXXX')")
+touch "$ctrl_top/a" "$ctrl_top/b"
+old "$ctrl_top/a" "$ctrl_top/b" "$ctrl_top"
+printf 'd "%s" - - - amM:12h\nd "%s" - - - amM:12h\n' "$dir" "$ctrl_top" > "$cfg/breakdown.conf"
+ctrl_masked=$(printf '%s' "$ctrl_top" | LC_ALL=C tr '\001-\037\177' '[?*]')
+breakdown_out=$(TMPCLEANER_CONF=$cfg/breakdown.conf sh "$here/tmpcleaner" --dry-run 2>&1)
+rm -rf "$ctrl_top" "$cfg/breakdown.conf"
+ctrl_top=
+# The breakdown config keeps no x rules, so count its own closed preview lines under $dir.
+dir_count=$(printf '%s\n' "$breakdown_out" | awk -v p="$dir/" '
+	/"$/ && (index($0, "Would remove \"" p) == 1 || index($0, "Would remove directory \"" p) == 1) { n++ }
+	END { print n + 0 }')
+if [ "$(printf '%s\n' "$breakdown_out" | grep -c '^tmpcleaner: would remove')" -ne 1 ] || [ "$dir_count" -le 2 ] ||
+	[ "$(printf '%s\n' "$breakdown_out" | grep '^tmpcleaner:   ')" != "$(printf 'tmpcleaner:   %d under %s\ntmpcleaner:   2 under %s' "$dir_count" "$dir" "$ctrl_masked")" ]; then
+	echo "FAIL: preview should list top-level /tmp entries in descending count order and mask control bytes"
+	fail=1
+fi
 [ "$fail" = 0 ] || exit 1
 
 argdir=$(mktemp -d "$dir/args.XXXXXX")
