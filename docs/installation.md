@@ -56,7 +56,7 @@ systemd after installation but does not stop an already running timer.
 Staged installs skip all service actions with either value; uninstall still
 disables and stops the timer when `DESTDIR` is empty.
 
-`install` runs `install-conf` first: reinstalling upgrades an unedited `/etc/tmpcleaner/tmpcleaner.conf` in place, or keeps an edited config and writes new defaults to `/etc/tmpcleaner/tmpcleaner.conf.new` (using `tmpcleaner.conf.default` to compare; an install from before `.default` existed gets a `.new` once). Run `sudo make install-conf` to update the config alone.
+`install` runs `install-conf` first: reinstalling upgrades an unedited `/etc/tmpcleaner/tmpcleaner.conf` in place, or keeps an edited config and writes new defaults to `/etc/tmpcleaner/tmpcleaner.conf.new` (using `tmpcleaner.conf.default` to compare; an install from before `.default` existed gets a `.new` once, unless its config already matches the shipped file). Run `sudo make install-conf` to update the config alone.
 
 #### Makefile variables and targets
 
