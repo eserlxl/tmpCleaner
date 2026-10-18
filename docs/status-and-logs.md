@@ -58,6 +58,20 @@ the last real run that exited `0`. Failed runs carry forward the previous value
 from an existing metrics file, or write `0` when no prior successful timestamp
 is recorded.
 
+```yaml
+groups:
+  - name: tmpcleaner
+    rules:
+      - alert: TmpcleanerStalled
+        expr: time() - tmpcleaner_last_success_timestamp_seconds > 3600 and tmpcleaner_last_success_timestamp_seconds > 0
+        for: 15m
+```
+
+The 3600 threshold allows four cycles of the 15-minute timer interval before
+alerting, while a value of `0` means the cleaner has never succeeded since
+metrics were enabled (`tmpcleaner_last_success_timestamp_seconds == 0 and
+tmpcleaner_last_exit_status != 0`).
+
 `tmpcleaner_pressure_mode_active` is `1` when the run selected the pressure age
 override, including when a later step failed. It is `0` when no override was
 selected, including disabled pressure mode and failures before that decision.
