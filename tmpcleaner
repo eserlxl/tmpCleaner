@@ -70,6 +70,7 @@ nl='
 '
 errstatus=1
 check=
+holders_file=
 if [ "${1:-}" = --check ]; then
 	errstatus=2
 	cr=$(printf '\r')
@@ -309,7 +310,8 @@ in_use() {
 		printf '%s\0' /proc/[0-9]*/root /proc/[0-9]*/exe /proc/[0-9]*/cwd /proc/[0-9]*/fd/* |
 			LC_ALL=C xargs -0 sh -c 'printf "batch\0"; exec stat -L --cached=always --printf "%d %i %n %F\0" -- / "$@" 2>/dev/null' sh ||
 			[ "$?" -lt 124 ] || printf 'fail\0fail\0'
-	} | LC_ALL=C awk -v tmpdev="$tmpdev" -v devhex="$devhex" '
+	# POSIX leaves export of assignments before a function call unspecified.
+	} | HOLDERS=$holders_file LC_ALL=C awk -v tmpdev="$tmpdev" -v devhex="$devhex" '
 		BEGIN {
 			RS = "\0"
 		}
@@ -533,7 +535,8 @@ rules() {
 	# C-escape \ " and all control bytes for the quoted field and double % (specifier).
 	# LC_ALL=C: names are bytes, not text. In a UTF-8 locale "." skips invalid
 	# bytes, so a name holding one would leave its rule half quoted.
-	HOLDERS=${check:+$scratch/holders} in_use > "$scratch/inuse" || return 1
+	[ -z "$check" ] || holders_file=$scratch/holders
+	in_use > "$scratch/inuse" || return 1
 	LC_ALL=C sort -zu "$scratch/inuse" "$scratch/excludes" > "$scratch/sorted" || return 1
 	LC_ALL=C sed -z -e '/[[*?]/s/[][*?\\]/\\&/g' -e 's/[\\"]/\\&/g' \
 		-e "$control_escapes" -e 's/%/%%/g' -e 's/.*/x "&"/' \
