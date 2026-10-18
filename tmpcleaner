@@ -38,6 +38,7 @@ When the in-use scan fails, nothing is removed and every mode exits non-zero.
 Environment variables:
   TMPCLEANER_CONF           Path to configuration file
                             (default: /etc/tmpcleaner/tmpcleaner.conf)
+                            Drop-ins: <path>.d/*.conf, read after it in byte order
   TMPCLEANER_AGE            Override duration on every d rule (e.g. 6h, 30m)
   TMPCLEANER_FULL_PERCENT   Threshold percentage of /tmp usage (1-100); the
                             larger of block and inode usage counts ('-' = 0).

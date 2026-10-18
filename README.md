@@ -88,6 +88,9 @@ for anything that must survive even while no program uses it:
 x /tmp/my-long-job-*
 ```
 
+A `*.conf` file in `/etc/tmpcleaner/tmpcleaner.conf.d/` works the same and
+survives package upgrades (see [docs/configuration.md](docs/configuration.md)).
+
 Age overrides, the opt-in pressure mode (a shorter age when `/tmp` is nearly
 full, which applies to **every unprotected file**), and the other service
 settings are in [docs/configuration.md](docs/configuration.md).
