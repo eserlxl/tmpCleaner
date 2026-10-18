@@ -716,6 +716,28 @@ if [ -n "$check" ]; then
 			;;
 		1)
 			CHECK=$check HOLDERS=$scratch/holders LC_ALL=C awk '
+				function holders(target, holders_file, hpath, hpids, n, pid_list, i, pid, seen, shown_pids, comm_file, comm, who) {
+					holders_file = ENVIRON["HOLDERS"]
+					while ((getline hpath < holders_file) > 0 && (getline hpids < holders_file) > 0) {
+						if (hpath == target) {
+							n = split(hpids, pid_list, " ")
+							for (i = 1; i <= n && shown_pids < 3; i++) {
+								pid = pid_list[i]
+								if (pid in seen) continue
+								seen[pid] = 1
+								comm_file = "/proc/" pid "/comm"
+								comm = (getline comm < comm_file) > 0 ? comm : "?"
+								close(comm_file)
+								sub(/\n$/, "", comm)
+								gsub(/[\001-\037\177]/, "?", comm)
+								if (comm == "") comm = "?"
+								who = who (shown_pids++ ? ", " : "") "PID " pid " (" comm ")"
+							}
+						}
+					}
+					close(holders_file)
+					return who
+				}
 				BEGIN {
 					RS = "\0"
 					path = ENVIRON["CHECK"]
@@ -727,33 +749,19 @@ if [ -n "$check" ]; then
 				}
 				$0 == path { exact = 1; exit }
 				# A file name is untrusted: no control bytes reach the terminal.
-				index($0, prefix) == 1 && held == "" { held = $0; gsub(/[\001-\037\177]/, "?", held) }
-				index(path, $0 "/") == 1 && ancestor == "" { ancestor = $0; gsub(/[\001-\037\177]/, "?", ancestor) }
+				index($0, prefix) == 1 && held == "" { held_raw = held = $0; gsub(/[\001-\037\177]/, "?", held) }
+				index(path, $0 "/") == 1 && ancestor == "" { ancestor_raw = ancestor = $0; gsub(/[\001-\037\177]/, "?", ancestor) }
 				END {
 					if (exact) {
-						holders_file = ENVIRON["HOLDERS"]
-						while ((getline hpath < holders_file) > 0 && (getline hpids < holders_file) > 0) {
-							if (hpath == path) {
-								n = split(hpids, pid_list, " ")
-								for (i = 1; i <= n && shown_pids < 3; i++) {
-									pid = pid_list[i]
-									if (pid in seen) continue
-									seen[pid] = 1
-									comm_file = "/proc/" pid "/comm"
-									comm = (getline comm < comm_file) > 0 ? comm : "?"
-									close(comm_file)
-									sub(/\n$/, "", comm)
-									gsub(/[\001-\037\177]/, "?", comm)
-									if (comm == "") comm = "?"
-									who = who (shown_pids++ ? ", " : "") "PID " pid " (" comm ")"
-								}
-							}
-						}
-						close(holders_file)
+						who = holders(path)
 						print "tmpcleaner: in use by a running process" (who != "" ? ": " who : "")
-					} else if (held != "") print "tmpcleaner: holds an in-use path: " held
-					else if (ancestor != "") print "tmpcleaner: inside an in-use directory: " ancestor
-					else if (excluded) print "tmpcleaner: kept by an explicit --exclude-prefix"
+					} else if (held != "") {
+						who = holders(held_raw)
+						print "tmpcleaner: holds an in-use path: " held (who != "" ? "; used by " who : "")
+					} else if (ancestor != "") {
+						who = holders(ancestor_raw)
+						print "tmpcleaner: inside an in-use directory: " ancestor (who != "" ? "; used by " who : "")
+					} else if (excluded) print "tmpcleaner: kept by an explicit --exclude-prefix"
 					else print "tmpcleaner: not old enough, or kept by a configuration rule"
 				}
 				' "$scratch/inuse" "$scratch/excludes" >&2

@@ -322,7 +322,8 @@ sleep infinity < "$utf8" & pids="$pids $!"
 # shellcheck disable=SC2217 # sleep only holds these files open for the in-use scan
 sleep infinity < "$dir/open a%b.txt" 3<"$star" 4<"$glob" 5<"$bs" 6<"$newline" 7<"$carriage" 8<"$tabbed" 9<"$quote" & held_pid=$!
 pids="$pids $held_pid"
-(cd "$dir/workdir" && exec sleep infinity) & pids="$pids $!"
+(cd "$dir/workdir" && exec sleep infinity) & workdir_pid=$!
+pids="$pids $workdir_pid"
 libm=$(ldconfig -p | awk '/libm\.so\.6/ { print $NF; exit }')
 cp "$libm" "$dir"
 LD_PRELOAD="$dir/libm.so.6" sleep infinity & pids="$pids $!"
@@ -1051,7 +1052,7 @@ for filter_name in keep 'keep[ab]' 'keep%root' "keep' quoted"; do
 		expected_err='tmpcleaner: kept by an explicit --exclude-prefix'
 		if [ "$filter_scope" = in-use ]; then
 			set --
-			expected_err="tmpcleaner: inside an in-use directory: $filter_keep"
+			expected_err="tmpcleaner: inside an in-use directory: $filter_keep; used by PID $filter_pid (sleep)"
 		fi
 		check_out=$(TMPCLEANER_CONF=$cfg/root-filter.conf sh "$here/tmpcleaner" --check "$filter_keep/old" \
 			"$@" 2>"$cfg/check.err") || status=$?
@@ -1261,7 +1262,7 @@ status=0
 check_out=$(TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --check "$dir/heldparent" 2>"$cfg/check.err") || status=$?
 check_err=$(cat "$cfg/check.err")
 rm -rf "$dir/heldparent" "$cfg/check.err"
-if [ "$status" -ne 1 ] || [ "$check_out" != "kept: $dir/heldparent" ] || [ "$check_err" != "tmpcleaner: holds an in-use path: $dir/heldparent/open a%b.txt" ]; then
+if [ "$status" -ne 1 ] || [ "$check_out" != "kept: $dir/heldparent" ] || [ "$check_err" != "tmpcleaner: holds an in-use path: $dir/heldparent/open a%b.txt; used by PID $held_pid (sleep)" ]; then
 	echo "FAIL: --check should explain an old directory holding an in-use file"
 	fail=1
 fi
@@ -1269,7 +1270,7 @@ status=0
 check_out=$(TMPCLEANER_CONF="$conf" sh "$here/tmpcleaner" --check "$dir/workdir/f" 2>"$cfg/check.err") || status=$?
 check_err=$(cat "$cfg/check.err")
 rm -f "$cfg/check.err"
-if [ "$status" -ne 1 ] || [ "$check_out" != "kept: $dir/workdir/f" ] || [ "$check_err" != "tmpcleaner: inside an in-use directory: $dir/workdir" ]; then
+if [ "$status" -ne 1 ] || [ "$check_out" != "kept: $dir/workdir/f" ] || [ "$check_err" != "tmpcleaner: inside an in-use directory: $dir/workdir; used by PID $workdir_pid (sleep)" ]; then
 	echo "FAIL: --check should explain a file inside an in-use directory"
 	fail=1
 fi
@@ -1298,14 +1299,14 @@ done
 status=0
 check_out=$(TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --check "$dir/ctrlparent" 2>"$cfg/check.err") || status=$?
 check_err=$(cat "$cfg/check.err")
-if [ "$status" -ne 1 ] || [ "$check_out" != "kept: $dir/ctrlparent" ] || [ "$check_err" != "tmpcleaner: holds an in-use path: $dir/ctrlparent/c?????z" ]; then
+if [ "$status" -ne 1 ] || [ "$check_out" != "kept: $dir/ctrlparent" ] || [ "$check_err" != "tmpcleaner: holds an in-use path: $dir/ctrlparent/c?????z; used by PID $ctrl_fd_pid (sleep)" ]; then
 	echo "FAIL: --check should sanitize control bytes in a held child path"
 	fail=1
 fi
 status=0
 check_out=$(TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --check "$dir/$ctrl_name/f" 2>"$cfg/check.err") || status=$?
 check_err=$(cat "$cfg/check.err")
-if [ "$status" -ne 1 ] || [ "$check_out" != "kept: $dir/c?????z/f" ] || [ "$check_err" != "tmpcleaner: inside an in-use directory: $dir/c?????z" ]; then
+if [ "$status" -ne 1 ] || [ "$check_out" != "kept: $dir/c?????z/f" ] || [ "$check_err" != "tmpcleaner: inside an in-use directory: $dir/c?????z; used by PID $ctrl_cwd_pid (sleep)" ]; then
 	echo "FAIL: --check should sanitize control bytes in an in-use ancestor directory"
 	fail=1
 fi
