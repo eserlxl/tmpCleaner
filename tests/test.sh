@@ -1436,7 +1436,9 @@ printf 'd %s - - - 12h\n' "$dir" > "$cfg/mount.conf"
 : > "$cfg/mount.empty"
 head -n 1 /proc/self/mountinfo > "$cfg/mount.truncated"
 printf '1 2 0:1 / /tmp/truncated rw - tmpfs\n' >> "$cfg/mount.truncated"
-for mount_info in "$cfg/mount.missing" "$cfg/mount.empty" "$cfg/mount.truncated"; do
+printf '1 2 0:1 / /tmp rw - tmpfs tmpfs rw\n' > "$cfg/mount.invalid"
+printf '%s\n' '2 1 0:1 / /tmp/bad\007mount rw - tmpfs tmpfs rw' >> "$cfg/mount.invalid"
+for mount_info in "$cfg/mount.missing" "$cfg/mount.empty" "$cfg/mount.truncated" "$cfg/mount.invalid"; do
 	for mode in real dry check rules raw; do
 		case "$mode" in
 			real) set -- ;;
@@ -1449,8 +1451,9 @@ for mount_info in "$cfg/mount.missing" "$cfg/mount.empty" "$cfg/mount.truncated"
 		MOUNTINFO_SHIM_FILE=$mount_info CLEAN_SHIM_STATUS=99 CLEAN_SHIM_MARKER=$cfg/mount.clean \
 			TMPCLEANER_CONF=$cfg/mount.conf sh "$here/tmpcleaner" "$@" > "$cfg/mount.out" 2> "$cfg/mount.err" || status=$?
 		expected=1; [ "$mode" != check ] || expected=2
+		expected_err=mountinfo; [ "$mount_info" != "$cfg/mount.invalid" ] || expected_err='invalid mountinfo path'
 		if [ "$status" -ne "$expected" ] || [ -s "$cfg/mount.out" ] || [ -e "$cfg/mount.clean" ] ||
-			! grep -Fq mountinfo "$cfg/mount.err"; then
+			! grep -Fq "$expected_err" "$cfg/mount.err"; then
 			echo "FAIL: mountinfo failure must stop $mode before cleanup ($mount_info)"
 			fail=1
 		fi
