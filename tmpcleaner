@@ -827,7 +827,13 @@ snapshot() {
 		fi
 	done < "$scratch/roots" | LC_ALL=C sort -zu > "$1"
 }
-snapshot "$scratch/before" "$scratch/sizes"
+sizes_file=
+if [ -n "${TMPCLEANER_METRICS:-}" ]; then
+	sizes_file=$scratch/sizes
+	snapshot "$scratch/before" "$sizes_file"
+else
+	snapshot "$scratch/before"
+fi
 
 status=0
 if [ "${TMPCLEANER_LIST:-}" = nul ]; then
@@ -838,16 +844,18 @@ fi
 
 snapshot "$scratch/after"
 LC_ALL=C comm -z -23 "$scratch/before" "$scratch/after" |
-	COUNTS=$scratch/counts SIZES=$scratch/sizes LC_ALL=C awk -v list="${TMPCLEANER_LIST:-}" '
+	COUNTS=$scratch/counts SIZES=$sizes_file LC_ALL=C awk -v list="${TMPCLEANER_LIST:-}" '
 	BEGIN {
 		RS = "\0"
 		bytes = 0
 		sizes_file = ENVIRON["SIZES"]
-		while ((getline record < sizes_file) > 0) {
-			sep = index(record, " ")
-			if (sep > 1) sizes[substr(record, sep + 1)] = substr(record, 1, sep - 1) + 0
+		if (sizes_file != "") {
+			while ((getline record < sizes_file) > 0) {
+				sep = index(record, " ")
+				if (sep > 1) sizes[substr(record, sep + 1)] = substr(record, 1, sep - 1) + 0
+			}
+			close(sizes_file)
 		}
-		close(sizes_file)
 		for (i = 1; i < 32; i++) escapes[sprintf("%c", i)] = sprintf("\\x%02x", i)
 		escapes[sprintf("%c", 127)] = "\\x7f"
 		escapes[sprintf("%c", 92)] = "\\x5c"

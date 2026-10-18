@@ -57,6 +57,9 @@ case "\${FIND_SHIM_FAIL:-}:\$*" in
 	walk-killed:"/tmp -xdev -printf"*) "$(command -v find)" /tmp -maxdepth 0 -printf '%i %p\0'; kill -KILL \$\$ ;;
 	killed:/proc/self/ns/mnt*) "$(command -v find)" /proc/self/ns/mnt -maxdepth 0 -type l -printf '%p\0%l\0'; kill -KILL \$\$ ;;
 esac
+case "\$*" in
+	*-fprintf*) [ -z "\${FIND_SHIM_FPRINTF_MARKER:-}" ] || : > "\$FIND_SHIM_FPRINTF_MARKER" ;;
+esac
 exec "$(command -v find)" "\$@"
 SHIM
 cat > "$shimdir/mktemp" <<SHIM
@@ -1611,6 +1614,20 @@ if [ "$status" -ne 0 ] || [ -e "$size_root/a" ] || [ -e "$size_root/olddir" ] ||
 	fail=1
 fi
 rm -rf "$size_root" "$cfg/size.conf" "$cfg/size.prom"
+size_root=$(mktemp -d "$dir/sizes.XXXXXX")
+mkdir "$size_root/olddir"
+printf '123' > "$size_root/olddir/f"
+old "$size_root/olddir/f" "$size_root/olddir"
+sed "s#$dir#$size_root#" "$conf" > "$cfg/size.conf"
+rm -f "$cfg/find.fprintf"
+status=0
+shim env FIND_SHIM_FPRINTF_MARKER=$cfg/find.fprintf TMPCLEANER_CONF=$cfg/size.conf \
+	sh "$here/tmpcleaner" >/dev/null 2>&1 || status=$?
+if [ "$status" -ne 0 ] || [ -e "$size_root/olddir/f" ] || [ -e "$cfg/find.fprintf" ]; then
+	echo 'FAIL: metrics-disabled run must not pass -fprintf to find'
+	fail=1
+fi
+rm -rf "$size_root" "$cfg/size.conf" "$cfg/find.fprintf"
 [ "$fail" = 0 ] || exit 1
 
 run_log=$(env -u LC_ALL LANG=C.UTF-8 TMPCLEANER_LIST=1 TMPCLEANER_METRICS="$cfg/metrics.prom" TMPCLEANER_CONF="$conf" sh "$here/tmpcleaner" 2>&1 >/dev/null)
