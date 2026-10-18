@@ -239,8 +239,8 @@ if [ "$#" -gt 0 ]; then
 fi
 
 dropins() {
-	if [ -d "$conf.d" ]; then
-		[ -r "$conf.d" ] && [ -x "$conf.d" ] || {
+	if [ -e "$conf.d" ] || [ -L "$conf.d" ]; then
+		[ -d "$conf.d" ] && [ -r "$conf.d" ] && [ -x "$conf.d" ] || {
 			echo "tmpcleaner: cannot read $conf.d" >&2
 			exit "$errstatus"
 		}

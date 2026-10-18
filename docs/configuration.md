@@ -19,7 +19,8 @@ locale), each followed by a newline, so packages and configuration management
 tools can install their own exclusions (for example
 `/etc/tmpcleaner/tmpcleaner.conf.d/50-my-job.conf`) without editing
 `tmpcleaner.conf`. Other filenames and subdirectories in the directory are
-ignored, and a missing or empty directory is not an error; an unreadable or
+ignored, and a missing or empty directory is not an error; a dangling
+`*.conf.d` symlink, a non-directory `*.conf.d` entry, an unreadable or
 unsearchable `*.conf.d` directory, a dangling `*.conf` symlink, or any other
 unreadable or non-regular `*.conf` entry stops the run before cleaning.
 
@@ -61,8 +62,9 @@ Service environment settings below go in a unit drop-in via `sudo systemctl edit
 
 A configuration file other than the installed one can be previewed with
 `sudo env TMPCLEANER_CONF=/path/to/custom.conf tmpcleaner --dry-run`; an
-unreadable file, `*.conf.d` directory, or `*.conf` drop-in (including a
-dangling symlink) stops the run before cleaning.
+unreadable file, dangling `*.conf.d` symlink, non-directory `*.conf.d` entry,
+unreadable `*.conf.d` directory, or `*.conf` drop-in (including a dangling
+symlink) stops the run before cleaning.
 
 ## Override the age
 

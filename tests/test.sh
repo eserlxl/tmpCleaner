@@ -1256,6 +1256,50 @@ for dropin_mode in real dry check rules raw; do
 done
 rm -rf "$scope_outside" "$cfg/conf.d/70-outside.conf"
 scope_outside=
+mv "$cfg/conf.d" "$cfg/conf.d.fixture"
+ln -s "$cfg/missing-target" "$cfg/conf.d"
+for dropin_mode in real dry check rules raw; do
+	case "$dropin_mode" in
+		real) set -- ;;
+		dry) set -- --dry-run ;;
+		check) set -- --check "$dropin_root/kept" ;;
+		rules) set -- --print-rules ;;
+		raw) set -- --print-in-use0 ;;
+	esac
+	status=0
+	CLEAN_SHIM_STATUS=99 CLEAN_SHIM_MARKER=$cfg/dropin.clean TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" "$@" \
+		> "$cfg/dropin.out" 2> "$cfg/dropin.err" || status=$?
+	expected=1; [ "$dropin_mode" != check ] || expected=2
+	if [ "$status" -ne "$expected" ] || [ -s "$cfg/dropin.out" ] || [ -e "$cfg/dropin.clean" ] ||
+		[ ! -e "$dropin_root/kept" ] ||
+		! grep -Fxq "tmpcleaner: cannot read $cfg/conf.d" "$cfg/dropin.err"; then
+		echo "FAIL: dangling conf.d symlink must stop $dropin_mode before cleaning"
+		fail=1
+	fi
+done
+rm -f "$cfg/conf.d"
+touch "$cfg/conf.d"
+for dropin_mode in real dry check rules raw; do
+	case "$dropin_mode" in
+		real) set -- ;;
+		dry) set -- --dry-run ;;
+		check) set -- --check "$dropin_root/kept" ;;
+		rules) set -- --print-rules ;;
+		raw) set -- --print-in-use0 ;;
+	esac
+	status=0
+	CLEAN_SHIM_STATUS=99 CLEAN_SHIM_MARKER=$cfg/dropin.clean TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" "$@" \
+		> "$cfg/dropin.out" 2> "$cfg/dropin.err" || status=$?
+	expected=1; [ "$dropin_mode" != check ] || expected=2
+	if [ "$status" -ne "$expected" ] || [ -s "$cfg/dropin.out" ] || [ -e "$cfg/dropin.clean" ] ||
+		[ ! -e "$dropin_root/kept" ] ||
+		! grep -Fxq "tmpcleaner: cannot read $cfg/conf.d" "$cfg/dropin.err"; then
+		echo "FAIL: regular-file conf.d must stop $dropin_mode before cleaning"
+		fail=1
+	fi
+done
+rm -f "$cfg/conf.d"
+mv "$cfg/conf.d.fixture" "$cfg/conf.d"
 if [ "$(id -u)" -ne 0 ]; then
 	chmod 000 "$cfg/conf.d/50-keep.conf"
 	for dropin_mode in real dry check rules raw; do
