@@ -630,9 +630,9 @@ printf '%s\n' "$age_rules" | grep -Eq "^d $dir - - - amM:8h$" || {
 # The override sets the age field itself: a short rule gains it, and a
 # trailing argument field is left alone.
 for rule in "d $dir|d $dir - - - 8h" "d $dir - - - amM:6h -|d $dir - - - amM:8h -" \
-	"d $dir - - - ~amM:6h|d $dir - - - ~amM:8h"; do
+	"d $dir - - - ~amM:6h|d $dir - - - ~amM:8h" "d- $dir - - - amM:12h|d- $dir - - - amM:8h"; do
 	printf '%s\n' "${rule%%|*}" > "$cfg/short.conf"
-	got=$(TMPCLEANER_AGE=8h TMPCLEANER_CONF=$cfg/short.conf sh "$here/tmpcleaner" --print-rules | grep '^d ')
+	got=$(TMPCLEANER_AGE=8h TMPCLEANER_CONF=$cfg/short.conf sh "$here/tmpcleaner" --print-rules | grep '^d')
 	[ "$got" = "${rule#*|}" ] || {
 		echo "FAIL: age override should set field 6 of: ${rule%%|*}"
 		fail=1
