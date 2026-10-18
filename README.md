@@ -58,8 +58,9 @@ from a source install to the package, and uninstalling are in
 [docs/installation.md](docs/installation.md).
 
 > [!WARNING]
-> `sudo make uninstall` deletes the whole `/etc/tmpcleaner` directory, including
-> local exclusions; back up `/etc/tmpcleaner/tmpcleaner.conf` first if you edited it.
+> `sudo make uninstall` removes `tmpcleaner.conf`, its `.default`/`.new` copies,
+> and the `tmpcleaner.conf.d` drop-ins (the local exclusions), while keeping
+> anything else in the directory; `KEEP_CONFIG=1` keeps the configuration.
 
 ## What gets deleted
 

@@ -90,11 +90,13 @@ Pacman preserves an edited `/etc/tmpcleaner/tmpcleaner.conf` as `/etc/tmpcleaner
 sudo make uninstall
 ```
 
-**Warning:** By default, `make uninstall` deletes the whole configuration directory, including
-local exclusions; back up `/etc/tmpcleaner/tmpcleaner.conf` first if you edited it.
+**Warning:** By default, `make uninstall` removes `tmpcleaner.conf`, its `.default`/`.new`
+copies, and the `tmpcleaner.conf.d` drop-ins (the local exclusions), while keeping anything
+else in the directory (removing `CONFDIR` itself only when empty); back up your rules first
+or pass `KEEP_CONFIG=1` to keep the configuration.
 
-To retain the entire configuration directory, including `.default`, `.new` and
-local files or subdirectories, use:
+To keep the configuration (`tmpcleaner.conf`, its `.default`/`.new` copies, and
+`tmpcleaner.conf.d`), use:
 
 ```sh
 sudo make uninstall KEEP_CONFIG=1

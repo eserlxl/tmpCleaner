@@ -63,7 +63,9 @@ ifeq ($(DESTDIR),)
 endif
 	rm -f -- $(call shell_quote,$(DESTDIR)$(UNITDIR)/tmpcleaner.service) $(call shell_quote,$(DESTDIR)$(UNITDIR)/tmpcleaner.timer)
 ifeq ($(KEEP_CONFIG),0)
-	rm -rf -- $(call shell_quote,$(DESTDIR)$(CONFDIR))
+	rm -f -- $(call shell_quote,$(DESTDIR)$(CONFDIR)/tmpcleaner.conf) $(call shell_quote,$(DESTDIR)$(CONFDIR)/tmpcleaner.conf.default) $(call shell_quote,$(DESTDIR)$(CONFDIR)/tmpcleaner.conf.new)
+	rm -rf -- $(call shell_quote,$(DESTDIR)$(CONFDIR)/tmpcleaner.conf.d)
+	if [ -d $(call shell_quote,$(DESTDIR)$(CONFDIR)) ]; then rmdir --ignore-fail-on-non-empty -- $(call shell_quote,$(DESTDIR)$(CONFDIR)); fi
 endif
 	rm -f -- $(call shell_quote,$(DESTDIR)$(BINDIR)/tmpcleaner)
 ifeq ($(DESTDIR),)

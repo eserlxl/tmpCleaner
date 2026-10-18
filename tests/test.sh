@@ -2513,9 +2513,11 @@ for uninstall_case in confdir destdir; do
 		uninstall_conf=/target uninstall_units=/units uninstall_bin=/bin
 		uninstall_prefix=$uninstall_root/stage
 	fi
-	mkdir -p "$uninstall_dest$uninstall_conf" "$uninstall_dest$uninstall_units" "$uninstall_dest$uninstall_bin" \
+	mkdir -p "$uninstall_dest$uninstall_conf/tmpcleaner.conf.d" "$uninstall_dest$uninstall_units" "$uninstall_dest$uninstall_bin" \
 		"$uninstall_prefix" "$uninstall_work/safe/target" "$uninstall_work/safe/units" "$uninstall_work/safe/bin" "$uninstall_root/shim"
-	touch "$uninstall_dest$uninstall_conf/real.conf" "$uninstall_dest$uninstall_units/tmpcleaner.service" \
+	touch "$uninstall_dest$uninstall_conf/real.conf" "$uninstall_dest$uninstall_conf/tmpcleaner.conf" \
+		"$uninstall_dest$uninstall_conf/tmpcleaner.conf.default" "$uninstall_dest$uninstall_conf/tmpcleaner.conf.new" \
+		"$uninstall_dest$uninstall_conf/tmpcleaner.conf.d/x.conf" "$uninstall_dest$uninstall_units/tmpcleaner.service" \
 		"$uninstall_dest$uninstall_units/tmpcleaner.timer" "$uninstall_dest$uninstall_bin/tmpcleaner" \
 		"$uninstall_prefix/unrelated" "$uninstall_work/safe/unrelated" "$uninstall_work/safe/target/unrelated" \
 		"$uninstall_work/safe/units/tmpcleaner.service" "$uninstall_work/safe/units/tmpcleaner.timer" "$uninstall_work/safe/bin/tmpcleaner"
@@ -2529,7 +2531,9 @@ SHIM
 	(cd "$uninstall_work" && PATH="$uninstall_root/shim:$PATH" UNINSTALL_SYSTEMCTL_MARKER=$uninstall_root/systemctl.called \
 		make -s -f "$here/Makefile" uninstall DESTDIR="$uninstall_dest" CONFDIR="$uninstall_conf" \
 		UNITDIR="$uninstall_units" BINDIR="$uninstall_bin") > "$uninstall_root/log" 2>&1 || status=$?
-	if [ "$status" -ne 0 ] || [ -e "$uninstall_dest$uninstall_conf" ] ||
+	if [ "$status" -ne 0 ] || [ ! -d "$uninstall_dest$uninstall_conf" ] || [ ! -e "$uninstall_dest$uninstall_conf/real.conf" ] ||
+		[ -e "$uninstall_dest$uninstall_conf/tmpcleaner.conf" ] || [ -e "$uninstall_dest$uninstall_conf/tmpcleaner.conf.default" ] ||
+		[ -e "$uninstall_dest$uninstall_conf/tmpcleaner.conf.new" ] || [ -e "$uninstall_dest$uninstall_conf/tmpcleaner.conf.d" ] ||
 		[ -e "$uninstall_dest$uninstall_units/tmpcleaner.service" ] || [ -e "$uninstall_dest$uninstall_units/tmpcleaner.timer" ] ||
 		[ -e "$uninstall_dest$uninstall_bin/tmpcleaner" ] || [ -e "$uninstall_root/systemctl.called" ] ||
 		[ ! -e "$uninstall_prefix/unrelated" ] || [ ! -e "$uninstall_work/safe/unrelated" ] ||
@@ -2691,6 +2695,7 @@ if [ -e "$custom_bin/tmpcleaner" ] || [ -e "$custom_units/tmpcleaner.service" ] 
 	echo 'FAIL: unstaged KEEP_CONFIG=1 must preserve the config tree while removing binary/units and stopping the timer'
 	fail=1
 fi
+rm -rf "$custom_conf/local dir"
 : > "$staged/systemctl.log"
 PATH="$staged/fakes:$PATH" make -s -C "$here" uninstall \
 	ENABLE_TIMER=0 KEEP_CONFIG=0 \
