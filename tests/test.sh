@@ -131,6 +131,7 @@ failure_metrics_ok() {
 	grep -Fxq 'tmpcleaner_removed_files 0' "$cfg/failure.prom" &&
 	grep -Fxq 'tmpcleaner_removed_directories 0' "$cfg/failure.prom" &&
 	grep -Fxq 'tmpcleaner_removed_bytes 0' "$cfg/failure.prom" &&
+	grep -Fxq 'tmpcleaner_protected_paths 0' "$cfg/failure.prom" &&
 	grep -Fxq 'tmpcleaner_last_exit_status 1' "$cfg/failure.prom" &&
 	grep -Fxq "tmpcleaner_pressure_mode_active ${1:-0}" "$cfg/failure.prom" &&
 	grep -Eq '^tmpcleaner_last_run_duration_seconds (NaN|[0-9]+[.][0-9][0-9])$' "$cfg/failure.prom" &&
@@ -1644,6 +1645,9 @@ if ! { [ -f "$cfg/metrics.prom" ] &&
 	grep -Fxq '# HELP tmpcleaner_removed_bytes Apparent size in bytes of non-directory entries observed removed in the last run.' "$cfg/metrics.prom" &&
 	grep -Fxq '# TYPE tmpcleaner_removed_bytes gauge' "$cfg/metrics.prom" &&
 	grep -Fxq 'tmpcleaner_removed_bytes 0' "$cfg/metrics.prom" &&
+	grep -Fxq '# HELP tmpcleaner_protected_paths Number of in-use /tmp paths the last run protected from cleanup.' "$cfg/metrics.prom" &&
+	grep -Fxq '# TYPE tmpcleaner_protected_paths gauge' "$cfg/metrics.prom" &&
+	grep -Eq '^tmpcleaner_protected_paths [1-9][0-9]*$' "$cfg/metrics.prom" &&
 	grep -Fxq '# HELP tmpcleaner_last_run_timestamp_seconds Unix timestamp of the last run completion.' "$cfg/metrics.prom" &&
 	grep -Fxq '# TYPE tmpcleaner_last_run_timestamp_seconds gauge' "$cfg/metrics.prom" &&
 	grep -Eq '^tmpcleaner_last_run_timestamp_seconds [1-9][0-9]*$' "$cfg/metrics.prom" &&

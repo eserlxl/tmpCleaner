@@ -162,6 +162,9 @@ tmpcleaner_removed_directories $metric_directories
 # HELP tmpcleaner_removed_bytes Apparent size in bytes of non-directory entries observed removed in the last run.
 # TYPE tmpcleaner_removed_bytes gauge
 tmpcleaner_removed_bytes $metric_bytes
+# HELP tmpcleaner_protected_paths Number of in-use /tmp paths the last run protected from cleanup.
+# TYPE tmpcleaner_protected_paths gauge
+tmpcleaner_protected_paths $metric_protected
 # HELP tmpcleaner_last_run_timestamp_seconds Unix timestamp of the last run completion.
 # TYPE tmpcleaner_last_run_timestamp_seconds gauge
 tmpcleaner_last_run_timestamp_seconds $now
@@ -182,7 +185,7 @@ EOF
 		echo "tmpcleaner: cannot write metrics to $TMPCLEANER_METRICS" >&2
 	fi
 }
-scratch='' metric_files=0 metric_directories=0 metric_bytes=0 metric_pressure_active=0
+scratch='' metric_files=0 metric_directories=0 metric_bytes=0 metric_protected=0 metric_pressure_active=0
 finish() {
 	exit_status=$?
 	trap - EXIT
@@ -636,11 +639,10 @@ generate_rules() {
 	}
 }
 
-if [ "${1:-}" = --print-in-use0 ]; then
-	generate_rules
+filter_in_use() {
 	canonical_scratch=$(realpath -e -- "$scratch" 2>/dev/null && printf x) || {
-		echo "tmpcleaner: cannot canonicalize scratch directory" >&2
-		exit 1
+		[ "$previewing" = 0 ] || echo "tmpcleaner: cannot canonicalize scratch directory" >&2
+		return 1
 	}
 	canonical_scratch=${canonical_scratch%x}
 	canonical_scratch=${canonical_scratch%"$nl"}
@@ -650,9 +652,14 @@ if [ "${1:-}" = --print-in-use0 ]; then
 		$0 != canonical && index($0, canonical "/") != 1 { printf "%s%c", $0, 0 }
 	' "$scratch/inuse" > "$scratch/export" &&
 		LC_ALL=C sort -zu "$scratch/export" > "$scratch/export-sorted" || {
-		echo "tmpcleaner: cannot export in-use paths" >&2
-		exit 1
+		[ "$previewing" = 0 ] || echo "tmpcleaner: cannot export in-use paths" >&2
+		return 1
 	}
+}
+
+if [ "${1:-}" = --print-in-use0 ]; then
+	generate_rules
+	filter_in_use || exit 1
 	cat "$scratch/export-sorted"
 	exit
 fi
@@ -813,6 +820,9 @@ done
 # counted too. Scratch files sit in one private directory (mode 0700, random
 # name) that the rules exclude and the snapshots skip.
 generate_rules
+if [ -n "${TMPCLEANER_METRICS:-}" ] && filter_in_use && protected=$(LC_ALL=C awk 'BEGIN { RS = "\0" } END { print NR + 0 }' "$scratch/export-sorted" 2>/dev/null); then
+	metric_protected=$protected
+fi
 # Snapshot every supported age-cleanup root (normally just /tmp).
 LC_ALL=C awk 'substr($1, 1, 1) ~ /^[dDevqQCrR]$/ {
 	# A quoted root may hold spaces, so take everything between its quotes.
