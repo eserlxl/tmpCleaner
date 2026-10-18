@@ -2545,6 +2545,40 @@ SHIM
 	rm -rf "$uninstall_root"
 done
 
+# A symlinked CONFDIR is preserved on uninstall while its tmpCleaner files are purged.
+uninstall_symlink_root=$(mktemp -d "$cfg/uninstall-symlink.XXXXXX")
+uninstall_symlink_dest=$uninstall_symlink_root/stage
+uninstall_symlink_target=$uninstall_symlink_root/target
+uninstall_symlink_conf=/etc/tmpcleaner
+uninstall_symlink_units=/units
+uninstall_symlink_bin=/bin
+mkdir -p "$uninstall_symlink_target/tmpcleaner.conf.d" "$uninstall_symlink_dest/etc" \
+	"$uninstall_symlink_dest$uninstall_symlink_units" "$uninstall_symlink_dest$uninstall_symlink_bin"
+ln -s "$uninstall_symlink_target" "$uninstall_symlink_dest$uninstall_symlink_conf"
+touch "$uninstall_symlink_target/tmpcleaner.conf" "$uninstall_symlink_target/tmpcleaner.conf.default" \
+	"$uninstall_symlink_target/tmpcleaner.conf.d/x.conf" "$uninstall_symlink_target/unrelated.conf" \
+	"$uninstall_symlink_dest$uninstall_symlink_units/tmpcleaner.service" \
+	"$uninstall_symlink_dest$uninstall_symlink_units/tmpcleaner.timer" \
+	"$uninstall_symlink_dest$uninstall_symlink_bin/tmpcleaner"
+status=0
+PATH="$staged/fakes:$PATH" make -s -C "$here" uninstall DESTDIR="$uninstall_symlink_dest" \
+	CONFDIR="$uninstall_symlink_conf" UNITDIR="$uninstall_symlink_units" \
+	BINDIR="$uninstall_symlink_bin" > "$uninstall_symlink_root/log" 2>&1 || status=$?
+if [ "$status" -ne 0 ] || [ ! -L "$uninstall_symlink_dest$uninstall_symlink_conf" ] ||
+	[ ! -f "$uninstall_symlink_target/unrelated.conf" ] ||
+	[ ! -f "$uninstall_symlink_dest$uninstall_symlink_conf/unrelated.conf" ] ||
+	[ -e "$uninstall_symlink_target/tmpcleaner.conf" ] ||
+	[ -e "$uninstall_symlink_target/tmpcleaner.conf.default" ] ||
+	[ -e "$uninstall_symlink_target/tmpcleaner.conf.d" ] ||
+	[ -e "$uninstall_symlink_dest$uninstall_symlink_units/tmpcleaner.service" ] ||
+	[ -e "$uninstall_symlink_dest$uninstall_symlink_units/tmpcleaner.timer" ] ||
+	[ -e "$uninstall_symlink_dest$uninstall_symlink_bin/tmpcleaner" ] ||
+	[ -e "$staged/systemctl.log" ]; then
+	echo "FAIL: staged uninstall with symlinked CONFDIR must remove files and preserve link"
+	fail=1
+fi
+rm -rf "$uninstall_symlink_root"
+
 PATH="$staged/fakes:$PATH" make -s -C "$here" install ENABLE_TIMER=0 \
 	DESTDIR="$staged_dest" PREFIX=/usr UNITDIR="$staged_units" >/dev/null
 if [ ! -x "$staged_dest/usr/bin/tmpcleaner" ] || [ ! -f "$staged_dest$staged_units/tmpcleaner.service" ] ||
