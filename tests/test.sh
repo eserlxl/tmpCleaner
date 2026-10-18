@@ -2256,6 +2256,14 @@ cmp -s "$confpath/tmpcleaner.conf.default" "$here/tmpcleaner.conf" || {
 	echo "FAIL: initial install should create tmpcleaner.conf.default matching shipped file"
 	fail=1
 }
+[ -d "$confpath/tmpcleaner.conf.d" ] || {
+	echo "FAIL: initial install should create tmpcleaner.conf.d"
+	fail=1
+}
+[ -z "$(find "$confpath/tmpcleaner.conf.d" -mindepth 1 -print -quit)" ] || {
+	echo "FAIL: initial install should leave tmpcleaner.conf.d empty"
+	fail=1
+}
 
 sed '$d' "$here/tmpcleaner.conf" > "$confpath/tmpcleaner.conf"
 cp "$confpath/tmpcleaner.conf" "$confpath/tmpcleaner.conf.default"
@@ -2270,9 +2278,14 @@ cmp -s "$confpath/tmpcleaner.conf" "$here/tmpcleaner.conf" || {
 }
 
 printf 'x /tmp/local-rule\n' >> "$confpath/tmpcleaner.conf"
+printf 'x /tmp/local-dropin\n' > "$confpath/tmpcleaner.conf.d/local.conf"
 make -s -C "$confsource" install-conf DESTDIR="$confdest" CONFDIR='/target [safe]' >/dev/null
 grep -Fxq 'x /tmp/local-rule' "$confpath/tmpcleaner.conf" || {
 	echo "FAIL: local rule should survive reinstall"
+	fail=1
+}
+grep -Fxq 'x /tmp/local-dropin' "$confpath/tmpcleaner.conf.d/local.conf" || {
+	echo "FAIL: drop-in exclusions should survive reinstall"
 	fail=1
 }
 cmp -s "$confpath/tmpcleaner.conf.new" "$here/tmpcleaner.conf" || {
@@ -2310,6 +2323,14 @@ fi
 }
 [ -f "$staged_dest/etc/tmpcleaner/tmpcleaner.conf" ] || {
 	echo "FAIL: staged install should install /etc/tmpcleaner/tmpcleaner.conf"
+	fail=1
+}
+[ -d "$staged_dest/etc/tmpcleaner/tmpcleaner.conf.d" ] || {
+	echo "FAIL: staged install should install /etc/tmpcleaner/tmpcleaner.conf.d"
+	fail=1
+}
+[ -z "$(find "$staged_dest/etc/tmpcleaner/tmpcleaner.conf.d" -mindepth 1 -print -quit)" ] || {
+	echo "FAIL: staged install should leave /etc/tmpcleaner/tmpcleaner.conf.d empty"
 	fail=1
 }
 [ ! -e "$staged/systemctl.log" ] || {

@@ -18,7 +18,7 @@ git clone https://aur.archlinux.org/linux-tmpcleaner.git && cd linux-tmpcleaner 
 ```
 
 It conflicts with the unrelated AUR package `tmpcleaner`, which installs a command of the same name.
-The package installs `/usr/bin/tmpcleaner`, the systemd units in `/usr/lib/systemd/system`, and `/etc/tmpcleaner/tmpcleaner.conf` (tracked by pacman as a backup file so local edits survive upgrades and new defaults arrive as `.pacnew`). The timer is **not** enabled automatically; preview what would be removed, adjust `/etc/tmpcleaner/tmpcleaner.conf` if needed, then enable the timer:
+The package installs `/usr/bin/tmpcleaner`, the systemd units in `/usr/lib/systemd/system`, `/etc/tmpcleaner/tmpcleaner.conf` (tracked by pacman as a backup file so local edits survive upgrades and new defaults arrive as `.pacnew`), and the drop-in directory `/etc/tmpcleaner/tmpcleaner.conf.d`. The timer is **not** enabled automatically; preview what would be removed, adjust `/etc/tmpcleaner/tmpcleaner.conf` if needed, then enable the timer:
 
 ```sh
 sudo tmpcleaner --dry-run
@@ -37,7 +37,7 @@ preview of what would go to `preview.txt`, without deleting:
 sudo make preview
 ```
 
-Add any needed exclusions to `tmpcleaner.conf` (see [Configuration](configuration.md)), then install; this copies the config to `/etc/tmpcleaner/tmpcleaner.conf`, the wrapper to `/usr/local/bin/tmpcleaner`, and enables the timer:
+Add any needed exclusions to `tmpcleaner.conf` (see [Configuration](configuration.md)), then install; this copies the config to `/etc/tmpcleaner/tmpcleaner.conf`, creates the drop-in directory `/etc/tmpcleaner/tmpcleaner.conf.d`, copies the wrapper to `/usr/local/bin/tmpcleaner`, and enables the timer:
 
 ```sh
 sudo make install

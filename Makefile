@@ -45,6 +45,7 @@ endif
 endif
 
 install-conf:
+	@install -dm755 $(call shell_quote,$(DESTDIR)$(CONFDIR)/tmpcleaner.conf.d)
 	@c=$(call shell_quote,$(DESTDIR)$(CONFDIR)/tmpcleaner.conf); \
 	if [ ! -e "$$c" ] || cmp -s "$$c" "$$c.default" || cmp -s tmpcleaner.conf "$$c"; then \
 		install -Dm644 tmpcleaner.conf "$$c" && \
