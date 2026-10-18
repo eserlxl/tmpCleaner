@@ -2551,5 +2551,21 @@ for srcinfo_case in match stale match-fail partial-fail; do
 done
 rm -rf "$srcinfo_root"
 
+# The package's post_install message directs new users to preview, keep paths, and enable the timer.
+install_out=$(
+	# shellcheck source=/dev/null
+	. "$here/tmpcleaner.install"
+	post_install
+)
+install_expected=$(printf '%s\n' \
+	"tmpcleaner: the timer is not enabled automatically." \
+	"  Preview first: sudo tmpcleaner --dry-run" \
+	"  Keep paths:    add 'x /tmp/my-job-*' to /etc/tmpcleaner/tmpcleaner.conf.d/local.conf" \
+	"  Then enable:   sudo systemctl enable --now tmpcleaner.timer")
+if [ "$install_out" != "$install_expected" ]; then
+	echo "FAIL: post_install must print preview, keep-paths, and enable lines in order"
+	fail=1
+fi
+
 [ "$fail" = 0 ] && echo "PASS"
 exit "$fail"
