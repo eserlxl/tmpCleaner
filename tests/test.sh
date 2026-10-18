@@ -1274,6 +1274,16 @@ if [ "$status" -ne 1 ] || [ "$check_out" != "kept: $dir/workdir/f" ] || [ "$chec
 	echo "FAIL: --check should explain a file inside an in-use directory"
 	fail=1
 fi
+if [ "$sockbatch_running" = 1 ]; then
+	status=0
+	check_out=$(TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --check "$dir/b205" 2>"$cfg/check.err") || status=$?
+	check_err=$(cat "$cfg/check.err")
+	rm -f "$cfg/check.err"
+	if [ "$status" -ne 1 ] || [ "$check_out" != "kept: $dir/b205" ] || [ "$check_err" != "tmpcleaner: in use by a running process" ] || [ ! -e "$dir/b205" ]; then
+		echo "FAIL: --check should explain a live socket without deleting it"
+		fail=1
+	fi
+fi
 # Control bytes in held children and in-use ancestors are replaced with "?" on stderr.
 ctrl_name=$(printf 'c\001\t\002\033\177z')
 mkdir "$dir/ctrlparent" "$dir/$ctrl_name"
