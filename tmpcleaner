@@ -410,6 +410,7 @@ in_use() {
 					else if (ns in unconfined) path = "/proc/" unconfined[ns] "/root" name[k]
 					if (path != "" && !((inode[k], ns) in unviewed)) {
 						unviewed[inode[k], ns] = 1
+						if (real && !(path in sock_holder)) sock_holder[path] = who[h]
 						args = args " " quote(path)
 						queued++
 					}

@@ -1404,6 +1404,16 @@ if [ "$sockbatch_running" = 1 ]; then
 		fail=1
 	fi
 fi
+if [ "$chrootsock_running" = 1 ]; then
+	status=0
+	check_out=$(TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --check "$dir/chrootsock" 2>"$cfg/check.err") || status=$?
+	check_err=$(cat "$cfg/check.err")
+	rm -f "$cfg/check.err"
+	if [ "$status" -ne 1 ] || [ "$check_out" != "kept: $dir/chrootsock" ] || [ "$check_err" != "tmpcleaner: in use by a running process: PID $chrootsock_pid (python3)" ] || [ ! -e "$dir/chrootsock" ]; then
+		echo "FAIL: --check should explain a chrooted socket without deleting it"
+		fail=1
+	fi
+fi
 # Control bytes in held children and in-use ancestors are replaced with "?" on stderr.
 ctrl_name=$(printf 'c\001\t\002\033\177z')
 mkdir "$dir/ctrlparent" "$dir/$ctrl_name"
