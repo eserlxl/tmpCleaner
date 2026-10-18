@@ -158,6 +158,9 @@ tmpcleaner_removed_files $metric_files
 # HELP tmpcleaner_removed_directories Number of directories removed in the last run.
 # TYPE tmpcleaner_removed_directories gauge
 tmpcleaner_removed_directories $metric_directories
+# HELP tmpcleaner_removed_bytes Apparent size in bytes of non-directory entries observed removed in the last run.
+# TYPE tmpcleaner_removed_bytes gauge
+tmpcleaner_removed_bytes $metric_bytes
 # HELP tmpcleaner_last_run_timestamp_seconds Unix timestamp of the last run completion.
 # TYPE tmpcleaner_last_run_timestamp_seconds gauge
 tmpcleaner_last_run_timestamp_seconds $now
@@ -178,7 +181,7 @@ EOF
 		echo "tmpcleaner: cannot write metrics to $TMPCLEANER_METRICS" >&2
 	fi
 }
-scratch='' metric_files=0 metric_directories=0 metric_pressure_active=0
+scratch='' metric_files=0 metric_directories=0 metric_bytes=0 metric_pressure_active=0
 finish() {
 	exit_status=$?
 	trap - EXIT
@@ -803,13 +806,20 @@ LC_ALL=C awk 'substr($1, 1, 1) ~ /^[dDevqQCrR]$/ {
 }' \
 	"$scratch/rules" > "$scratch/roots"
 snapshot() {
+	[ -z "${2:-}" ] || : > "$2"
 	while IFS= read -r root; do
 		# Keep overlapping walks identical without following root symlinks.
 		root=$(realpath -ms -- "$root" 2>/dev/null) || continue
-		find "$root" -xdev -samefile "$scratch" -prune -o -printf '%y %p\0' 2>/dev/null || :
+		if [ -n "${2:-}" ]; then
+			: > "$scratch/root-sizes"
+			find "$root" -xdev -samefile "$scratch" -prune -o -printf '%y %p\0' -fprintf "$scratch/root-sizes" '%s %y %p\0' 2>/dev/null || :
+			cat "$scratch/root-sizes" >> "$2"
+		else
+			find "$root" -xdev -samefile "$scratch" -prune -o -printf '%y %p\0' 2>/dev/null || :
+		fi
 	done < "$scratch/roots" | LC_ALL=C sort -zu > "$1"
 }
-snapshot "$scratch/before"
+snapshot "$scratch/before" "$scratch/sizes"
 
 status=0
 if [ "${TMPCLEANER_LIST:-}" = nul ]; then
@@ -820,9 +830,16 @@ fi
 
 snapshot "$scratch/after"
 LC_ALL=C comm -z -23 "$scratch/before" "$scratch/after" |
-	COUNTS=$scratch/counts LC_ALL=C awk -v list="${TMPCLEANER_LIST:-}" '
+	COUNTS=$scratch/counts SIZES=$scratch/sizes LC_ALL=C awk -v list="${TMPCLEANER_LIST:-}" '
 	BEGIN {
 		RS = "\0"
+		bytes = 0
+		sizes_file = ENVIRON["SIZES"]
+		while ((getline record < sizes_file) > 0) {
+			sep = index(record, " ")
+			if (sep > 1) sizes[substr(record, sep + 1)] = substr(record, 1, sep - 1) + 0
+		}
+		close(sizes_file)
 		for (i = 1; i < 32; i++) escapes[sprintf("%c", i)] = sprintf("\\x%02x", i)
 		escapes[sprintf("%c", 127)] = "\\x7f"
 		escapes[sprintf("%c", 92)] = "\\x5c"
@@ -836,17 +853,21 @@ LC_ALL=C comm -z -23 "$scratch/before" "$scratch/after" |
 	}
 	{
 		directory = (substr($0, 1, 1) == "d")
-		if (directory) directories++; else files++
+		if (directory) directories++
+		else {
+			files++
+			bytes += sizes[$0]
+		}
 		if (list == 1) printf "tmpcleaner: removed%s: %s\n", directory ? " directory" : "", escaped(substr($0, 3)) > "/dev/stderr"
 		if (list == "nul") printf "%s%c", substr($0, 3), 0
 	}
 	END {
 		printf "tmpcleaner: removed %d files and %d directories\n", files, directories > "/dev/stderr"
 		# -v would decode backslashes in the scratch path; ENVIRON keeps it raw.
-		printf "%d %d\n", files, directories > ENVIRON["COUNTS"]
+		printf "%d %d %.0f\n", files, directories, bytes > ENVIRON["COUNTS"]
 	}
 	'
-if read -r files directories < "$scratch/counts" 2>/dev/null; then
-	metric_files=$files metric_directories=$directories
+if read -r files directories bytes < "$scratch/counts" 2>/dev/null; then
+	metric_files=$files metric_directories=$directories metric_bytes=$bytes
 fi
 exit "$status"

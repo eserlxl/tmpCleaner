@@ -127,6 +127,7 @@ old() { touch -d '13 hours ago' "$@"; }
 failure_metrics_ok() {
 	grep -Fxq 'tmpcleaner_removed_files 0' "$cfg/failure.prom" &&
 	grep -Fxq 'tmpcleaner_removed_directories 0' "$cfg/failure.prom" &&
+	grep -Fxq 'tmpcleaner_removed_bytes 0' "$cfg/failure.prom" &&
 	grep -Fxq 'tmpcleaner_last_exit_status 1' "$cfg/failure.prom" &&
 	grep -Fxq "tmpcleaner_pressure_mode_active ${1:-0}" "$cfg/failure.prom" &&
 	grep -Eq '^tmpcleaner_last_run_duration_seconds (NaN|[0-9]+[.][0-9][0-9])$' "$cfg/failure.prom" &&
@@ -1569,6 +1570,7 @@ if [ "$status" -ne 42 ] || ! grep -Fxq 'tmpcleaner_last_run_duration_seconds NaN
 	! grep -Fxq 'tmpcleaner_last_exit_status 42' "$cfg/duration.prom" ||
 	! grep -Fxq 'tmpcleaner_removed_files 0' "$cfg/duration.prom" ||
 	! grep -Fxq 'tmpcleaner_removed_directories 0' "$cfg/duration.prom" ||
+	! grep -Fxq 'tmpcleaner_removed_bytes 0' "$cfg/duration.prom" ||
 	grep -Fq 'cannot write metrics' "$cfg/duration.err"; then
 	echo 'FAIL: duration calculation failure must retain other gauges and status without a warning'
 	fail=1
@@ -1581,6 +1583,23 @@ if [ -e "$cfg/duration.called" ]; then
 	fail=1
 fi
 rm -rf "$dir/duration"
+size_root=$(mktemp -d "$dir/sizes.XXXXXX")
+mkdir "$size_root/olddir" "$size_root/keepdir"
+printf '1234567' > "$size_root/a"
+printf '890123456789' > "$size_root/olddir/9999 f"
+printf 'kept-bytes' > "$size_root/keepdir/fresh"
+old "$size_root/a" "$size_root/olddir/9999 f" "$size_root/olddir"
+sed "s#$dir#$size_root#" "$conf" > "$cfg/size.conf"
+status=0
+TMPCLEANER_CONF=$cfg/size.conf TMPCLEANER_METRICS=$cfg/size.prom sh "$here/tmpcleaner" >/dev/null 2>&1 || status=$?
+if [ "$status" -ne 0 ] || [ -e "$size_root/a" ] || [ -e "$size_root/olddir" ] || [ ! -e "$size_root/keepdir/fresh" ] ||
+	! grep -Fxq 'tmpcleaner_removed_files 2' "$cfg/size.prom" ||
+	! grep -Fxq 'tmpcleaner_removed_directories 1' "$cfg/size.prom" ||
+	! grep -Fxq 'tmpcleaner_removed_bytes 19' "$cfg/size.prom"; then
+	echo 'FAIL: metrics must report the exact apparent byte sum of removed non-directory entries'
+	fail=1
+fi
+rm -rf "$size_root" "$cfg/size.conf" "$cfg/size.prom"
 [ "$fail" = 0 ] || exit 1
 
 run_log=$(env -u LC_ALL LANG=C.UTF-8 TMPCLEANER_LIST=1 TMPCLEANER_METRICS="$cfg/metrics.prom" TMPCLEANER_CONF="$conf" sh "$here/tmpcleaner" 2>&1 >/dev/null)
@@ -1594,6 +1613,9 @@ if ! { [ -f "$cfg/metrics.prom" ] &&
 	grep -Fxq '# HELP tmpcleaner_removed_directories Number of directories removed in the last run.' "$cfg/metrics.prom" &&
 	grep -Fxq '# TYPE tmpcleaner_removed_directories gauge' "$cfg/metrics.prom" &&
 	grep -Fxq 'tmpcleaner_removed_directories 2' "$cfg/metrics.prom" &&
+	grep -Fxq '# HELP tmpcleaner_removed_bytes Apparent size in bytes of non-directory entries observed removed in the last run.' "$cfg/metrics.prom" &&
+	grep -Fxq '# TYPE tmpcleaner_removed_bytes gauge' "$cfg/metrics.prom" &&
+	grep -Fxq 'tmpcleaner_removed_bytes 0' "$cfg/metrics.prom" &&
 	grep -Fxq '# HELP tmpcleaner_last_run_timestamp_seconds Unix timestamp of the last run completion.' "$cfg/metrics.prom" &&
 	grep -Fxq '# TYPE tmpcleaner_last_run_timestamp_seconds gauge' "$cfg/metrics.prom" &&
 	grep -Eq '^tmpcleaner_last_run_timestamp_seconds [1-9][0-9]*$' "$cfg/metrics.prom" &&
