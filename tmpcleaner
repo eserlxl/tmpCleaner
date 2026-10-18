@@ -33,6 +33,7 @@ Passed through to systemd-tmpfiles (any other argument is rejected with exit 2):
   --prefix=PATH            Only apply rules with the prefix PATH
   --exclude-prefix=PATH    Keep the absolute path PATH and everything below it
 
+A regular .tmpcleaner-keep file in /tmp/<dir> or /tmp/<dir>/<subdir> keeps that directory.
 When the in-use scan fails, nothing is removed and every mode exits non-zero.
 
 Environment variables:
@@ -605,7 +606,9 @@ rules() {
 	# bytes, so a name holding one would leave its rule half quoted.
 	[ -z "$check" ] || holders_file=$scratch/holders
 	in_use > "$scratch/inuse" || return 1
-	LC_ALL=C sort -zu "$scratch/inuse" "$scratch/excludes" > "$scratch/sorted" || return 1
+	find /tmp -xdev -mindepth 2 -maxdepth 3 -name .tmpcleaner-keep -type f -printf '%h\0' \
+		> "$scratch/markers" 2>/dev/null || [ "$?" -eq 1 ] || return 1
+	LC_ALL=C sort -zu "$scratch/inuse" "$scratch/markers" "$scratch/excludes" > "$scratch/sorted" || return 1
 	LC_ALL=C sed -z -e '/[[*?]/s/[][*?\\]/\\&/g' -e 's/[\\"]/\\&/g' \
 		-e "$control_escapes" -e 's/%/%%/g' -e 's/.*/x "&"/' \
 		"$scratch/sorted" > "$scratch/excl" || return 1
@@ -822,6 +825,13 @@ if [ -n "$check" ]; then
 					if ($0 == path || $0 == "/" || index(path, $0 "/") == 1) excluded = 1
 					next
 				}
+				FILENAME == ARGV[3] {
+					if (marked == "" && ($0 == path || index(path, $0 "/") == 1 || index($0, prefix) == 1)) {
+						marked = $0
+						gsub(/[\001-\037\177]/, "?", marked)
+					}
+					next
+				}
 				$0 == path { exact = 1; exit }
 				# A file name is untrusted: no control bytes reach the terminal.
 				index($0, prefix) == 1 && held == "" { held_raw = held = $0; gsub(/[\001-\037\177]/, "?", held) }
@@ -836,10 +846,11 @@ if [ -n "$check" ]; then
 					} else if (ancestor != "") {
 						who = holders(ancestor_raw)
 						print "tmpcleaner: inside an in-use directory: " ancestor (who != "" ? "; used by " who : "")
-					} else if (excluded) print "tmpcleaner: kept by an explicit --exclude-prefix"
+					} else if (marked != "") print "tmpcleaner: kept by a .tmpcleaner-keep marker in " marked
+					else if (excluded) print "tmpcleaner: kept by an explicit --exclude-prefix"
 					else print "tmpcleaner: not old enough, or kept by a configuration rule"
 				}
-				' "$scratch/inuse" "$scratch/excludes" >&2
+				' "$scratch/inuse" "$scratch/excludes" "$scratch/markers" >&2
 			printf 'kept: %s\n' "$shown"
 			exit 1
 			;;

@@ -18,7 +18,8 @@ sockalias=
 shmdir=
 scope_outside=
 ctrl_top=
-trap 'kill $pids 2>/dev/null || :; rm -rf "$dir" "$cfg" "$shimdir" "$bindpoint" "$detachpoint" "$sockalias" "$shmdir" "$scope_outside" "$ctrl_top"' EXIT
+marker_top=
+trap 'kill $pids 2>/dev/null || :; rm -rf "$dir" "$cfg" "$shimdir" "$bindpoint" "$detachpoint" "$sockalias" "$shmdir" "$scope_outside" "$ctrl_top" "$marker_top"' EXIT
 trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
@@ -56,6 +57,8 @@ cat > "$shimdir/find" <<SHIM
 case "\${FIND_SHIM_FAIL:-}:\$*" in
 	walk:"/tmp -xdev -printf"*) exit 1 ;;
 	walk-killed:"/tmp -xdev -printf"*) "$(command -v find)" /tmp -maxdepth 0 -printf '%i %p\0'; kill -KILL \$\$ ;;
+	markers:*"-name .tmpcleaner-keep"*) exit 2 ;;
+	markers-unreadable:*"-name .tmpcleaner-keep"*) "$(command -v find)" "\$@"; exit 1 ;;
 	killed:/proc/self/ns/mnt*) "$(command -v find)" /proc/self/ns/mnt -maxdepth 0 -type l -printf '%p\0%l\0'; kill -KILL \$\$ ;;
 	netns-fallback:/proc/self/ns/mnt*)
 		for arg do
@@ -1675,7 +1678,7 @@ if [ "$chrootsock_running" = 1 ] || [ "$sockbatch_running" = 1 ]; then
 		fail=1
 	}
 fi
-for scanfail in STAT_SHIM_FAIL=tmp STAT_SHIM_FAIL=cached STAT_SHIM_FAIL=verify STAT_SHIM_FAIL=killed STAT_SHIM_FAIL=verify-killed FIND_SHIM_FAIL=walk FIND_SHIM_FAIL=killed FIND_SHIM_FAIL=walk-killed CAT_SHIM_FAIL=1; do
+for scanfail in STAT_SHIM_FAIL=tmp STAT_SHIM_FAIL=cached STAT_SHIM_FAIL=verify STAT_SHIM_FAIL=killed STAT_SHIM_FAIL=verify-killed FIND_SHIM_FAIL=walk FIND_SHIM_FAIL=killed FIND_SHIM_FAIL=walk-killed FIND_SHIM_FAIL=markers CAT_SHIM_FAIL=1; do
 	status=0
 	shim_rules=$(shim env "$scanfail" TMPCLEANER_CONF="$conf" sh "$here/tmpcleaner" --print-rules 2>/dev/null) || status=$?
 	if [ "$status" -ne 1 ] || [ -n "$shim_rules" ]; then
@@ -2004,6 +2007,10 @@ printf '%s\n' "$help_out" | grep -Fq -- 'rejected' || {
 	echo "FAIL: help should mention rejected"
 	fail=1
 }
+printf '%s\n' "$help_out" | grep -Fq -- '.tmpcleaner-keep' || {
+	echo "FAIL: help should mention .tmpcleaner-keep"
+	fail=1
+}
 gone() { [ ! -e "$dir/$1" ] || { echo "FAIL: $1 should be deleted"; fail=1; }; }
 kept() { [ -e "$dir/$1" ] || { echo "FAIL: $1 should be kept"; fail=1; }; }
 gone old.txt; gone olddir; gone weirdX; gone emptydir
@@ -2073,6 +2080,79 @@ if [ "$bind_running" = 1 ]; then
 		wait "$alias_pid" 2>/dev/null || :
 	done
 fi
+
+# A regular .tmpcleaner-keep file one or two levels below /tmp keeps its
+# directory until the marker is deleted, while a symlinked marker does not.
+marker_top=$(mktemp -d /tmp/tmpcleaner-keep.XXXXXX)
+ctrl_job="$dir/job$(printf '\001')"
+mkdir -p "$dir/job" "$dir/symlink-job" "$ctrl_job"
+touch "$dir/job/.tmpcleaner-keep" "$dir/job/old" \
+	"$marker_top/.tmpcleaner-keep" "$marker_top/old" \
+	"$ctrl_job/.tmpcleaner-keep" "$ctrl_job/old" \
+	"$dir/symlink-job/old"
+ln -s "$dir/job/.tmpcleaner-keep" "$dir/symlink-job/.tmpcleaner-keep"
+old "$dir/job/.tmpcleaner-keep" "$dir/job/old" "$dir/job" \
+	"$marker_top/.tmpcleaner-keep" "$marker_top/old" "$marker_top" \
+	"$ctrl_job/.tmpcleaner-keep" "$ctrl_job/old" "$ctrl_job" \
+	"$dir/symlink-job/old" "$dir/symlink-job"
+printf 'd %s - - - amM:12h\nd %s/job - - - amM:12h\nd %s - - - amM:12h\n' \
+	"$dir" "$dir" "$marker_top" > "$cfg/marker.conf"
+status=0
+marker_preview=$(TMPCLEANER_CONF=$cfg/marker.conf sh "$here/tmpcleaner" --dry-run 2>&1) || status=$?
+if [ "$status" -ne 0 ] ||
+	printf '%s\n' "$marker_preview" | grep -Fq "$dir/job/old" ||
+	printf '%s\n' "$marker_preview" | grep -Fq "$marker_top/old" ||
+	! printf '%s\n' "$marker_preview" | grep -Fq "$dir/symlink-job/old"; then
+	echo 'FAIL: --dry-run must keep .tmpcleaner-keep directories and announce a symlinked-marker directory'
+	fail=1
+fi
+TMPCLEANER_CONF=$cfg/marker.conf sh "$here/tmpcleaner" --print-in-use0 > "$cfg/marker.inuse"
+if JOB=$dir/job TOP=$marker_top LC_ALL=C awk '
+	BEGIN { RS = "\0" }
+	$0 == ENVIRON["JOB"] || index($0, ENVIRON["JOB"] "/") == 1 ||
+	$0 == ENVIRON["TOP"] || index($0, ENVIRON["TOP"] "/") == 1 { found = 1 }
+	END { exit !found }
+' "$cfg/marker.inuse"; then
+	echo 'FAIL: --print-in-use0 must stay process-only and omit .tmpcleaner-keep directories'
+	fail=1
+fi
+status=0
+check_out=$(TMPCLEANER_CONF=$cfg/marker.conf sh "$here/tmpcleaner" --check "$dir/job/old" \
+	"--exclude-prefix=$dir/job" 2>"$cfg/check.err") || status=$?
+if [ "$status" -ne 1 ] || [ "$check_out" != "kept: $dir/job/old" ] ||
+	[ "$(cat "$cfg/check.err")" != "tmpcleaner: kept by a .tmpcleaner-keep marker in $dir/job" ]; then
+	echo 'FAIL: --check must print the .tmpcleaner-keep marker reason before --exclude-prefix'
+	fail=1
+fi
+status=0
+check_out=$(TMPCLEANER_CONF=$cfg/marker.conf sh "$here/tmpcleaner" --check "$ctrl_job/old" 2>"$cfg/check.err") || status=$?
+if [ "$status" -ne 1 ] || [ "$check_out" != "kept: $dir/job?/old" ] ||
+	[ "$(cat "$cfg/check.err")" != "tmpcleaner: kept by a .tmpcleaner-keep marker in $dir/job?" ]; then
+	echo 'FAIL: --check must mask control bytes in the .tmpcleaner-keep marker directory'
+	fail=1
+fi
+status=0
+check_out=$(TMPCLEANER_CONF=$cfg/marker.conf sh "$here/tmpcleaner" --check "$dir/symlink-job/old" 2>"$cfg/check.err") || status=$?
+if [ "$status" -ne 0 ] || [ "$check_out" != "would be removed: $dir/symlink-job/old" ] || [ -s "$cfg/check.err" ]; then
+	echo 'FAIL: --check must report a symlinked .tmpcleaner-keep directory as removable'
+	fail=1
+fi
+status=0
+shim env FIND_SHIM_FAIL=markers-unreadable TMPCLEANER_CONF=$cfg/marker.conf sh "$here/tmpcleaner" >/dev/null 2>&1 || status=$?
+if [ "$status" -ne 0 ] || [ ! -e "$dir/job/old" ] || [ ! -e "$marker_top/old" ] || [ -e "$dir/symlink-job/old" ]; then
+	echo 'FAIL: real run must keep regular .tmpcleaner-keep directories and remove symlinked-marker contents'
+	fail=1
+fi
+rm -f "$dir/job/.tmpcleaner-keep" "$marker_top/.tmpcleaner-keep" "$ctrl_job/.tmpcleaner-keep"
+old "$dir/job" "$marker_top" "$ctrl_job"
+status=0
+TMPCLEANER_CONF=$cfg/marker.conf sh "$here/tmpcleaner" >/dev/null 2>&1 || status=$?
+if [ "$status" -ne 0 ] || [ -e "$dir/job/old" ] || [ -e "$marker_top/old" ] || [ -e "$ctrl_job/old" ]; then
+	echo 'FAIL: removing .tmpcleaner-keep must let the next run remove the aged files'
+	fail=1
+fi
+rm -rf "$dir/job" "$dir/symlink-job" "$ctrl_job" "$marker_top" "$cfg/marker.conf" "$cfg/marker.inuse" "$cfg/check.err"
+marker_top=
 
 # Counts, listings and metrics include every age-cleanup type and deduplicate
 # overlapping roots. Boot-only rules and static exclusions remain untouched.

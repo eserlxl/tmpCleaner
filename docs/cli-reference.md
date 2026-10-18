@@ -18,6 +18,7 @@ prints one reason line to stderr (`tmpcleaner: in use by a running process: PID 
 `tmpcleaner: holds an in-use path: ...; used by PID ... (...)`
 (or without `; used by PID ...` when no holder PID is known),
 `tmpcleaner: inside an in-use directory: ...; used by PID ... (...)`,
+`tmpcleaner: kept by a .tmpcleaner-keep marker in ...`,
 `tmpcleaner: kept by an explicit --exclude-prefix`, or
 `tmpcleaner: not old enough, or kept by a configuration rule`). Control bytes in
 these paths are printed as `?`. Every error exits 2: invalid
