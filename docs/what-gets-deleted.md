@@ -97,6 +97,9 @@ still clean its contents. For example, `x /tmp/tree/keep` cannot save
 `/tmp/tree/keep/old` if a separate `d /tmp/tree/keep ...` rule cleans it. Remove
 the conflicting cleanup rule; see [configuration.md](configuration.md).
 
+A `*.conf` file in `/etc/tmpcleaner/tmpcleaner.conf.d/` works the same and
+survives package upgrades untouched ([configuration.md](configuration.md)).
+
 The next run reads it; nothing needs reloading. Package upgrades keep an edited
 config (pacman writes new defaults to `.pacnew`, `make install` to
 `tmpcleaner.conf.new`).
@@ -122,12 +125,16 @@ Preview the next run without deleting anything:
 sudo tmpcleaner --dry-run 2>&1 | less
 ```
 
-The preview goes to stderr, one line per entry, then a summary:
+The preview goes to stderr, one line per entry, then a summary and a count for
+each of up to ten top-level `/tmp` entries, largest first
+([cli-reference.md](cli-reference.md)):
 
 ```text
 Would remove "/tmp/old-build.log"
 Would remove directory "/tmp/old-build"
 tmpcleaner: would remove 1 files and 1 directories
+tmpcleaner:   1 under /tmp/old-build
+tmpcleaner:   1 under /tmp/old-build.log
 ```
 
 Run it as root: without root, directories that only root can open are not
