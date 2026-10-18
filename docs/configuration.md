@@ -3,7 +3,8 @@
 The exclusion list, service environment variables, age overrides, pressure mode, and removal listings.
 
 Anything that must survive even while no program uses it goes into the
-exclusion list in `/etc/tmpcleaner/tmpcleaner.conf` (format: `man tmpfiles.d`);
+exclusion list in `/etc/tmpcleaner/tmpcleaner.conf` or a `*.conf` drop-in file
+in `/etc/tmpcleaner/tmpcleaner.conf.d` (format: `man tmpfiles.d`);
 the age is set there too (`x` and `X` rules for paths under `/tmp` from the
 distribution's `tmpfiles.d` files are appended automatically via
 `systemd-tmpfiles --cat-config`, except a bare `/tmp`):
@@ -11,6 +12,15 @@ distribution's `tmpfiles.d` files are appended automatically via
 ```text
 x /tmp/my-long-job-*
 ```
+
+Regular files matching `/etc/tmpcleaner/tmpcleaner.conf.d/*.conf` (or
+`$TMPCLEANER_CONF.d/*.conf`) are read after the main file in byte order (`C`
+locale), each followed by a newline, so packages and configuration management
+tools can install their own exclusions (for example
+`/etc/tmpcleaner/tmpcleaner.conf.d/50-my-job.conf`) without editing
+`tmpcleaner.conf`. Other filenames and non-regular entries in the directory are
+ignored, and a missing or empty directory is not an error; an unreadable
+`*.conf` drop-in stops the run before cleaning.
 
 An exclusion applies while a parent cleanup rule traverses the tree. A
 separately configured cleanup root at or below the excluded directory can still
@@ -41,7 +51,7 @@ Service environment settings below go in a unit drop-in via `sudo systemctl edit
 
 ## Environment variables
 
-- `TMPCLEANER_CONF`: Path to configuration file (default: `/etc/tmpcleaner/tmpcleaner.conf`).
+- `TMPCLEANER_CONF`: Path to configuration file (default: `/etc/tmpcleaner/tmpcleaner.conf`; regular files in `$TMPCLEANER_CONF.d/*.conf` are read after it).
 - `TMPCLEANER_AGE`: Override duration on every `d` rule (e.g. `6h`, `30m`).
 - `TMPCLEANER_FULL_PERCENT`: Threshold percentage of `/tmp` usage (1-100); the larger of block and inode usage counts (`-` is 0), and a `df` error aborts the run.
 - `TMPCLEANER_FULL_AGE`: Age duration to use when `/tmp` usage meets or exceeds `TMPCLEANER_FULL_PERCENT`.
@@ -50,7 +60,7 @@ Service environment settings below go in a unit drop-in via `sudo systemctl edit
 
 A configuration file other than the installed one can be previewed with
 `sudo env TMPCLEANER_CONF=/path/to/custom.conf tmpcleaner --dry-run`; an
-unreadable file stops the run before cleaning.
+unreadable file or `*.conf` drop-in stops the run before cleaning.
 
 ## Override the age
 

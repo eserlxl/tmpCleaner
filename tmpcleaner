@@ -239,6 +239,15 @@ fi
 
 conf=${TMPCLEANER_CONF:-/etc/tmpcleaner/tmpcleaner.conf}
 [ -r "$conf" ] || { echo "tmpcleaner: cannot read $conf" >&2; exit "$errstatus"; }
+if [ -d "$conf.d" ]; then
+	saved_lc_all=${LC_ALL+x}:${LC_ALL-}
+	LC_ALL=C
+	for dropin in "$conf.d"/*.conf; do
+		[ -f "$dropin" ] || continue
+		[ -r "$dropin" ] || { echo "tmpcleaner: cannot read $dropin" >&2; exit "$errstatus"; }
+	done
+	case "$saved_lc_all" in :*) unset LC_ALL ;; *) LC_ALL=${saved_lc_all#*:} ;; esac
+fi
 case "${TMPCLEANER_LIST:-}" in
 	''|1|nul) ;;
 	*) echo "tmpcleaner: invalid TMPCLEANER_LIST (expected 1, nul or empty)" >&2; exit "$errstatus" ;;
@@ -501,29 +510,42 @@ in_use() {
 }
 
 rules() {
-	if [ "${TMPCLEANER_AGE+x}" ]; then
-		# Set field 6 (the age) of d rules, keeping any age-by letters and
-		# filling omitted mode/user/group fields; a quoted path holding spaces
-		# cannot be split into fields safely, so such a rule is left as is.
-		AGE=$TMPCLEANER_AGE LC_ALL=C awk '
-		{
-			sub(/\015$/, "")
-			if ($0 ~ /[\013\014\015]/) { print "tmpcleaner: raw CR, FF or VT in rule" > "/dev/stderr"; exit 1 }
-		}
-		$1 != "d" { print; next }
-		$2 ~ /^["\047]/ && $2 !~ /["\047]$/ { print "tmpcleaner: age override skipped for: " $0 > "/dev/stderr"; print; next }
-		{
-			for (i = NF + 1; i <= 5; i++) $i = "-"
-			prefix = ""
-			# Keep "~" (spares the immediate entries of a directory) and age-by letters.
-			if (NF >= 6 && match($6, /^~?([abcmABCM]+:)?/)) prefix = substr($6, 1, RLENGTH)
-			$6 = prefix ENVIRON["AGE"]
-			print
-		}' "$conf" || return 1
-	else
-		cat "$conf" || return 1
+	set -- "$conf"
+	if [ -d "$conf.d" ]; then
+		saved_lc_all=${LC_ALL+x}:${LC_ALL-}
+		LC_ALL=C
+		for dropin in "$conf.d"/*.conf; do
+			[ -f "$dropin" ] || continue
+			[ -r "$dropin" ] || { echo "tmpcleaner: cannot read $dropin" >&2; exit "$errstatus"; }
+			set -- "$@" "$dropin"
+		done
+		case "$saved_lc_all" in :*) unset LC_ALL ;; *) LC_ALL=${saved_lc_all#*:} ;; esac
 	fi
-	echo
+	for cfgfile do
+		if [ "${TMPCLEANER_AGE+x}" ]; then
+			# Set field 6 (the age) of d rules, keeping any age-by letters and
+			# filling omitted mode/user/group fields; a quoted path holding spaces
+			# cannot be split into fields safely, so such a rule is left as is.
+			AGE=$TMPCLEANER_AGE LC_ALL=C awk '
+			{
+				sub(/\015$/, "")
+				if ($0 ~ /[\013\014\015]/) { print "tmpcleaner: raw CR, FF or VT in rule" > "/dev/stderr"; exit 1 }
+			}
+			$1 != "d" { print; next }
+			$2 ~ /^["\047]/ && $2 !~ /["\047]$/ { print "tmpcleaner: age override skipped for: " $0 > "/dev/stderr"; print; next }
+			{
+				for (i = NF + 1; i <= 5; i++) $i = "-"
+				prefix = ""
+				# Keep "~" (spares the immediate entries of a directory) and age-by letters.
+				if (NF >= 6 && match($6, /^~?([abcmABCM]+:)?/)) prefix = substr($6, 1, RLENGTH)
+				$6 = prefix ENVIRON["AGE"]
+				print
+			}' "$cfgfile" || return 1
+		else
+			cat "$cfgfile" || return 1
+		fi
+		echo
+	done
 	# Packages ship their own /tmp exclusions in tmpfiles.d (display-manager
 	# X auth files, PrivateTmp). Keep the lines verbatim so specifiers and X
 	# keep their meaning; skip a bare /tmp so no rule can exclude the whole tree.

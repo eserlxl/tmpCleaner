@@ -1183,6 +1183,81 @@ if ! TMPCLEANER_CONF=$cfg/root-filter.conf sh "$here/tmpcleaner" --print-rules >
 fi
 rm -rf "$scope_outside" "$filter_root" "$cfg/root-filter.conf" "$cfg/filter.err" "$cfg/filter.out" "$cfg/filter.clean"
 scope_outside=
+# Drop-in files in $conf.d/*.conf apply in byte order after the main file, each
+# followed by a newline, go through the same validation and age override,
+# ignore non-.conf and non-regular entries, and abort on unreadable files.
+dropin_root=$(mktemp -d "$dir/dropin.XXXXXX")
+mkdir -p "$cfg/conf.d" "$cfg/conf.d/00-subdir.conf" "$dropin_root/extra"
+touch "$dropin_root/kept" "$dropin_root/removed" "$dropin_root/extra/old"
+old "$dropin_root/kept" "$dropin_root/removed" "$dropin_root/extra/old"
+printf 'x %s/kept' "$dropin_root" > "$cfg/conf.d/50-keep.conf"
+printf 'd %s - - - amM:12h' "$dropin_root" > "$cfg/conf.d/60-extra.conf"
+printf 'x %s/removed\n' "$dropin_root" > "$cfg/conf.d/50-keep.conf.bak"
+printf 'x %s/removed\n' "$dropin_root" > "$cfg/conf.d/README"
+dropin_rules=$(env -u LC_ALL LANG=C.UTF-8 TMPCLEANER_AGE=8h TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --print-rules)
+if ! printf '%s\n' "$dropin_rules" | awk -v k="x $dropin_root/kept" -v d="d $dropin_root - - - amM:8h" '
+	$0 == k { kf = NR }
+	$0 == d { df = NR }
+	END { exit !(kf && df && kf < df) }
+' || printf '%s\n' "$dropin_rules" | grep -Fq "$dropin_root/removed"; then
+	echo 'FAIL: drop-in *.conf files must appear in byte order with age overrides and ignore non-.conf or directory entries'
+	fail=1
+fi
+status=0
+TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" "--prefix=$dropin_root" >/dev/null 2>&1 || status=$?
+if [ "$status" -ne 0 ] || [ ! -e "$dropin_root/kept" ] || [ -e "$dropin_root/removed" ] || [ -e "$dropin_root/extra/old" ]; then
+	echo 'FAIL: drop-in x rule in 50-keep.conf must keep an old file while other old files are cleaned'
+	fail=1
+fi
+scope_base=$here
+case "$scope_base" in /tmp|/tmp/*) scope_base=/dev/shm ;; esac
+scope_outside=$(mktemp -d "$scope_base/.tmpcleaner-dropin.XXXXXX")
+printf 'untouched\n' > "$scope_outside/sentinel"
+printf 'd %s - - - 12h\n' "$scope_outside" > "$cfg/conf.d/70-outside.conf"
+for dropin_mode in real dry check rules raw; do
+	case "$dropin_mode" in
+		real) set -- ;;
+		dry) set -- --dry-run ;;
+		check) set -- --check "$dropin_root/kept" ;;
+		rules) set -- --print-rules ;;
+		raw) set -- --print-in-use0 ;;
+	esac
+	status=0
+	CLEAN_SHIM_STATUS=99 CLEAN_SHIM_MARKER=$cfg/dropin.clean TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" "$@" \
+		> "$cfg/dropin.out" 2> "$cfg/dropin.err" || status=$?
+	expected=1; [ "$dropin_mode" != check ] || expected=2
+	if [ "$status" -ne "$expected" ] || [ -s "$cfg/dropin.out" ] || [ -e "$cfg/dropin.clean" ] ||
+		! grep -Fq 'cleanup root is outside /tmp' "$cfg/dropin.err" ||
+		[ "$(cat "$scope_outside/sentinel")" != untouched ]; then
+		echo "FAIL: drop-in d rule outside /tmp must be refused in $dropin_mode mode"
+		fail=1
+	fi
+done
+rm -rf "$scope_outside" "$cfg/conf.d/70-outside.conf"
+scope_outside=
+if [ "$(id -u)" -ne 0 ]; then
+	chmod 000 "$cfg/conf.d/50-keep.conf"
+	for dropin_mode in real dry check rules raw; do
+		case "$dropin_mode" in
+			real) set -- ;;
+			dry) set -- --dry-run ;;
+			check) set -- --check "$dropin_root/kept" ;;
+			rules) set -- --print-rules ;;
+			raw) set -- --print-in-use0 ;;
+		esac
+		status=0
+		CLEAN_SHIM_STATUS=99 CLEAN_SHIM_MARKER=$cfg/dropin.clean TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" "$@" \
+			> "$cfg/dropin.out" 2> "$cfg/dropin.err" || status=$?
+		expected=1; [ "$dropin_mode" != check ] || expected=2
+		if [ "$status" -ne "$expected" ] || [ -s "$cfg/dropin.out" ] || [ -e "$cfg/dropin.clean" ] ||
+			! grep -Fxq "tmpcleaner: cannot read $cfg/conf.d/50-keep.conf" "$cfg/dropin.err"; then
+			echo "FAIL: unreadable drop-in must stop $dropin_mode before cleaning"
+			fail=1
+		fi
+	done
+	chmod 600 "$cfg/conf.d/50-keep.conf"
+fi
+rm -rf "$dropin_root" "$cfg/conf.d" "$cfg/dropin.out" "$cfg/dropin.err" "$cfg/dropin.clean"
 # Nested mount roots cannot bypass the /tmp-only inode index or -xdev walk.
 cat > "$cfg/mount-roots.sh" <<'MOUNT_TEST'
 set -eu
