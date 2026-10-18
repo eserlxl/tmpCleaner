@@ -1256,6 +1256,47 @@ if [ "$(id -u)" -ne 0 ]; then
 		fi
 	done
 	chmod 600 "$cfg/conf.d/50-keep.conf"
+	chmod 000 "$cfg/conf.d"
+	for dropin_mode in real dry check rules raw; do
+		case "$dropin_mode" in
+			real) set -- ;;
+			dry) set -- --dry-run ;;
+			check) set -- --check "$dropin_root/kept" ;;
+			rules) set -- --print-rules ;;
+			raw) set -- --print-in-use0 ;;
+		esac
+		status=0
+		CLEAN_SHIM_STATUS=99 CLEAN_SHIM_MARKER=$cfg/dropin.clean TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" "$@" \
+			> "$cfg/dropin.out" 2> "$cfg/dropin.err" || status=$?
+		expected=1; [ "$dropin_mode" != check ] || expected=2
+		if [ "$status" -ne "$expected" ] || [ -s "$cfg/dropin.out" ] || [ -e "$cfg/dropin.clean" ] ||
+			[ ! -e "$dropin_root/kept" ] ||
+			! grep -Fxq "tmpcleaner: cannot read $cfg/conf.d" "$cfg/dropin.err"; then
+			echo "FAIL: unreadable conf.d must stop $dropin_mode before cleaning"
+			fail=1
+		fi
+	done
+	chmod 700 "$cfg/conf.d"
+	ln -sf "$cfg/conf.d/missing-target" "$cfg/conf.d/50-keep.conf"
+	for dropin_mode in real dry check rules raw; do
+		case "$dropin_mode" in
+			real) set -- ;;
+			dry) set -- --dry-run ;;
+			check) set -- --check "$dropin_root/kept" ;;
+			rules) set -- --print-rules ;;
+			raw) set -- --print-in-use0 ;;
+		esac
+		status=0
+		CLEAN_SHIM_STATUS=99 CLEAN_SHIM_MARKER=$cfg/dropin.clean TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" "$@" \
+			> "$cfg/dropin.out" 2> "$cfg/dropin.err" || status=$?
+		expected=1; [ "$dropin_mode" != check ] || expected=2
+		if [ "$status" -ne "$expected" ] || [ -s "$cfg/dropin.out" ] || [ -e "$cfg/dropin.clean" ] ||
+			[ ! -e "$dropin_root/kept" ] ||
+			! grep -Fxq "tmpcleaner: cannot read $cfg/conf.d/50-keep.conf" "$cfg/dropin.err"; then
+			echo "FAIL: dangling drop-in symlink must stop $dropin_mode before cleaning"
+			fail=1
+		fi
+	done
 fi
 rm -rf "$dropin_root" "$cfg/conf.d" "$cfg/dropin.out" "$cfg/dropin.err" "$cfg/dropin.clean"
 # Nested mount roots cannot bypass the /tmp-only inode index or -xdev walk.

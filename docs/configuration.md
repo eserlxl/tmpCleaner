@@ -18,9 +18,10 @@ Regular files matching `/etc/tmpcleaner/tmpcleaner.conf.d/*.conf` (or
 locale), each followed by a newline, so packages and configuration management
 tools can install their own exclusions (for example
 `/etc/tmpcleaner/tmpcleaner.conf.d/50-my-job.conf`) without editing
-`tmpcleaner.conf`. Other filenames and non-regular entries in the directory are
-ignored, and a missing or empty directory is not an error; an unreadable
-`*.conf` drop-in stops the run before cleaning.
+`tmpcleaner.conf`. Other filenames and subdirectories in the directory are
+ignored, and a missing or empty directory is not an error; an unreadable or
+unsearchable `*.conf.d` directory, a dangling `*.conf` symlink, or any other
+unreadable or non-regular `*.conf` entry stops the run before cleaning.
 
 An exclusion applies while a parent cleanup rule traverses the tree. A
 separately configured cleanup root at or below the excluded directory can still
@@ -60,7 +61,8 @@ Service environment settings below go in a unit drop-in via `sudo systemctl edit
 
 A configuration file other than the installed one can be previewed with
 `sudo env TMPCLEANER_CONF=/path/to/custom.conf tmpcleaner --dry-run`; an
-unreadable file or `*.conf` drop-in stops the run before cleaning.
+unreadable file, `*.conf.d` directory, or `*.conf` drop-in (including a
+dangling symlink) stops the run before cleaning.
 
 ## Override the age
 
