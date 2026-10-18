@@ -385,7 +385,11 @@ in_use() {
 			file = "/proc/" pid "/net/unix"
 			saved = RS
 			RS = "\n"
-			getline line < file
+			if ((getline line < file) <= 0) {
+				close(file)
+				RS = saved
+				return 0
+			}
 			while ((getline line < file) > 0) {
 				if (line ~ /^ *[0-9a-fA-F]+: /) {
 					split(line, fields, " ")
@@ -423,6 +427,7 @@ in_use() {
 				}
 			}
 			if (queued) verify(args)
+			return 1
 		}
 		# A shell word for s: single quotes, with each quote as '\''.
 		function quote(s, parts, n, i, word) {
@@ -494,7 +499,7 @@ in_use() {
 			pid = parts[3]
 			next
 		}
-		parts[5] == "net" { if (!($0 in netns)) netns[$0] = pid; next }
+		parts[5] == "net" { netns[$0] = ($0 in netns) ? netns[$0] " " pid : pid; next }
 		parts[4] == "ns" { namespace[pid] = $0; next }
 		parts[4] == "root" {
 			rootlink[pid] = $0
@@ -506,7 +511,12 @@ in_use() {
 		# or bind alias only keeps another name of a file in use.
 		END {
 			if (failed || expect || expect_ns || !batches || !("self" in namespace)) exit 1
-			for (ns in netns) sockets(netns[ns])
+			# A member may exit mid-scan: read the namespace through the next one. When
+			# none is left, no process holds its sockets any more.
+			for (ns in netns) {
+				n = split(netns[ns], members, " ")
+				for (i = 1; i <= n; i++) if (sockets(members[i])) break
+			}
 			if (failed) exit 1
 			if (!nwanted) exit
 			holders_file = ENVIRON["HOLDERS"]

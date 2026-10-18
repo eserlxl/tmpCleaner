@@ -57,6 +57,18 @@ case "\${FIND_SHIM_FAIL:-}:\$*" in
 	walk:"/tmp -xdev -printf"*) exit 1 ;;
 	walk-killed:"/tmp -xdev -printf"*) "$(command -v find)" /tmp -maxdepth 0 -printf '%i %p\0'; kill -KILL \$\$ ;;
 	killed:/proc/self/ns/mnt*) "$(command -v find)" /proc/self/ns/mnt -maxdepth 0 -type l -printf '%p\0%l\0'; kill -KILL \$\$ ;;
+	netns-fallback:/proc/self/ns/mnt*)
+		for arg do
+			case "\$arg" in
+				/proc/*/ns/net)
+					[ "\$(readlink "\$arg" 2>/dev/null)" = "\$FIND_SHIM_NETNS" ] || set -- "\$@" "\$arg" ;;
+				*) set -- "\$@" "\$arg" ;;
+			esac
+			shift
+		done
+		"$(command -v find)" "\$@"
+		printf '/proc/999999999/ns/net\0%s\0/proc/%s/ns/net\0%s\0' "\$FIND_SHIM_NETNS" "\$FIND_SHIM_PID" "\$FIND_SHIM_NETNS"
+		exit 0 ;;
 esac
 case "\$*" in
 	*-fprintf*) [ -z "\${FIND_SHIM_FPRINTF_MARKER:-}" ] || : > "\$FIND_SHIM_FPRINTF_MARKER" ;;
@@ -1641,6 +1653,26 @@ TMPCLEANER_LIST=bogus TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --check "$dir/
 if [ "$status" -ne 2 ]; then
 	echo "FAIL: --check with invalid TMPCLEANER_LIST should exit 2"
 	fail=1
+fi
+if [ "$chrootsock_running" = 1 ] || [ "$sockbatch_running" = 1 ]; then
+	if [ "$chrootsock_running" = 1 ]; then
+		fb_pid=$chrootsock_pid
+		fb_netns=$(readlink "/proc/$chrootsock_pid/ns/net")
+		fb_sock="$dir/chrootsock"
+	else
+		fb_pid=$sockbatch_pid
+		fb_netns="net:[0]"
+		fb_sock="$dir/b205"
+	fi
+	fb_rules=$(shim env FIND_SHIM_FAIL=netns-fallback FIND_SHIM_PID="$fb_pid" FIND_SHIM_NETNS="$fb_netns" \
+		TMPCLEANER_CONF="$conf" sh "$here/tmpcleaner" --print-rules) || {
+		echo "FAIL: netns fallback should succeed when a later member is readable"
+		fail=1
+	}
+	printf '%s\n' "$fb_rules" | grep -Fxq "x \"$fb_sock\"" || {
+		echo "FAIL: netns fallback should protect sockets read through the surviving member"
+		fail=1
+	}
 fi
 for scanfail in STAT_SHIM_FAIL=tmp STAT_SHIM_FAIL=cached STAT_SHIM_FAIL=verify STAT_SHIM_FAIL=killed STAT_SHIM_FAIL=verify-killed FIND_SHIM_FAIL=walk FIND_SHIM_FAIL=killed FIND_SHIM_FAIL=walk-killed CAT_SHIM_FAIL=1; do
 	status=0
