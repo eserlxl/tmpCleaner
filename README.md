@@ -91,7 +91,8 @@ x /tmp/my-long-job-*
 A `*.conf` file in `/etc/tmpcleaner/tmpcleaner.conf.d/` works the same and
 survives package upgrades (see [docs/configuration.md](docs/configuration.md)).
 Without root, a job can instead create a regular `.tmpcleaner-keep` file in its
-`/tmp/<dir>` or `/tmp/<dir>/<subdir>` directory and remove it when done.
+`/tmp/<dir>` or `/tmp/<dir>/<subdir>` directory and remove it when done (read by
+tmpCleaner only, not by the distribution's own cleaner).
 
 Age overrides, the opt-in pressure mode (a shorter age when `/tmp` is nearly
 full, which applies to **every unprotected file**), and the other service

@@ -105,6 +105,12 @@ To protect a path from the distribution's own cleaner too, put the same line in
 a `tmpfiles.d` file instead, for example `/etc/tmpfiles.d/my-long-job.conf`;
 tmpCleaner imports `x` and `X` rules under `/tmp` from there at every run.
 
+Without root, a job can create a regular `.tmpcleaner-keep` file in its
+`/tmp/<a>` or `/tmp/<a>/<b>` directory and delete it when done; a symlink with
+that name keeps nothing. Only tmpCleaner reads the marker: the distribution's own
+cleaner does not, so work that must outlive the distribution's `/tmp` age still
+needs a `tmpfiles.d` `x` rule.
+
 For a single manual run, `--exclude-prefix=PATH` keeps PATH and everything
 below it ([cli-reference.md](cli-reference.md)).
 
