@@ -36,7 +36,8 @@ When `TMPCLEANER_METRICS` is set to the absolute path of a `*.prom` file (for
 example `/var/lib/node_exporter/textfile_collector/tmpcleaner.prom`), each real
 run atomically writes `tmpcleaner_removed_files`,
 `tmpcleaner_removed_directories`, `tmpcleaner_removed_bytes`,
-`tmpcleaner_protected_paths`, `tmpcleaner_last_run_timestamp_seconds`,
+`tmpcleaner_protected_paths`, `tmpcleaner_marked_directories`,
+`tmpcleaner_last_run_timestamp_seconds`,
 `tmpcleaner_last_success_timestamp_seconds`, `tmpcleaner_last_exit_status`,
 `tmpcleaner_pressure_mode_active`, and `tmpcleaner_last_run_duration_seconds`
 gauges for the Prometheus `node_exporter` textfile collector. Preview modes
@@ -52,6 +53,11 @@ run fails before cleanup counts are obtained.
 last run protected from cleanup (excluding the scratch directory and its
 descendants, as `--print-in-use0` reports), or `0` when the run failed before
 the in-use scan.
+
+`tmpcleaner_marked_directories` is the number of `/tmp` directories
+`.tmpcleaner-keep` markers kept in the last run, or `0` when the run failed
+before the scan. A value that keeps growing means markers were left behind,
+listed with `find /tmp -mindepth 2 -maxdepth 3 -name .tmpcleaner-keep`.
 
 `tmpcleaner_last_success_timestamp_seconds` is the Unix completion timestamp of
 the last real run that exited `0`. Failed runs carry forward the previous value

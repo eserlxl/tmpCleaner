@@ -148,6 +148,7 @@ failure_metrics_ok() {
 	grep -Fxq 'tmpcleaner_removed_directories 0' "$cfg/failure.prom" &&
 	grep -Fxq 'tmpcleaner_removed_bytes 0' "$cfg/failure.prom" &&
 	grep -Fxq 'tmpcleaner_protected_paths 0' "$cfg/failure.prom" &&
+	grep -Fxq 'tmpcleaner_marked_directories 0' "$cfg/failure.prom" &&
 	grep -Fxq 'tmpcleaner_last_success_timestamp_seconds 0' "$cfg/failure.prom" &&
 	grep -Fxq 'tmpcleaner_last_exit_status 1' "$cfg/failure.prom" &&
 	grep -Fxq "tmpcleaner_pressure_mode_active ${1:-0}" "$cfg/failure.prom" &&
@@ -2138,7 +2139,8 @@ if [ "$status" -ne 0 ] || [ "$check_out" != "would be removed: $dir/symlink-job/
 	fail=1
 fi
 status=0
-shim env FIND_SHIM_FAIL=markers-unreadable TMPCLEANER_CONF=$cfg/marker.conf sh "$here/tmpcleaner" >/dev/null 2>&1 || status=$?
+shim env FIND_SHIM_FAIL=markers-unreadable TMPCLEANER_CONF=$cfg/marker.conf \
+	TMPCLEANER_METRICS=$cfg/marker-with.prom sh "$here/tmpcleaner" >/dev/null 2>&1 || status=$?
 if [ "$status" -ne 0 ] || [ ! -e "$dir/job/old" ] || [ ! -e "$marker_top/old" ] || [ -e "$dir/symlink-job/old" ]; then
 	echo 'FAIL: real run must keep regular .tmpcleaner-keep directories and remove symlinked-marker contents'
 	fail=1
@@ -2146,12 +2148,21 @@ fi
 rm -f "$dir/job/.tmpcleaner-keep" "$marker_top/.tmpcleaner-keep" "$ctrl_job/.tmpcleaner-keep"
 old "$dir/job" "$marker_top" "$ctrl_job"
 status=0
-TMPCLEANER_CONF=$cfg/marker.conf sh "$here/tmpcleaner" >/dev/null 2>&1 || status=$?
+TMPCLEANER_CONF=$cfg/marker.conf TMPCLEANER_METRICS=$cfg/marker-without.prom \
+	sh "$here/tmpcleaner" >/dev/null 2>&1 || status=$?
 if [ "$status" -ne 0 ] || [ -e "$dir/job/old" ] || [ -e "$marker_top/old" ] || [ -e "$ctrl_job/old" ]; then
 	echo 'FAIL: removing .tmpcleaner-keep must let the next run remove the aged files'
 	fail=1
 fi
-rm -rf "$dir/job" "$dir/symlink-job" "$ctrl_job" "$marker_top" "$cfg/marker.conf" "$cfg/marker.inuse" "$cfg/check.err"
+marked_with=$(LC_ALL=C awk '$1 == "tmpcleaner_marked_directories" { print $2; exit }' "$cfg/marker-with.prom" 2>/dev/null || :)
+marked_without=$(LC_ALL=C awk '$1 == "tmpcleaner_marked_directories" { print $2; exit }' "$cfg/marker-without.prom" 2>/dev/null || :)
+case "$marked_with" in ''|*[!0-9]*) marked_with=-1 ;; esac
+case "$marked_without" in ''|*[!0-9]*) marked_without=-1 ;; esac
+if [ "$((marked_with - marked_without))" -ne 3 ]; then
+	echo 'FAIL: tmpcleaner_marked_directories must count regular markers and drop when they are removed'
+	fail=1
+fi
+rm -rf "$dir/job" "$dir/symlink-job" "$ctrl_job" "$marker_top" "$cfg/marker.conf" "$cfg/marker.inuse" "$cfg/check.err" "$cfg/marker-with.prom" "$cfg/marker-without.prom"
 marker_top=
 
 # Counts, listings and metrics include every age-cleanup type and deduplicate
