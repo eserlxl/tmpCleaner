@@ -145,6 +145,7 @@ failure_metrics_ok() {
 	grep -Fxq 'tmpcleaner_removed_directories 0' "$cfg/failure.prom" &&
 	grep -Fxq 'tmpcleaner_removed_bytes 0' "$cfg/failure.prom" &&
 	grep -Fxq 'tmpcleaner_protected_paths 0' "$cfg/failure.prom" &&
+	grep -Fxq 'tmpcleaner_last_success_timestamp_seconds 0' "$cfg/failure.prom" &&
 	grep -Fxq 'tmpcleaner_last_exit_status 1' "$cfg/failure.prom" &&
 	grep -Fxq "tmpcleaner_pressure_mode_active ${1:-0}" "$cfg/failure.prom" &&
 	grep -Eq '^tmpcleaner_last_run_duration_seconds (NaN|[0-9]+[.][0-9][0-9])$' "$cfg/failure.prom" &&
@@ -1788,13 +1789,30 @@ fi
 # values, and preserves both successful and failed cleanup statuses.
 mkdir "$dir/duration"
 printf 'd %s/duration - - - amM:12h\n' "$dir" > "$cfg/duration.conf"
+rm -f "$cfg/duration.prom"
+status=0
+shim env CLEAN_SHIM_STATUS=42 TMPCLEANER_CONF=$cfg/duration.conf TMPCLEANER_METRICS=$cfg/duration.prom \
+	sh "$here/tmpcleaner" >/dev/null 2> "$cfg/duration.err" || status=$?
+if [ "$status" -ne 42 ] ||
+	! grep -Fxq 'tmpcleaner_last_success_timestamp_seconds 0' "$cfg/duration.prom" ||
+	! grep -Fxq 'tmpcleaner_last_exit_status 42' "$cfg/duration.prom"; then
+	echo 'FAIL: a first-ever failing run must write 0 for tmpcleaner_last_success_timestamp_seconds'
+	fail=1
+fi
 for duration_case in 2000000000:0 2000000000:0 1000000000:42; do
 	status=0
 	shim env DATE_SHIM_VALUE=${duration_case%:*} CLEAN_SHIM_DELAY=0.2 CLEAN_SHIM_STATUS=${duration_case#*:} \
 		TMPCLEANER_CONF=$cfg/duration.conf TMPCLEANER_METRICS=$cfg/duration.prom \
 		sh "$here/tmpcleaner" >/dev/null 2> "$cfg/duration.err" || status=$?
+	if [ "${duration_case#*:}" = 0 ]; then
+		success_ts=$(LC_ALL=C awk '$1 == "tmpcleaner_last_success_timestamp_seconds" { print $2 }' "$cfg/duration.prom")
+		expected_success=${duration_case%:*}
+	else
+		expected_success=$success_ts
+	fi
 	if [ "$status" -ne "${duration_case#*:}" ] ||
 		! grep -Fxq "tmpcleaner_last_run_timestamp_seconds ${duration_case%:*}" "$cfg/duration.prom" ||
+		! grep -Fxq "tmpcleaner_last_success_timestamp_seconds $expected_success" "$cfg/duration.prom" ||
 		! grep -Fxq "tmpcleaner_last_exit_status ${duration_case#*:}" "$cfg/duration.prom" ||
 		! LC_ALL=C awk '$1 == "tmpcleaner_last_run_duration_seconds" { found++; if ($2 !~ /^[0-9]+[.][0-9][0-9]$/ || $2 + 0 < 0.20) exit 1 } END { if (found != 1) exit 1 }' "$cfg/duration.prom"; then
 		echo 'FAIL: run duration must cover backend delay independently of wall-clock changes'
@@ -1805,6 +1823,7 @@ status=0
 shim env DURATION_SHIM_FAIL=1 CLEAN_SHIM_STATUS=42 TMPCLEANER_CONF=$cfg/duration.conf TMPCLEANER_METRICS=$cfg/duration.prom \
 	sh "$here/tmpcleaner" >/dev/null 2> "$cfg/duration.err" || status=$?
 if [ "$status" -ne 42 ] || ! grep -Fxq 'tmpcleaner_last_run_duration_seconds NaN' "$cfg/duration.prom" ||
+	! grep -Fxq "tmpcleaner_last_success_timestamp_seconds $success_ts" "$cfg/duration.prom" ||
 	! grep -Fxq 'tmpcleaner_last_exit_status 42' "$cfg/duration.prom" ||
 	! grep -Fxq 'tmpcleaner_removed_files 0' "$cfg/duration.prom" ||
 	! grep -Fxq 'tmpcleaner_removed_directories 0' "$cfg/duration.prom" ||
@@ -1858,6 +1877,7 @@ run_log=$(env -u LC_ALL LANG=C.UTF-8 TMPCLEANER_LIST=1 TMPCLEANER_METRICS="$cfg/
 
 fail=0
 expected_files=$((5 + bind_running + sock_running))
+run_ts=$(LC_ALL=C awk '$1 == "tmpcleaner_last_run_timestamp_seconds" { print $2 }' "$cfg/metrics.prom" 2>/dev/null || :)
 if ! { [ -f "$cfg/metrics.prom" ] &&
 	grep -Fxq '# HELP tmpcleaner_removed_files Number of files removed in the last run.' "$cfg/metrics.prom" &&
 	grep -Fxq '# TYPE tmpcleaner_removed_files gauge' "$cfg/metrics.prom" &&
@@ -1874,6 +1894,9 @@ if ! { [ -f "$cfg/metrics.prom" ] &&
 	grep -Fxq '# HELP tmpcleaner_last_run_timestamp_seconds Unix timestamp of the last run completion.' "$cfg/metrics.prom" &&
 	grep -Fxq '# TYPE tmpcleaner_last_run_timestamp_seconds gauge' "$cfg/metrics.prom" &&
 	grep -Eq '^tmpcleaner_last_run_timestamp_seconds [1-9][0-9]*$' "$cfg/metrics.prom" &&
+	grep -Fxq '# HELP tmpcleaner_last_success_timestamp_seconds Unix timestamp of the last run that exited 0.' "$cfg/metrics.prom" &&
+	grep -Fxq '# TYPE tmpcleaner_last_success_timestamp_seconds gauge' "$cfg/metrics.prom" &&
+	grep -Fxq "tmpcleaner_last_success_timestamp_seconds $run_ts" "$cfg/metrics.prom" &&
 	grep -Fxq '# HELP tmpcleaner_last_exit_status Exit status of the last run.' "$cfg/metrics.prom" &&
 	grep -Fxq '# TYPE tmpcleaner_last_exit_status gauge' "$cfg/metrics.prom" &&
 	grep -Fxq 'tmpcleaner_last_exit_status 0' "$cfg/metrics.prom" &&

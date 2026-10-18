@@ -153,6 +153,16 @@ write_metrics() {
 	mdir=${TMPCLEANER_METRICS%/*}
 	# A metrics failure is logged, never turned into the run's exit status.
 	if [ ! -d "$TMPCLEANER_METRICS" ] && now=$(date +%s 2>/dev/null) && mtmp=$(mktemp "${mdir:-/}/.tmpcleaner.XXXXXX" 2>/dev/null) && {
+		last_success=0
+		if [ "$exit_status" = 0 ]; then
+			last_success=$now
+		elif [ ! -L "$TMPCLEANER_METRICS" ] && [ -f "$TMPCLEANER_METRICS" ]; then
+			prev_success=$(LC_ALL=C awk '/^tmpcleaner_last_success_timestamp_seconds [0-9]+$/ { print $2; exit }' "$TMPCLEANER_METRICS" 2>/dev/null) || prev_success=
+			case "$prev_success" in
+				*[!0-9]*|'') ;;
+				*) last_success=$prev_success ;;
+			esac
+		fi
 		cat > "$mtmp" <<EOF && chmod a+r "$mtmp" && mv -fT -- "$mtmp" "$TMPCLEANER_METRICS"
 # HELP tmpcleaner_removed_files Number of files removed in the last run.
 # TYPE tmpcleaner_removed_files gauge
@@ -169,6 +179,9 @@ tmpcleaner_protected_paths $metric_protected
 # HELP tmpcleaner_last_run_timestamp_seconds Unix timestamp of the last run completion.
 # TYPE tmpcleaner_last_run_timestamp_seconds gauge
 tmpcleaner_last_run_timestamp_seconds $now
+# HELP tmpcleaner_last_success_timestamp_seconds Unix timestamp of the last run that exited 0.
+# TYPE tmpcleaner_last_success_timestamp_seconds gauge
+tmpcleaner_last_success_timestamp_seconds $last_success
 # HELP tmpcleaner_last_exit_status Exit status of the last run.
 # TYPE tmpcleaner_last_exit_status gauge
 tmpcleaner_last_exit_status $exit_status

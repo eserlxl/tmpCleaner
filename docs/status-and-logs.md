@@ -37,11 +37,12 @@ example `/var/lib/node_exporter/textfile_collector/tmpcleaner.prom`), each real
 run atomically writes `tmpcleaner_removed_files`,
 `tmpcleaner_removed_directories`, `tmpcleaner_removed_bytes`,
 `tmpcleaner_protected_paths`, `tmpcleaner_last_run_timestamp_seconds`,
-`tmpcleaner_last_exit_status`, `tmpcleaner_pressure_mode_active`, and
-`tmpcleaner_last_run_duration_seconds` gauges for the Prometheus
-`node_exporter` textfile collector. Preview modes (`--dry-run`,
-`--print-rules`, `--print-in-use0`, `--check`) never touch the file, and a
-write failure logs one line to stderr without changing the run's exit status.
+`tmpcleaner_last_success_timestamp_seconds`, `tmpcleaner_last_exit_status`,
+`tmpcleaner_pressure_mode_active`, and `tmpcleaner_last_run_duration_seconds`
+gauges for the Prometheus `node_exporter` textfile collector. Preview modes
+(`--dry-run`, `--print-rules`, `--print-in-use0`, `--check`) never touch the
+file, and a write failure logs one line to stderr without changing the run's
+exit status.
 
 `tmpcleaner_removed_bytes` is the summed apparent byte size (`find` `%s`) of
 non-directory entries observed to disappear during the run, or `0` when the
@@ -51,6 +52,11 @@ run fails before cleanup counts are obtained.
 last run protected from cleanup (excluding the scratch directory and its
 descendants, as `--print-in-use0` reports), or `0` when the run failed before
 the in-use scan.
+
+`tmpcleaner_last_success_timestamp_seconds` is the Unix completion timestamp of
+the last real run that exited `0`. Failed runs carry forward the previous value
+from an existing metrics file, or write `0` when no prior successful timestamp
+is recorded.
 
 `tmpcleaner_pressure_mode_active` is `1` when the run selected the pressure age
 override, including when a later step failed. It is `0` when no override was
