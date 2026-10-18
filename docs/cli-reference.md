@@ -27,6 +27,12 @@ never a false "kept"; paths containing newlines (LF) or carriage returns (CR),
 directories holding such names, and paths whose directories cannot be read
 cannot be judged and exit 2.
 
+Checks also exit 2 when any retained cleanup root uses a noncanonical spelling:
+`.` or `..` components, duplicate or trailing slashes, or a symlink alias.
+Use canonical configured roots for reliable preview matching. Roots removed by
+in-use protection or `--exclude-prefix` filtering do not block a check. Other
+modes continue to accept these spellings under the usual safety rules.
+
 Append repeated `--exclude-prefix=PATH` options to check a path with the same
 temporary exclusions as a real run, for example
 `sudo tmpcleaner --check /tmp/my-job/file --exclude-prefix=/tmp/my-job`.

@@ -929,6 +929,49 @@ for name in old.txt 'open a%b.txt' new.txt; do
 		fail=1
 	fi
 done
+# Retained root aliases cannot produce a reliable path check from backend text.
+check_root=$(mktemp -d "$dir/check-roots.XXXXXX")
+mkdir "$check_root/keep" "$check_root/fake"
+printf 'retained\n' > "$check_root/keep/old"
+old "$check_root/keep/old"
+ln -s "$check_root/keep" "$check_root/alias"
+for alias_root in "$check_root/keep/." "$check_root/fake/../keep" "$check_root//keep" \
+	"$check_root/keep/" "$check_root/alias"; do
+	printf 'd %s - - - amM:12h\n' "$alias_root" > "$cfg/check-roots.conf"
+	status=0
+	CLEAN_SHIM_STATUS=99 CLEAN_SHIM_MARKER=$cfg/check-roots.clean TMPCLEANER_CONF=$cfg/check-roots.conf \
+		sh "$here/tmpcleaner" --check "$check_root/keep/old" > "$cfg/check-roots.out" 2> "$cfg/check-roots.err" || status=$?
+	if [ "$status" -ne 2 ] || [ -s "$cfg/check-roots.out" ] || [ -e "$cfg/check-roots.clean" ] ||
+		! grep -Fq 'noncanonical cleanup root in --check' "$cfg/check-roots.err" || [ ! -e "$check_root/keep/old" ]; then
+		echo "FAIL: --check must reject retained noncanonical roots without a verdict or cleanup ($alias_root)"
+		fail=1
+	fi
+	status=0
+	TMPCLEANER_CONF=$cfg/check-roots.conf sh "$here/tmpcleaner" --dry-run "--prefix=$alias_root" \
+		> "$cfg/check-roots.out" 2> "$cfg/check-roots.err" || status=$?
+	if [ "$status" -ne 0 ] || [ ! -e "$check_root/keep/old" ]; then
+		echo 'FAIL: ordinary preview must continue to accept configured root aliases'
+		fail=1
+	fi
+done
+status=0
+check_out=$(TMPCLEANER_CONF=$cfg/check-roots.conf sh "$here/tmpcleaner" --check "$check_root/keep/old" \
+	"--exclude-prefix=$check_root/keep" 2> "$cfg/check-roots.err") || status=$?
+if [ "$status" -ne 1 ] || [ "$check_out" != "kept: $check_root/keep/old" ] ||
+	[ "$(cat "$cfg/check-roots.err")" != 'tmpcleaner: kept by an explicit --exclude-prefix' ]; then
+	echo 'FAIL: an excluded alias root must retain a meaningful check verdict'
+	fail=1
+fi
+printf 'd %s/keep - - - amM:12h\n' "$check_root" > "$cfg/check-roots.conf"
+status=0
+check_out=$(TMPCLEANER_CONF=$cfg/check-roots.conf sh "$here/tmpcleaner" --check "$check_root/keep/old" \
+	2> "$cfg/check-roots.err") || status=$?
+if [ "$status" -ne 0 ] || [ "$check_out" != "would be removed: $check_root/keep/old" ] ||
+	[ -s "$cfg/check-roots.err" ] || [ "$(cat "$check_root/keep/old")" != retained ]; then
+	echo 'FAIL: a canonical configured root must retain the positive check verdict without deletion'
+	fail=1
+fi
+rm -rf "$check_root"
 # A path check can evaluate the same temporary exclusions as a real run.
 for exclusion_case in exact ancestor multiple symlink dotdot unrelated in-use; do
 	target=$dir/old.txt
@@ -1839,6 +1882,7 @@ if [ "$status" -ne 1 ] || [ -s "$cfg/list.out" ]; then
 	fail=1
 fi
 # NUL listing selection leaves previews in their normal formats and never cleans.
+printf 'd %s - - - amM:12h\n' "$list_root" > "$cfg/list.conf"
 for list_preview in rules dry check; do
 	case "$list_preview" in
 		rules) set -- --print-rules ;;

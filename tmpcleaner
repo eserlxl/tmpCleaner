@@ -532,7 +532,7 @@ generate_rules() {
 		exit "$errstatus"
 	}
 	# An x rule cannot protect a root that another rule cleans directly.
-	PROTECTED=$scratch/sorted LC_ALL=C awk '
+	CHECKING=$check PROTECTED=$scratch/sorted LC_ALL=C awk '
 		function quote(s, parts, n, i, word) {
 			n = split(s, parts, "\047")
 			word = "\047" parts[1]
@@ -603,6 +603,7 @@ generate_rules() {
 			if (!under(lexical, "/tmp") || !under(canonical, canonical_tmp)) refuse("cleanup root is outside /tmp")
 			for (i = 1; i <= mount_count; i++) if (under(canonical, mounts[i])) refuse("cleanup root crosses a nested /tmp mount")
 			for (i = 1; i <= count; i++) if (under(lexical, prefixes[i]) || under(canonical, prefixes[i])) next
+			if (ENVIRON["CHECKING"] != "" && path != canonical) refuse("noncanonical cleanup root in --check")
 			print
 		}' "$scratch/rules" > "$scratch/filtered" && mv "$scratch/filtered" "$scratch/rules" || {
 		echo "tmpcleaner: cannot apply path protections; nothing was removed" >&2
