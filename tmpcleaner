@@ -310,17 +310,25 @@ in_use() {
 		BEGIN {
 			RS = "\0"
 		}
-		function want(inode) {
+		function want(inode, holder) {
 			if (inode ~ /^[0-9]+$/ && !(inode in wanted)) {
 				wanted[inode] = 1
 				nwanted++
 			}
+			if (holder ~ /^[0-9]+$/ && !((inode, holder) in seen_holder)) {
+				seen_holder[inode, holder] = 1
+				inode_holders[inode] = inode_holders[inode] ? inode_holders[inode] " " holder : holder
+			}
 		}
-		function emit(path) {
+		function emit(path, inode) {
 			gsub(/\/+/, "/", path)
 			sub(/\/$/, "", path)
 			if (path ~ /(^|\/)\.\.?($|\/)/) return
-			if (index(path, "/tmp/") == 1 && length(path) > 5) printf "%s%c", path, 0
+			if (index(path, "/tmp/") == 1 && length(path) > 5) {
+				printf "%s%c", path, 0
+				if (holders_file != "" && (inode in inode_holders))
+					printf "%s%c%s%c", path, 0, inode_holders[inode], 0 > holders_file
+			}
 		}
 		# Memory-mapped files come from the maps text: listing map_files makes the
 		# kernel build an entry per mapping (tens of MB across all processes).
@@ -332,7 +340,7 @@ in_use() {
 				# Cheap pre-check, then the device field itself: a name may hold the text.
 				if (!index(line, " " devhex " ")) continue
 				split(line, fields, " ")
-				if (fields[4] == devhex) want(fields[5])
+				if (fields[4] == devhex) want(fields[5], pid)
 			}
 			close(file)
 			RS = saved
@@ -419,8 +427,10 @@ in_use() {
 				next
 			}
 			if (split($0, id, " ") < 4) next
-			if (id[1] == tmpdev) want(id[2])
-			else if ($0 ~ / socket$/ && split(id[3], parts, "/") == 5 && parts[4] == "fd") {
+			if (id[1] == tmpdev) {
+				split(id[3], parts, "/")
+				want(id[2], parts[3])
+			} else if ($0 ~ / socket$/ && split(id[3], parts, "/") == 5 && parts[4] == "fd") {
 				pid = parts[3]
 				view = namespace[pid] SUBSEP rootlink[pid]
 				if (!((id[2], view) in viewed)) {
@@ -461,12 +471,14 @@ in_use() {
 			for (ns in netns) sockets(netns[ns])
 			if (failed) exit 1
 			if (!nwanted) exit
+			holders_file = ENVIRON["HOLDERS"]
 			cmd = "find /tmp -xdev -printf \"%i %p\\0\" 2>/dev/null"
 			while ((cmd | getline line) > 0) {
 				n = index(line, " ")
+				inode = substr(line, 1, n - 1)
 				path = substr(line, n + 1)
 				if (path == "/tmp") walked = 1
-				if (substr(line, 1, n - 1) in wanted) emit(path)
+				if (inode in wanted) emit(path, inode)
 			}
 			status = close(cmd)
 			if (!walked || status < 0 || status > 1) exit 1
@@ -518,7 +530,7 @@ rules() {
 	# C-escape \ " and all control bytes for the quoted field and double % (specifier).
 	# LC_ALL=C: names are bytes, not text. In a UTF-8 locale "." skips invalid
 	# bytes, so a name holding one would leave its rule half quoted.
-	in_use > "$scratch/inuse" || return 1
+	HOLDERS=${check:+$scratch/holders} in_use > "$scratch/inuse" || return 1
 	LC_ALL=C sort -zu "$scratch/inuse" "$scratch/excludes" > "$scratch/sorted" || return 1
 	LC_ALL=C sed -z -e '/[[*?]/s/[][*?\\]/\\&/g' -e 's/[\\"]/\\&/g' \
 		-e "$control_escapes" -e 's/%/%%/g' -e 's/.*/x "&"/' \
@@ -700,7 +712,7 @@ if [ -n "$check" ]; then
 			exit 0
 			;;
 		1)
-			CHECK=$check LC_ALL=C awk '
+			CHECK=$check HOLDERS=$scratch/holders LC_ALL=C awk '
 				BEGIN {
 					RS = "\0"
 					path = ENVIRON["CHECK"]
@@ -715,8 +727,28 @@ if [ -n "$check" ]; then
 				index($0, prefix) == 1 && held == "" { held = $0; gsub(/[\001-\037\177]/, "?", held) }
 				index(path, $0 "/") == 1 && ancestor == "" { ancestor = $0; gsub(/[\001-\037\177]/, "?", ancestor) }
 				END {
-					if (exact) print "tmpcleaner: in use by a running process"
-					else if (held != "") print "tmpcleaner: holds an in-use path: " held
+					if (exact) {
+						holders_file = ENVIRON["HOLDERS"]
+						while ((getline hpath < holders_file) > 0 && (getline hpids < holders_file) > 0) {
+							if (hpath == path) {
+								n = split(hpids, pid_list, " ")
+								for (i = 1; i <= n && shown_pids < 3; i++) {
+									pid = pid_list[i]
+									if (pid in seen) continue
+									seen[pid] = 1
+									comm_file = "/proc/" pid "/comm"
+									comm = (getline comm < comm_file) > 0 ? comm : "?"
+									close(comm_file)
+									sub(/\n$/, "", comm)
+									gsub(/[\001-\037\177]/, "?", comm)
+									if (comm == "") comm = "?"
+									who = who (shown_pids++ ? ", " : "") "PID " pid " (" comm ")"
+								}
+							}
+						}
+						close(holders_file)
+						print "tmpcleaner: in use by a running process" (who != "" ? ": " who : "")
+					} else if (held != "") print "tmpcleaner: holds an in-use path: " held
 					else if (ancestor != "") print "tmpcleaner: inside an in-use directory: " ancestor
 					else if (excluded) print "tmpcleaner: kept by an explicit --exclude-prefix"
 					else print "tmpcleaner: not old enough, or kept by a configuration rule"

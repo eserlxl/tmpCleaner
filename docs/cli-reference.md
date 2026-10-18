@@ -13,7 +13,8 @@ Every `tmpcleaner` option, what `--check` reports, and its exit statuses.
 `--check PATH` requires an existing absolute path under `/tmp`. It prints
 `would be removed: PATH` (exit 0) or `kept: PATH` (exit 1, only) on stdout, using the
 same age, pressure and in-use rules as a real run; when a path is kept, it also
-prints one reason line to stderr (`tmpcleaner: in use by a running process`,
+prints one reason line to stderr (`tmpcleaner: in use by a running process: PID ... (...)`
+(or without `: PID ...` when only a socket inode was matched),
 `tmpcleaner: holds an in-use path: ...`,
 `tmpcleaner: inside an in-use directory: ...`,
 `tmpcleaner: kept by an explicit --exclude-prefix`, or

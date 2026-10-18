@@ -319,7 +319,8 @@ old "$utf8"
 # shellcheck disable=SC2217 # sleep only holds these files open for the in-use scan
 sleep infinity < "$utf8" & pids="$pids $!"
 # shellcheck disable=SC2217 # sleep only holds these files open for the in-use scan
-sleep infinity < "$dir/open a%b.txt" 3<"$star" 4<"$glob" 5<"$bs" 6<"$newline" 7<"$carriage" 8<"$tabbed" 9<"$quote" & pids="$pids $!"
+sleep infinity < "$dir/open a%b.txt" 3<"$star" 4<"$glob" 5<"$bs" 6<"$newline" 7<"$carriage" 8<"$tabbed" 9<"$quote" & held_pid=$!
+pids="$pids $held_pid"
 (cd "$dir/workdir" && exec sleep infinity) & pids="$pids $!"
 libm=$(ldconfig -p | awk '/libm\.so\.6/ { print $NF; exit }')
 cp "$libm" "$dir"
@@ -849,8 +850,8 @@ argdir=$(mktemp -d "$dir/args.XXXXXX")
 touch "$argdir/old.txt" "$argdir/held.txt"
 old "$argdir/old.txt" "$argdir/held.txt"
 # shellcheck disable=SC2217 # sleep only holds held.txt open for the in-use scan
-sleep infinity 3<"$argdir/held.txt" & held_pid=$!
-pids="$pids $held_pid"
+sleep infinity 3<"$argdir/held.txt" & arg_held_pid=$!
+pids="$pids $arg_held_pid"
 cp "$conf" "$cfg/other.conf"
 for arg in --remove --create --purge --boot --root=/ --prefix --prefix= --exclude-prefix --exclude-prefix= --exclude-prefix=old.txt "$cfg/other.conf"; do
 	status=0
@@ -894,7 +895,7 @@ if [ "$status" -ne 0 ] || printf '%s\n' "$held_file_preview" | grep -Fq "$argdir
 	echo "FAIL: --dry-run --exclude-prefix on held.txt should not announce held.txt"
 	fail=1
 fi
-kill "$held_pid" 2>/dev/null || :
+kill "$arg_held_pid" 2>/dev/null || :
 rm -rf "$argdir"
 rm -f "$cfg/other.conf"
 [ "$fail" = 0 ] || exit 1
@@ -917,7 +918,7 @@ for name in old.txt 'open a%b.txt' new.txt; do
 		expected_status=0
 	elif [ "$name" = 'open a%b.txt' ]; then
 		expected="kept: $dir/$name"
-		expected_err='tmpcleaner: in use by a running process'
+		expected_err="tmpcleaner: in use by a running process: PID $held_pid (sleep)"
 		expected_status=1
 	else
 		expected="kept: $dir/$name"
@@ -987,7 +988,7 @@ for exclusion_case in exact ancestor multiple symlink dotdot unrelated in-use; d
 		in-use)
 			target=$dir/'open a%b.txt'
 			set -- "--exclude-prefix=$target"
-			expected_err='tmpcleaner: in use by a running process'
+			expected_err="tmpcleaner: in use by a running process: PID $held_pid (sleep)"
 			;;
 	esac
 	status=0
@@ -1316,8 +1317,33 @@ if [ "$check_out" != "would be removed: $dir/e?[2Jx" ]; then
 	fail=1
 fi
 rm -f -- "$dir/${esc_name:?}"
-kill "$ctrl_fd_pid" "$ctrl_cwd_pid" 2>/dev/null || :
-wait "$ctrl_fd_pid" "$ctrl_cwd_pid" 2>/dev/null || :
+cp /usr/bin/sleep "$dir/ctrlparent/$ctrl_name"
+# cp keeps the mode of the existing fixture file, which is not executable.
+chmod u+x "$dir/ctrlparent/$ctrl_name"
+"$dir/ctrlparent/$ctrl_name" infinity < "$dir/ctrlparent/$ctrl_name" &
+ctrl_comm_pid=$!
+pids="$pids $ctrl_comm_pid"
+waited=0
+until [ "$(readlink "/proc/$ctrl_comm_pid/fd/0" 2>/dev/null)" = "$dir/ctrlparent/$ctrl_name" ]; do
+	if [ "$waited" -ge 100 ]; then
+		echo "FAIL: timed out waiting for control-byte comm holder"
+		exit 1
+	fi
+	waited=$((waited + 1))
+	sleep 0.1
+done
+kill "$ctrl_fd_pid" 2>/dev/null || :
+wait "$ctrl_fd_pid" 2>/dev/null || :
+status=0
+check_out=$(TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --check "$dir/ctrlparent/$ctrl_name" 2>"$cfg/check.err") || status=$?
+check_err=$(cat "$cfg/check.err")
+if [ "$status" -ne 1 ] || [ "$check_out" != "kept: $dir/ctrlparent/c?????z" ] ||
+	[ "$check_err" != "tmpcleaner: in use by a running process: PID $ctrl_comm_pid (c?????z)" ]; then
+	echo "FAIL: --check should sanitize control bytes in a holder comm"
+	fail=1
+fi
+kill "$ctrl_comm_pid" "$ctrl_cwd_pid" 2>/dev/null || :
+wait "$ctrl_comm_pid" "$ctrl_cwd_pid" 2>/dev/null || :
 rm -rf "$dir/ctrlparent" "$dir/${ctrl_name:?}" "$cfg/check.err"
 # The caller's systemd log settings must not hide or reshape the preview lines.
 plain_summary=$(TMPCLEANER_CONF="$conf" sh "$here/tmpcleaner" --dry-run 2>&1 | grep '^tmpcleaner: would remove') || :
