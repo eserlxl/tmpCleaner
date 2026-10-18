@@ -2781,5 +2781,74 @@ if [ "$install_out" != "$install_expected" ]; then
 	fail=1
 fi
 
+# All internal markdown links and heading anchors in README.md and docs/*.md
+# resolve relative to the containing file's directory, and no doc carries a
+# local-environment path prefix.
+if ! LC_ALL=C awk '
+function slug(s,    out) {
+	out = tolower(s)
+	gsub(/[^a-z0-9_ -]/, "", out)
+	gsub(/ /, "-", out)
+	return out
+}
+function check_file(path,    cmd, line) {
+	if (path in file_exists) return file_exists[path]
+	cmd = "test -e \"" path "\""
+	file_exists[path] = (system(cmd) == 0)
+	if (file_exists[path]) {
+		while ((getline line < path) > 0) {
+			if (match(line, /^#{1,6}[ \t]+/)) {
+				sub(/^#{1,6}[ \t]+/, "", line)
+				sub(/[ \t]+#*[ \t]*$/, "", line)
+				headings[path, slug(line)] = 1
+			}
+		}
+		close(path)
+	}
+	return file_exists[path]
+}
+{
+	if ($0 ~ /\/(home|Users)\/[A-Za-z0-9._-]+/ || $0 ~ /\/root\//) {
+		printf "FAIL: environment fingerprint in %s:%d: %s\n", FILENAME, FNR, $0
+		bad = 1
+	}
+	line = $0
+	dir = FILENAME
+	sub(/\/[^\/]+$/, "", dir)
+	while (match(line, /\[[^\[\]]*\]\([^()]+\)/)) {
+		token = substr(line, RSTART, RLENGTH)
+		line = substr(line, RSTART + RLENGTH)
+		sub(/^\[[^\[\]]*\]\(/, "", token)
+		sub(/\)$/, "", token)
+		if (token ~ /^https?:\/\//) continue
+		links++
+		frag = ""
+		target = token
+		if (index(token, "#") > 0) {
+			frag = substr(token, index(token, "#") + 1)
+			target = substr(token, 1, index(token, "#") - 1)
+		}
+		resolved = (target == "") ? FILENAME : dir "/" target
+		if (!check_file(resolved)) {
+			printf "FAIL: broken markdown link in %s:%d: %s -> %s\n", FILENAME, FNR, token, resolved
+			bad = 1
+		} else if (frag != "" && !((resolved, frag) in headings)) {
+			printf "FAIL: broken markdown anchor in %s:%d: %s (#%s in %s)\n", FILENAME, FNR, token, frag, resolved
+			bad = 1
+		}
+	}
+}
+END {
+	# Guards the scanner itself: the docs link to each other, so zero means it parsed nothing.
+	if (!links) {
+		print "FAIL: no internal markdown links scanned"
+		bad = 1
+	}
+	exit bad ? 1 : 0
+}
+' "$here/README.md" "$here"/docs/*.md; then
+	fail=1
+fi
+
 [ "$fail" = 0 ] && echo "PASS"
 exit "$fail"
