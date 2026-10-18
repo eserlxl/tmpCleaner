@@ -479,6 +479,10 @@ rules() {
 		# filling omitted mode/user/group fields; a quoted path holding spaces
 		# cannot be split into fields safely, so such a rule is left as is.
 		AGE=$TMPCLEANER_AGE LC_ALL=C awk '
+		{
+			sub(/\015$/, "")
+			if ($0 ~ /[\013\014\015]/) { print "tmpcleaner: raw CR, FF or VT in rule" > "/dev/stderr"; exit 1 }
+		}
 		$1 != "d" { print; next }
 		$2 ~ /^["\047]/ && $2 !~ /["\047]$/ { print "tmpcleaner: age override skipped for: " $0 > "/dev/stderr"; print; next }
 		{
@@ -570,6 +574,10 @@ generate_rules() {
 				records++
 			}
 			if (got < 0 || !records || close("/proc/self/mountinfo") != 0) refuse("cannot read mountinfo")
+		}
+		{
+			sub(/\015$/, "")
+			if ($0 ~ /[\013\014\015]/) refuse("raw CR, FF or VT in rule")
 		}
 		/^[[:space:]]*(#|$)/ { print; next }
 		{

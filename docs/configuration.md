@@ -32,6 +32,10 @@ Cleanup rule paths must be literal absolute paths, plain or simply quoted;
 and ambiguous glob-capable roots stop every run before cleaning, including
 runs without CLI exclusions. See the [supported path grammar](cli-reference.md)
 and literal directory-root exceptions.
+Records may use LF or CRLF endings, with spaces or tabs between fields.
+Any other raw carriage return (CR), form feed (FF) or vertical tab (VT) is
+rejected, including in comments and `x`/`X` records, before rules are forwarded.
+Generated exclusions retain their encoded control-byte paths.
 
 Service environment settings below go in a unit drop-in via `sudo systemctl edit tmpcleaner.service` (works for both AUR and source installs).
 

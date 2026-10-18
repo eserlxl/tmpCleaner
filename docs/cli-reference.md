@@ -41,6 +41,9 @@ must be literal absolute paths, unquoted or simply single/double quoted;
 glob patterns in glob-capable rule types stop the run before cleaning (exit 1,
 or 2 with `--check`). Directory-root types `d`, `D`, `v`, `q`, `Q`, and `C` may
 contain literal glob characters. Existing `x`/`X` rules are preserved.
+LF and CRLF record endings and ordinary spaces/tabs are accepted. Any remaining
+raw CR, FF or VT byte stops every mode, including in comments or `x`/`X` records;
+generated exclusions use encoded paths and remain supported.
 Every non-`x`/`X` root must normalize under `/tmp` and resolve inside `/tmp`'s
 canonical tree. Outside roots and lexical or symlink escapes stop all modes
 before cleanup, including with `--prefix` (exit 1, or 2 with `--check`).

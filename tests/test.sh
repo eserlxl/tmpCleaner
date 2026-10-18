@@ -1019,21 +1019,65 @@ for filter_name in keep 'keep[ab]' 'keep%root' "keep' quoted"; do
 		rm -rf "$filter_root"
 	done
 done
-# Native whitespace separators must not disguise an exact protected root.
+# CRLF records, spaces/tabs and quoted roots retain ordinary cleanup behavior.
 filter_root=$(mktemp -d "$dir/root-filter.XXXXXX")
-mkdir "$filter_root/cr" "$filter_root/ff" "$filter_root/vt"
-touch "$filter_root/cr/old" "$filter_root/ff/old" "$filter_root/vt/old" "$filter_root/sibling"
-old "$filter_root/cr/old" "$filter_root/ff/old" "$filter_root/vt/old" "$filter_root/sibling"
-printf 'd %s - - - amM:12h\nd %s/cr\r- - - amM:12h\nd %s/ff\f- - - amM:12h\nd %s/vt\v- - - amM:12h\n\r\n' \
-	"$filter_root" "$filter_root" "$filter_root" "$filter_root" > "$cfg/root-filter.conf"
+mkdir "$filter_root/keep"
+touch "$filter_root/keep/old" "$filter_root/sibling"
+old "$filter_root/keep/old" "$filter_root/sibling"
+printf '# comment\r\nd\t"%s" - - - amM:12h\r\nx %s/keep\r\n\r\n' \
+	"$filter_root" "$filter_root" > "$cfg/root-filter.conf"
 status=0
-TMPCLEANER_CONF=$cfg/root-filter.conf sh "$here/tmpcleaner" "--exclude-prefix=$filter_root/cr" \
-	"--exclude-prefix=$filter_root/ff" "--exclude-prefix=$filter_root/vt" >/dev/null 2>&1 || status=$?
-if [ "$status" -ne 0 ] || [ ! -e "$filter_root/cr/old" ] || [ ! -e "$filter_root/ff/old" ] ||
-	[ ! -e "$filter_root/vt/old" ] || [ -e "$filter_root/sibling" ]; then
-	echo "FAIL: native CR/FF/VT separators must preserve protected roots and keep siblings eligible"
+TMPCLEANER_AGE=12h TMPCLEANER_CONF=$cfg/root-filter.conf sh "$here/tmpcleaner" >/dev/null 2>&1 || status=$?
+if [ "$status" -ne 0 ] || [ ! -e "$filter_root/keep/old" ] || [ -e "$filter_root/sibling" ]; then
+	echo 'FAIL: CRLF records must preserve exclusions and clean ordinary quoted roots'
 	fail=1
 fi
+for control_record in cleanup-cr cleanup-ff cleanup-vt before-comment within-comment before-x within-x; do
+	printf 'd %s - - - amM:12h\n' "$filter_root" > "$cfg/root-filter.conf"
+	case "$control_record" in
+		cleanup-cr) printf 'd %s/keep\rinside - - - amM:12h\n' "$filter_root" ;;
+		cleanup-ff) printf 'd %s/keep\finside - - - amM:12h\n' "$filter_root" ;;
+		cleanup-vt) printf 'd %s/keep\vinside - - - amM:12h\n' "$filter_root" ;;
+		before-comment) printf '\r# comment\n' ;;
+		within-comment) printf '# bad\fcomment\n' ;;
+		before-x) printf '\vx %s/keep\n' "$filter_root" ;;
+		within-x) printf 'x %s/keep\rinside\n' "$filter_root" ;;
+	esac >> "$cfg/root-filter.conf"
+	for control_mode in real dry rules raw check; do
+		case "$control_mode" in
+			real) set -- ;;
+			dry) set -- --dry-run ;;
+			rules) set -- --print-rules ;;
+			raw) set -- --print-in-use0 ;;
+			check) set -- --check "$filter_root/keep/old" ;;
+		esac
+		[ "$control_mode" = raw ] || set -- "$@" "--exclude-prefix=$filter_root/keep"
+		status=0
+		CLEAN_SHIM_STATUS=99 CLEAN_SHIM_MARKER=$cfg/control.clean TMPCLEANER_CONF=$cfg/root-filter.conf \
+			sh "$here/tmpcleaner" "$@" > "$cfg/control.out" 2> "$cfg/control.err" || status=$?
+		expected=1; [ "$control_mode" != check ] || expected=2
+		if [ "$status" -ne "$expected" ] || [ -s "$cfg/control.out" ] || [ -e "$cfg/control.clean" ] ||
+			! grep -Fq 'raw CR, FF or VT in rule' "$cfg/control.err" || [ ! -e "$filter_root/keep/old" ]; then
+			echo "FAIL: ambiguous control bytes must stop $control_mode before cleanup ($control_record)"
+			fail=1
+		fi
+	done
+done
+for control_override in age pressure; do
+	printf 'd %s/keep\finside - - - amM:12h\n' "$filter_root" > "$cfg/root-filter.conf"
+	case "$control_override" in
+		age) set -- TMPCLEANER_AGE=6h ;;
+		pressure) set -- TMPCLEANER_FULL_PERCENT=50 TMPCLEANER_FULL_AGE=6h ;;
+	esac
+	status=0
+	env "$@" CLEAN_SHIM_STATUS=99 CLEAN_SHIM_MARKER=$cfg/control.clean TMPCLEANER_CONF=$cfg/root-filter.conf \
+		sh "$here/tmpcleaner" --print-rules > "$cfg/control.out" 2> "$cfg/control.err" || status=$?
+	if [ "$status" -ne 1 ] || [ -s "$cfg/control.out" ] || [ -e "$cfg/control.clean" ] ||
+		! grep -Fq 'raw CR, FF or VT in rule' "$cfg/control.err" || [ ! -e "$filter_root/keep/old" ]; then
+		echo "FAIL: $control_override must reject raw controls before rewriting fields"
+		fail=1
+	fi
+done
 rm -rf "$filter_root"
 # Types other than d must not bypass a prefix, while x/X remain unchanged.
 filter_root=$(mktemp -d "$dir/root-filter.XXXXXX")
