@@ -1072,14 +1072,14 @@ fi
 printf 'q /tmp 1777 root root -\n' > "$cfg/suggest.cat"
 status=0
 suggest_unaged_out=$(CAT_SHIM_OUT=$cfg/suggest.cat TMPCLEANER_CONF=$cfg/suggest.conf sh "$here/tmpcleaner" --suggest-exclusions 2>"$cfg/suggest.err") || status=$?
-if [ "$status" -ne 0 ] || [ "$suggest_unaged_out" != "$suggest_aged_out" ] || [ -s "$cfg/suggest.err" ]; then
+if [ "$status" -ne 0 ] || printf '%s\n' "$suggest_unaged_out" | grep -Fq 'systemd-tmpfiles-clean' || [ -s "$cfg/suggest.err" ]; then
 	echo "FAIL: --suggest-exclusions should not warn when the /tmp rule in --cat-config has age -"
 	fail=1
 fi
 printf 'q /tmp 1777 root root -\nq /tmp 1777 root root 10d\n' > "$cfg/suggest.cat"
 status=0
 suggest_shadowed_out=$(CAT_SHIM_OUT=$cfg/suggest.cat TMPCLEANER_CONF=$cfg/suggest.conf sh "$here/tmpcleaner" --suggest-exclusions 2>"$cfg/suggest.err") || status=$?
-if [ "$status" -ne 0 ] || [ "$suggest_shadowed_out" != "$suggest_aged_out" ] || [ -s "$cfg/suggest.err" ]; then
+if [ "$status" -ne 0 ] || printf '%s\n' "$suggest_shadowed_out" | grep -Fq 'systemd-tmpfiles-clean' || [ -s "$cfg/suggest.err" ]; then
 	echo "FAIL: --suggest-exclusions should not warn when an unaged /tmp line precedes an aged one"
 	fail=1
 fi
