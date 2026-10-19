@@ -1018,7 +1018,7 @@ LC_ALL=C comm -z -23 "$scratch/before" "$scratch/after" |
 		if (list == "nul") printf "%s%c", substr($0, 3), 0
 	}
 	END {
-		printf "tmpcleaner: removed %d files and %d directories\n", files, directories > "/dev/stderr"
+		printf "tmpcleaner: %d files and %d directories disappeared during the run\n", files, directories > "/dev/stderr"
 		# -v would decode backslashes in the scratch path; ENVIRON keeps it raw.
 		printf "%d %d %.0f\n", files, directories, bytes > ENVIRON["COUNTS"]
 	}

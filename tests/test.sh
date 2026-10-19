@@ -754,7 +754,7 @@ shim env TMPCLEANER_FULL_PERCENT=90 TMPCLEANER_FULL_AGE=30m TMPCLEANER_CONF="$co
 lowscratch=$(mktemp -d /tmp/tmpcleaner-low.XXXXXX)
 sed "s#$dir#$lowscratch#" "$conf" > "$cfg/low.conf"
 low_err=$(shim env TMPCLEANER_METRICS=$cfg/pressure.prom TMPCLEANER_FULL_PERCENT=90 TMPCLEANER_FULL_AGE=30m TMPCLEANER_CONF="$cfg/low.conf" sh "$here/tmpcleaner" 2>&1 >/dev/null)
-[ "$low_err" = 'tmpcleaner: removed 0 files and 0 directories' ] &&
+[ "$low_err" = 'tmpcleaner: 0 files and 0 directories disappeared during the run' ] &&
 	grep -Fxq 'tmpcleaner_pressure_mode_active 0' "$cfg/pressure.prom" || {
 	echo "FAIL: a real run below the pressure threshold must not log the below-threshold line"
 	fail=1
@@ -1988,8 +1988,8 @@ if ! { [ -f "$cfg/metrics.prom" ] &&
 	fail=1
 fi
 rm -f "$cfg/metrics.prom"
-if ! { [ "$(printf '%s\n' "$run_log" | grep -c '^tmpcleaner: removed [0-9]')" = 1 ] &&
-	printf '%s\n' "$run_log" | grep -Fxq "tmpcleaner: removed $expected_files files and 2 directories"; }; then
+if ! { [ "$(printf '%s\n' "$run_log" | grep -c '^tmpcleaner: [0-9]')" = 1 ] &&
+	printf '%s\n' "$run_log" | grep -Fxq "tmpcleaner: $expected_files files and 2 directories disappeared during the run"; }; then
 	echo "FAIL: real run should log one summary with the expected removal counts"
 	fail=1
 fi
@@ -2276,7 +2276,7 @@ if [ "$backend_major" -ge 262 ]; then
 	printf 'tmpcleaner: removed: %s/r\ntmpcleaner: removed: %s/R/old\ntmpcleaner: removed directory: %s/R\n' "$count_root" "$count_root" "$count_root" >> "$cfg/count.expected"
 	count_files=10 count_dirs=1
 fi
-printf 'tmpcleaner: removed %s files and %s directories\n' "$count_files" "$count_dirs" >> "$cfg/count.expected"
+printf 'tmpcleaner: %s files and %s directories disappeared during the run\n' "$count_files" "$count_dirs" >> "$cfg/count.expected"
 status=0
 TMPDIR=$count_root/d- TMPCLEANER_CONF=$cfg/count.conf TMPCLEANER_LIST=1 TMPCLEANER_METRICS=$cfg/count.prom \
 	sh "$here/tmpcleaner" > "$cfg/count.out" 2> "$cfg/count.log" || status=$?
@@ -2310,7 +2310,7 @@ for scratch_name in . 'scratch[ab]' 'scratch*?' "$(printf 'scratch\001\t\nend')"
 	touch "$dir3/f"
 	status=0
 	scratch_log=$(TMPDIR=$scratch_dir TMPCLEANER_AGE=0 TMPCLEANER_CONF=$cfg/conf3 sh "$here/tmpcleaner" 2>&1) || status=$?
-	if [ "$status" -ne 0 ] || [ "$scratch_log" != 'tmpcleaner: removed 1 files and 0 directories' ] ||
+	if [ "$status" -ne 0 ] || [ "$scratch_log" != 'tmpcleaner: 1 files and 0 directories disappeared during the run' ] ||
 		[ -e "$dir3/f" ] || [ -n "$(find "$scratch_dir" -mindepth 1 -print -quit)" ]; then
 		echo "FAIL: the run must preserve scratch state, count the removed file, and leave no scratch files"
 		fail=1
@@ -2347,8 +2347,8 @@ for list_status in 0 42; do
 	LC_ALL=C sort -z "$cfg/list.expected" > "$cfg/list.expected-sorted"
 	LC_ALL=C sort -z "$cfg/list.out" > "$cfg/list.actual-sorted"
 	if [ "$status" -ne "$list_status" ] || ! cmp -s "$cfg/list.expected-sorted" "$cfg/list.actual-sorted" ||
-		[ "$(grep -c '^tmpcleaner: removed ' "$cfg/list.err")" -ne 1 ] ||
-		! grep -Fxq 'tmpcleaner: removed 4 files and 1 directories' "$cfg/list.err" ||
+		[ "$(grep -c '^tmpcleaner: [0-9]' "$cfg/list.err")" -ne 1 ] ||
+		! grep -Fxq 'tmpcleaner: 4 files and 1 directories disappeared during the run' "$cfg/list.err" ||
 		! grep -Fxq backend-output "$cfg/list.err" ||
 		! grep -Fxq "tmpcleaner_last_exit_status $list_status" "$cfg/list.prom" ||
 		! grep -Fxq 'tmpcleaner_removed_files 4' "$cfg/list.prom" ||
@@ -2361,7 +2361,7 @@ done
 status=0
 TMPCLEANER_CONF=$cfg/list.conf TMPCLEANER_LIST=nul sh "$here/tmpcleaner" > "$cfg/list.out" 2> "$cfg/list.err" || status=$?
 if [ "$status" -ne 0 ] || [ -s "$cfg/list.out" ] ||
-	[ "$(cat "$cfg/list.err")" != 'tmpcleaner: removed 0 files and 0 directories' ]; then
+	[ "$(cat "$cfg/list.err")" != 'tmpcleaner: 0 files and 0 directories disappeared during the run' ]; then
 	echo 'FAIL: empty NUL listing must keep stdout empty and log one summary'
 	fail=1
 fi
@@ -2403,14 +2403,14 @@ touch "$dir2/extracted.txt"
 touch -d '13 hours ago' "$dir2/extracted.txt"
 
 run_log=$(TMPCLEANER_CONF=$conf2 sh "$here/tmpcleaner" 2>&1 >/dev/null)
-[ "$run_log" = 'tmpcleaner: removed 0 files and 0 directories' ] || {
+[ "$run_log" = 'tmpcleaner: 0 files and 0 directories disappeared during the run' ] || {
 	echo "FAIL: an unset TMPCLEANER_LIST should log only the usual summary"
 	fail=1
 }
 status=0
 mfail_log=$(TMPCLEANER_METRICS="$cfg/missing-dir/metrics.prom" TMPCLEANER_CONF=$conf2 sh "$here/tmpcleaner" 2>&1 >/dev/null) || status=$?
 if [ "$status" -ne 0 ] || [ "$(printf '%s\n' "$mfail_log" | wc -l)" -ne 2 ] ||
-	! printf '%s\n' "$mfail_log" | grep -Fxq 'tmpcleaner: removed 0 files and 0 directories' ||
+	! printf '%s\n' "$mfail_log" | grep -Fxq 'tmpcleaner: 0 files and 0 directories disappeared during the run' ||
 	! printf '%s\n' "$mfail_log" | grep -Fq 'cannot write metrics'; then
 	echo "FAIL: metrics write failure should keep exit status 0 and log one stderr line"
 	fail=1

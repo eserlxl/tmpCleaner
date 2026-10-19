@@ -10,7 +10,7 @@ journalctl -u tmpcleaner.service
 Each real run logs one summary, including runs that remove nothing:
 
 ```text
-tmpcleaner: removed 3 files and 2 directories
+tmpcleaner: 3 files and 2 directories disappeared during the run
 ```
 
 The counts compare listings of the cleaned trees taken just before and just
@@ -19,7 +19,9 @@ after the run, including roots selected by `d`, `D`, `e`, `v`, `q`, `Q`, `C`,
 overlapping roots count each path once, and scratch paths are skipped.
 The backend decides which rules apply, including boot-only rules and `r`/`R`
 age cleanup (systemd 262 or newer). Names of any shape are counted; anything
-another program deletes in that second is counted too. Cleanup roots must follow the
+another program deletes in that second is counted too. The line counts
+disappearances, so it is not proof that tmpcleaner deleted a given path.
+Cleanup roots must follow the
 [literal path grammar](cli-reference.md); unsupported encoded or ambiguous
 roots stop the run before cleaning. `systemd-tmpfiles` itself logs to
 the journal as usual, so warnings keep their severity.
