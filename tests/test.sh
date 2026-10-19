@@ -1743,6 +1743,23 @@ for mount_info in "$cfg/mount.missing" "$cfg/mount.empty" "$cfg/mount.truncated"
 		fi
 	done
 done
+printf '1 2 0:1 / /tmp rw - tmpfs  rw\n' > "$cfg/mount.emptysrc"
+if ! MOUNTINFO_SHIM_FILE=$cfg/mount.emptysrc TMPCLEANER_CONF=$cfg/mount.conf \
+	sh "$here/tmpcleaner" --print-rules > "$cfg/mount.out" 2> "$cfg/mount.err" ||
+	! grep -Fq "d $dir - - - 12h" "$cfg/mount.out" || [ -s "$cfg/mount.err" ]; then
+	echo 'FAIL: empty mount_source record in mountinfo must be accepted'
+	fail=1
+fi
+for tail in 'tmpfs rw' 'tmpfs   rw'; do
+	printf '1 2 0:1 / /tmp rw - %s\n' "$tail" > "$cfg/mount.badtail"
+	status=0
+	MOUNTINFO_SHIM_FILE=$cfg/mount.badtail TMPCLEANER_CONF=$cfg/mount.conf \
+		sh "$here/tmpcleaner" --print-rules > "$cfg/mount.out" 2> "$cfg/mount.err" || status=$?
+	if [ "$status" -ne 1 ] || [ -s "$cfg/mount.out" ] || ! grep -Fq 'invalid mountinfo:' "$cfg/mount.err"; then
+		echo "FAIL: malformed mountinfo tail ($tail) must fail closed"
+		fail=1
+	fi
+done
 rm -rf "$dir/mount-roots"
 mkdir "$dir/heldparent"
 ln "$dir/open a%b.txt" "$dir/heldparent/open a%b.txt"
