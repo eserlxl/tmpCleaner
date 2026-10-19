@@ -1098,6 +1098,36 @@ for arg in --remove --create --purge --boot --root=/ --prefix --prefix= --exclud
 		fail=1
 	fi
 done
+for arg in --dry-run --prefix=/tmp --print-rules --remove --help --exclude-prefix --exclude-prefix= --exclude-prefix=relative extra ''; do
+	for with_excl in 0 1; do
+		if [ "$with_excl" = 1 ]; then
+			set -- --print-rules --exclude-prefix=/tmp/x "$arg"
+		else
+			set -- --print-rules "$arg"
+		fi
+		status=0
+		arg_err=$(MKTEMP_SHIM_FAIL=both TMPCLEANER_CONF=$cfg/missing.conf sh "$here/tmpcleaner" "$@" 2>&1 >/dev/null) || status=$?
+		if [ "$status" -ne 2 ] || [ "$arg_err" != "tmpcleaner: unsupported argument: $arg" ] || [ ! -e "$argdir/old.txt" ]; then
+			echo "FAIL: --print-rules should reject $arg with exit 2 before config or scratch setup"
+			fail=1
+		fi
+	done
+done
+for lead_arg in --dry-run --prefix=/tmp --exclude-prefix=/tmp/x; do
+	status=0
+	arg_err=$(MKTEMP_SHIM_FAIL=both TMPCLEANER_CONF=$cfg/missing.conf sh "$here/tmpcleaner" "$lead_arg" --print-rules 2>&1 >/dev/null) || status=$?
+	if [ "$status" -ne 2 ] || [ "$arg_err" != 'tmpcleaner: unsupported argument: --print-rules' ] || [ ! -e "$argdir/old.txt" ]; then
+		echo "FAIL: trailing --print-rules after $lead_arg should be rejected with exit 2"
+		fail=1
+	fi
+done
+status=0
+print_excl_rules=$(TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --print-rules --exclude-prefix=/tmp/x "--exclude-prefix=$argdir") || status=$?
+if [ "$status" -ne 0 ] || ! printf '%s\n' "$print_excl_rules" | grep -Fxq 'x "/tmp/x"' ||
+	! printf '%s\n' "$print_excl_rules" | grep -Fxq "x \"$argdir\"" || [ ! -e "$argdir/old.txt" ]; then
+	echo "FAIL: --print-rules --exclude-prefix should include exclusion rules without cleaning"
+	fail=1
+fi
 status=0
 excl_preview=$(TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --dry-run --exclude-prefix="$dir/old.txt" 2>&1) || status=$?
 if [ "$status" -ne 0 ] || printf '%s\n' "$excl_preview" | grep -Fq "$dir/old.txt"; then

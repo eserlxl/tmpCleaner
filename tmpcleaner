@@ -77,11 +77,19 @@ if [ -n "${JOURNAL_STREAM:-}" ] &&
 	warn_tag='<4>'
 fi
 
-if [ "${1:-}" != --check ] && [ "${1:-}" != --check0 ]; then
+if [ "${1:-}" = --print-rules ]; then
+	shift
+	for arg do
+		case "$arg" in
+			--exclude-prefix=/*) ;;
+			*) echo "${err_tag}tmpcleaner: unsupported argument: $arg" >&2; exit 2 ;;
+		esac
+	done
+	set -- --print-rules "$@"
+elif [ "${1:-}" != --check ] && [ "${1:-}" != --check0 ]; then
 	for arg do
 		case "$arg" in
 			--dry-run|--prefix=?*|--exclude-prefix=/*) ;;
-			--print-rules) [ "$arg" = "$1" ] || { echo "${err_tag}tmpcleaner: unsupported argument: $arg" >&2; exit 2; } ;;
 			--print-in-use0|--print-holders0|--suggest-exclusions) [ "$#" -eq 1 ] || { echo "${err_tag}tmpcleaner: $arg accepts no other arguments" >&2; exit 2; } ;;
 			*) echo "${err_tag}tmpcleaner: unsupported argument: $arg" >&2; exit 2 ;;
 		esac
