@@ -828,7 +828,8 @@ if [ -n "$check" ]; then
 					prefix = path "/"
 				}
 				FILENAME == ARGV[2] {
-					if ($0 == path || $0 == "/" || index(path, $0 "/") == 1) excluded = 1
+					if ($0 == path || $0 == "/" || index(path, $0 "/") == 1 ||
+						(FNR > 1 && index($0, prefix) == 1)) excluded = 1
 					next
 				}
 				FILENAME == ARGV[3] {

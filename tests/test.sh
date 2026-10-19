@@ -1018,13 +1018,20 @@ if [ "$status" -ne 0 ] || [ "$check_out" != "would be removed: $check_root/keep/
 fi
 rm -rf "$check_root"
 # A path check can evaluate the same temporary exclusions as a real run.
-for exclusion_case in exact ancestor multiple symlink dotdot unrelated in-use; do
+status=0
+check_out=$(TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --check "$dir/olddir" 2>"$cfg/check.err") || status=$?
+if [ "$status" -ne 0 ] || [ "$check_out" != "would be removed: $dir/olddir" ] || [ -s "$cfg/check.err" ]; then
+	echo "FAIL: --check should report olddir as removable before testing descendant exclusions"
+	fail=1
+fi
+for exclusion_case in exact ancestor descendant multiple symlink dotdot unrelated in-use; do
 	target=$dir/old.txt
 	set -- "--exclude-prefix=$target"
 	expected_status=1
 	expected_err='tmpcleaner: kept by an explicit --exclude-prefix'
 	case "$exclusion_case" in
 		ancestor) target=$dir/olddir/f; set -- "--exclude-prefix=$dir/olddir" ;;
+		descendant) target=$dir/olddir; set -- "--exclude-prefix=$dir/olddir/f" ;;
 		multiple) set -- "--exclude-prefix=$dir/new.txt" "--exclude-prefix=$target" ;;
 		symlink) set -- "--exclude-prefix=$dir/selflink/old.txt" ;;
 		dotdot) set -- "--exclude-prefix=$dir/nonexistent/../old.txt" ;;
