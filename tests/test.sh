@@ -1173,8 +1173,29 @@ for bad_check0 in "$dir/missing" relative "$newline"; do
 	printf '%s\0' "$dir/old.txt" "$bad_check0" |
 		TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --check0 \
 		> "$cfg/check0.out" 2> "$cfg/check0.err" || status=$?
-	if [ "$status" -ne 2 ] || [ -s "$cfg/check0.out" ] || ! grep -Fq "$bad_check0" "$cfg/check0.err"; then
+	expected_err=$bad_check0
+	[ "$bad_check0" != "$newline" ] || expected_err="contains a newline or carriage return: $dir/new?line"
+	if [ "$status" -ne 2 ] || [ -s "$cfg/check0.out" ] || ! grep -Fq "$expected_err" "$cfg/check0.err"; then
 		echo "FAIL: --check0 should exit 2 with empty stdout and name invalid path ($bad_check0)"
+		fail=1
+	fi
+done
+ctrl_missing=$(printf '%s/missing-\033]0;pwned\007\177x' "$dir")
+ctrl_missing_expected="tmpcleaner: --check path does not exist: $dir/missing-?]0;pwned??x"
+for ctrl_mode in check0 check; do
+	status=0
+	if [ "$ctrl_mode" = check0 ]; then
+		printf '%s\0' "$ctrl_missing" |
+			TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --check0 \
+			> "$cfg/check0.out" 2> "$cfg/check0.err" || status=$?
+	else
+		TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --check "$ctrl_missing" \
+			> "$cfg/check0.out" 2> "$cfg/check0.err" || status=$?
+	fi
+	if [ "$status" -ne 2 ] || [ -s "$cfg/check0.out" ] ||
+		[ "$(cat "$cfg/check0.err")" != "$ctrl_missing_expected" ] ||
+		[ -n "$(tr -d '\n' < "$cfg/check0.err" | LC_ALL=C tr -dc '\001-\037\177')" ]; then
+		echo "FAIL: --$ctrl_mode should mask control bytes in error messages"
 		fail=1
 	fi
 done

@@ -23,7 +23,7 @@ prints one reason line to stderr (`tmpcleaner: in use by a running process: PID 
 `tmpcleaner: kept by a .tmpcleaner-keep marker in ...`,
 `tmpcleaner: kept by an explicit --exclude-prefix`, or
 `tmpcleaner: not old enough, or kept by a configuration rule`). Control bytes in
-these paths are printed as `?`. Every error exits 2: invalid
+these paths and in `--check` and `--check0` error messages are printed as `?`. Every error exits 2: invalid
 paths or missing arguments, unreadable configuration, invalid `TMPCLEANER_*`
 values, missing `/proc`, a failed in-use scan, and a `systemd-tmpfiles` failure
 other than 73. Each prints a message. Exit 1 therefore always means "kept". It reads the preview's text, which a

@@ -93,9 +93,10 @@ holders_file=
 export_holders=
 [ "${1:-}" != --print-holders0 ] || export_holders=1
 canonicalize_check() {
+	shown=$(printf '%s' "$requested" | LC_ALL=C tr '\001-\037\177' '[?*]')
 	case "$requested" in
 		/tmp/*) ;;
-		*) echo "${err_tag}tmpcleaner: --check requires an absolute path under /tmp${check0:+: $requested}" >&2; exit 2 ;;
+		*) echo "${err_tag}tmpcleaner: --check requires an absolute path under /tmp${check0:+: $shown}" >&2; exit 2 ;;
 	esac
 	# Resolve symlinked parent directories (the preview prints real paths) but
 	# keep the last component itself, which systemd-tmpfiles handles as is.
@@ -108,22 +109,22 @@ canonicalize_check() {
 		*) parent=${path%/*} ;;
 	esac
 	check=$(realpath -e -- "${parent:-/}" 2>/dev/null && printf x) || {
-		echo "${err_tag}tmpcleaner: --check path does not exist: $requested" >&2
+		echo "${err_tag}tmpcleaner: --check path does not exist: $shown" >&2
 		exit 2
 	}
 	check=${check%x}
 	check=${check%"$nl"}
 	[ -z "$base" ] || check=${check%/}/$base
 	[ -e "$check" ] || [ -L "$check" ] || {
-		echo "${err_tag}tmpcleaner: --check path does not exist: $requested" >&2
+		echo "${err_tag}tmpcleaner: --check path does not exist: $shown" >&2
 		exit 2
 	}
 	case "$check" in
-		*"$nl"*|*"$cr"*) echo "${err_tag}tmpcleaner: --check cannot match a path that contains a newline or carriage return${check0:+: $requested}" >&2; exit 2 ;;
+		*"$nl"*|*"$cr"*) echo "${err_tag}tmpcleaner: --check cannot match a path that contains a newline or carriage return${check0:+: $shown}" >&2; exit 2 ;;
 	esac
 	case "$check" in
 		/tmp/*) ;;
-		*) echo "${err_tag}tmpcleaner: --check path must be under /tmp: $requested" >&2; exit 2 ;;
+		*) echo "${err_tag}tmpcleaner: --check path must be under /tmp: $shown" >&2; exit 2 ;;
 	esac
 }
 if [ "${1:-}" = --check ]; then
@@ -294,7 +295,9 @@ if [ -n "$check0" ]; then
 	ERR_TAG=$err_tag LC_ALL=C awk '
 		BEGIN { RS = "\0" }
 		/\n/ {
-			print ENVIRON["ERR_TAG"] "tmpcleaner: --check cannot match a path that contains a newline or carriage return: " $0 > "/dev/stderr"
+			shown = $0
+			gsub(/[\001-\037\177]/, "?", shown)
+			print ENVIRON["ERR_TAG"] "tmpcleaner: --check cannot match a path that contains a newline or carriage return: " shown > "/dev/stderr"
 			exit 1
 		}
 	' "$scratch/check0-in" || exit 2
@@ -834,18 +837,18 @@ judge_check() {
 	# entries with newlines or carriage returns (their lines cannot be read) stop the check.
 	dir=${check%/*}
 	while [ -n "$dir" ]; do
-		[ -r "$dir" ] || { echo "${err_tag}tmpcleaner: --check cannot read $requested" >&2; exit 2; }
+		[ -r "$dir" ] || { echo "${err_tag}tmpcleaner: --check cannot read $shown" >&2; exit 2; }
 		[ "$dir" = /tmp ] && break
 		dir=${dir%/*}
 	done
 	entries=0
 	if [ -d "$check" ] && [ ! -L "$check" ]; then
 		if [ -n "$(find "$check" -mindepth 1 \( -name "*$nl*" -o -name "*$cr*" \) -print -quit 2>/dev/null)" ]; then
-			echo "${err_tag}tmpcleaner: --check cannot judge a directory holding names with newlines or carriage returns${check0:+: $requested}" >&2
+			echo "${err_tag}tmpcleaner: --check cannot judge a directory holding names with newlines or carriage returns${check0:+: $shown}" >&2
 			exit 2
 		fi
 		entries=$(find "$check" -mindepth 1 -printf . 2>/dev/null) || {
-			echo "${err_tag}tmpcleaner: --check cannot read $requested" >&2
+			echo "${err_tag}tmpcleaner: --check cannot read $shown" >&2
 			exit 2
 		}
 		entries=${#entries}
@@ -901,8 +904,6 @@ if [ -n "$check$check0" ]; then
 		exit "$any_kept"
 	fi
 	judge_check
-	# The checked name may come from /tmp too: mask control bytes like the reasons.
-	shown=$(printf '%s' "$requested" | LC_ALL=C tr '\001-\037\177' '[?*]')
 	case "$verdict" in
 		0)
 			printf 'would be removed: %s\n' "$shown"
