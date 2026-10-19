@@ -101,6 +101,17 @@ if [ "\$*" = --cat-config ]; then
 	cat "\$CAT_SHIM_OUT"
 	exit 0
 fi
+if [ "\$*" = "--clean -" ]; then
+	shim_in=\$(mktemp)
+	cat > "\$shim_in"
+	exec < "\$shim_in"
+	# The keep-rule parse probe (x/X lines only) gets the real parser.
+	if LC_ALL=C awk '\$1 !~ /^[xX]/ { exit 1 }' "\$shim_in"; then
+		rm -f "\$shim_in"
+		exec "$(command -v systemd-tmpfiles)" "\$@"
+	fi
+	rm -f "\$shim_in"
+fi
 [ -z "\${CLEAN_SHIM_MARKER:-}" ] || printf '%s\n' "\$*" >> "\$CLEAN_SHIM_MARKER"
 [ -z "\${CLEAN_SHIM_DELAY:-}" ] || sleep "\$CLEAN_SHIM_DELAY"
 [ -z "\${CLEAN_SHIM_STDOUT:-}" ] || printf '%s\n' "\$CLEAN_SHIM_STDOUT"
@@ -1580,7 +1591,32 @@ if [ "$(id -u)" -ne 0 ]; then
 		fi
 	done
 fi
-rm -rf "$dropin_root" "$cfg/conf.d" "$cfg/dropin.out" "$cfg/dropin.err" "$cfg/dropin.clean"
+mkdir "$dropin_root/badkeep"
+old "$dropin_root/badkeep"
+printf 'd %s - - - amM:12h\n' "$dropin_root" > "$cfg/badkeep.conf"
+mkdir -p "$cfg/badkeep.conf.d"
+printf 'x "%s/badkeep\n' "$dropin_root" > "$cfg/badkeep.conf.d/50-bad.conf"
+for dropin_mode in real dry check rules raw; do
+	case "$dropin_mode" in
+		real) set -- ;;
+		dry) set -- --dry-run ;;
+		check) set -- --check "$dropin_root/badkeep" ;;
+		rules) set -- --print-rules ;;
+		raw) set -- --print-in-use0 ;;
+	esac
+	status=0
+	TMPCLEANER_CONF=$cfg/badkeep.conf sh "$here/tmpcleaner" "$@" \
+		> "$cfg/dropin.out" 2> "$cfg/dropin.err" || status=$?
+	expected=1; [ "$dropin_mode" != check ] || expected=2
+	if [ "$status" -ne "$expected" ] || [ -s "$cfg/dropin.out" ] ||
+		[ ! -d "$dropin_root/badkeep" ] ||
+		! grep -Fxq "tmpcleaner: cannot parse exclusion rule: x \"$dropin_root/badkeep" "$cfg/dropin.err" ||
+		! grep -Fxq 'tmpcleaner: an exclusion rule failed to parse; nothing was removed' "$cfg/dropin.err"; then
+		echo "FAIL: malformed exclusion rule in drop-in must stop $dropin_mode, keep directory, and name rule"
+		fail=1
+	fi
+done
+rm -rf "$dropin_root" "$cfg/conf.d" "$cfg/badkeep.conf" "$cfg/badkeep.conf.d" "$cfg/dropin.out" "$cfg/dropin.err" "$cfg/dropin.clean"
 # Nested mount roots cannot bypass the /tmp-only inode index or -xdev walk.
 cat > "$cfg/mount-roots.sh" <<'MOUNT_TEST'
 set -eu

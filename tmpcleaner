@@ -777,6 +777,26 @@ generate_rules() {
 		echo "${err_tag}tmpcleaner: cannot apply path protections; nothing was removed" >&2
 		exit "$errstatus"
 	}
+	# A skipped keep rule would let the cleanup rule remove what it was meant to keep.
+	LC_ALL=C awk '$1 ~ /^[xX]/' "$scratch/rules" > "$scratch/keep-rules" || {
+		echo "${err_tag}tmpcleaner: cannot apply path protections; nothing was removed" >&2
+		exit "$errstatus"
+	}
+	if ! systemd-tmpfiles --clean - < "$scratch/keep-rules" 2> "$scratch/keep-errors"; then
+		ERR_TAG=$err_tag LC_ALL=C awk '
+			NR == FNR { lines[NR] = $0; next }
+			match($0, /<stdin>:[0-9]+:/) {
+				n = substr($0, RSTART + 8, RLENGTH - 9) + 0
+				if (n in lines) {
+					print ENVIRON["ERR_TAG"] "tmpcleaner: cannot parse exclusion rule: " lines[n]
+					mapped = 1
+				}
+			}
+			END { if (!mapped) exit 1 }
+		' "$scratch/keep-rules" "$scratch/keep-errors" >&2 || cat "$scratch/keep-errors" >&2
+		echo "${err_tag}tmpcleaner: an exclusion rule failed to parse; nothing was removed" >&2
+		exit "$errstatus"
+	fi
 }
 
 filter_in_use() {

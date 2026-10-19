@@ -22,7 +22,9 @@ tools can install their own exclusions (for example
 ignored, and a missing or empty directory is not an error; a dangling
 `*.conf.d` symlink, a non-directory `*.conf.d` entry, an unreadable or
 unsearchable `*.conf.d` directory, a dangling `*.conf` symlink, or any other
-unreadable or non-regular `*.conf` entry stops the run before cleaning.
+unreadable or non-regular `*.conf` entry stops the run before cleaning. An
+`x`/`X` line that `systemd-tmpfiles` cannot parse stops every mode before
+cleaning.
 
 An exclusion applies while a parent cleanup rule traverses the tree. A
 separately configured cleanup root at or below the excluded directory can still
