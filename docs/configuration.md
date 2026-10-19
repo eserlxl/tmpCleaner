@@ -57,7 +57,7 @@ Service environment settings below go in a unit drop-in via `sudo systemctl edit
 - `TMPCLEANER_AGE`: Override duration on every `d` rule (e.g. `6h`, `30m`).
 - `TMPCLEANER_FULL_PERCENT`: Threshold percentage of `/tmp` usage (1-100); the larger of block and inode usage counts (`-` is 0), and a `df` error aborts the run.
 - `TMPCLEANER_FULL_AGE`: Age duration to use when `/tmp` usage meets or exceeds `TMPCLEANER_FULL_PERCENT`.
-- `TMPCLEANER_LIST`: Set to `1` for escaped removal logs, or `nul` for raw NUL-separated paths on stdout (real runs only; default: off).
+- `TMPCLEANER_LIST`: Set to `1` for escaped removal logs, `top` for the top-10 per-entry breakdown, or `nul` for raw NUL-separated paths on stdout (real runs only; default: off).
 - `TMPCLEANER_METRICS`: Absolute path of a `*.prom` file for the `node_exporter` textfile collector (real runs only).
 
 A configuration file other than the installed one can be previewed with
@@ -136,6 +136,10 @@ cleanup, in addition to the summary. Files are logged as
 `tmpcleaner: removed: PATH` and directories as
 `tmpcleaner: removed directory: PATH`. Control bytes and backslashes in each
 path use `\xHH` escapes so a filename cannot start a new journal line.
+Set `TMPCLEANER_LIST=top` to log up to ten `tmpcleaner:   N under PATH`
+lines on stderr right after the summary, grouped by top-level `/tmp` entry
+in descending count order (ties broken by path byte order) with control bytes
+shown as `?`, matching the `--dry-run` breakdown.
 Listings and counts cover every supported age-cleanup rule type, including
 removed roots; overlapping configured roots do not duplicate paths. See
 [counting and metrics](status-and-logs.md) for details.
@@ -145,7 +149,7 @@ once, including directories; ordering is unspecified. Summary and backend
 output go to stderr. Check the exit status: a failed backend can still remove
 paths and produce records, and another process's deletions can also appear.
 Preview modes keep their usual output and do not export removals.
-Unset or empty leaves the usual output unchanged (default: off); values other than `1` or `nul` stop
+Unset or empty leaves the usual output unchanged (default: off); values other than `1`, `top` or `nul` stop
 the run before cleaning.
 
 For the service, run `sudo systemctl edit tmpcleaner.service` and add:

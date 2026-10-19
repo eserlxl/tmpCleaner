@@ -51,7 +51,8 @@ Environment variables:
   TMPCLEANER_FULL_AGE       Age duration to use when /tmp usage meets or
                             exceeds TMPCLEANER_FULL_PERCENT
   TMPCLEANER_LIST           Set to 1 to list removed paths with control bytes
-                            and backslashes escaped, or nul for raw NUL-separated
+                            and backslashes escaped, top for the top-10
+                            per-entry breakdown, or nul for raw NUL-separated
                             paths on stdout (real runs only; default: off)
   TMPCLEANER_METRICS        Absolute path of a *.prom file for the
                             node_exporter textfile collector (real runs only)
@@ -287,8 +288,8 @@ conf=${TMPCLEANER_CONF:-/etc/tmpcleaner/tmpcleaner.conf}
 [ -r "$conf" ] || { echo "tmpcleaner: cannot read $conf" >&2; exit "$errstatus"; }
 dropins
 case "${TMPCLEANER_LIST:-}" in
-	''|1|nul) ;;
-	*) echo "tmpcleaner: invalid TMPCLEANER_LIST (expected 1, nul or empty)" >&2; exit "$errstatus" ;;
+	''|1|top|nul) ;;
+	*) echo "tmpcleaner: invalid TMPCLEANER_LIST (expected 1, top, nul or empty)" >&2; exit "$errstatus" ;;
 esac
 # Check the user's own value before pressure mode may replace it.
 if [ "${TMPCLEANER_AGE+x}" ]; then
@@ -914,6 +915,27 @@ if [ -n "$check" ]; then
 	esac
 fi
 
+breakdown_awk='
+function track(path, rest, slash) {
+	if (index(path, "/tmp/") != 1) return
+	rest = substr(path, 6)
+	if (rest == "") return
+	slash = index(rest, "/")
+	group[slash ? "/tmp/" substr(rest, 1, slash - 1) : path]++
+}
+function print_top(i, best, g, shown) {
+	for (i = 1; i <= 10; i++) {
+		best = ""
+		for (g in group) {
+			if (best == "" || group[g] > group[best] || (group[g] == group[best] && g < best)) best = g
+		}
+		if (best == "") break
+		shown = best
+		gsub(/[\001-\037\177]/, "?", shown)
+		printf "tmpcleaner:   %d under %s\n", group[best], shown > "/dev/stderr"
+		delete group[best]
+	}
+}'
 for arg do
 	if [ "$arg" = --dry-run ]; then
 		generate_rules
@@ -925,14 +947,7 @@ for arg do
 		cat "$scratch/stderr" >&2
 		# Preview lines are text a crafted name could inflate, so the count is an
 		# estimate, like the --check preview parser.
-		LC_ALL=C awk '
-		function track(path, rest, slash) {
-			if (index(path, "/tmp/") != 1) return
-			rest = substr(path, 6)
-			if (rest == "") return
-			slash = index(rest, "/")
-			group[slash ? "/tmp/" substr(rest, 1, slash - 1) : path]++
-		}
+		LC_ALL=C awk "$breakdown_awk"'
 		# Only a line that closes its quote names a whole path for the breakdown.
 		/^Would remove directory "/ {
 			directories++
@@ -945,20 +960,10 @@ for arg do
 			next
 		}
 		END {
-			printf "tmpcleaner: would remove %d files and %d directories\n", files, directories
-			for (i = 1; i <= 10; i++) {
-				best = ""
-				for (g in group) {
-					if (best == "" || group[g] > group[best] || (group[g] == group[best] && g < best)) best = g
-				}
-				if (best == "") break
-				shown = best
-				gsub(/[\001-\037\177]/, "?", shown)
-				printf "tmpcleaner:   %d under %s\n", group[best], shown
-				delete group[best]
-			}
+			printf "tmpcleaner: would remove %d files and %d directories\n", files, directories > "/dev/stderr"
+			print_top()
 		}
-		' "$scratch/stderr" >&2
+		' "$scratch/stderr"
 		exit "$status"
 	fi
 done
@@ -1017,7 +1022,7 @@ fi
 
 snapshot "$scratch/after"
 LC_ALL=C comm -z -23 "$scratch/before" "$scratch/after" |
-	COUNTS=$scratch/counts SIZES=$sizes_file LC_ALL=C awk -v list="${TMPCLEANER_LIST:-}" '
+	COUNTS=$scratch/counts SIZES=$sizes_file LC_ALL=C awk -v list="${TMPCLEANER_LIST:-}" "$breakdown_awk"'
 	BEGIN {
 		RS = "\0"
 		bytes = 0
@@ -1047,11 +1052,14 @@ LC_ALL=C comm -z -23 "$scratch/before" "$scratch/after" |
 			files++
 			bytes += sizes[$0]
 		}
-		if (list == 1) printf "tmpcleaner: removed%s: %s\n", directory ? " directory" : "", escaped(substr($0, 3)) > "/dev/stderr"
-		if (list == "nul") printf "%s%c", substr($0, 3), 0
+		path = substr($0, 3)
+		track(path)
+		if (list == 1) printf "tmpcleaner: removed%s: %s\n", directory ? " directory" : "", escaped(path) > "/dev/stderr"
+		if (list == "nul") printf "%s%c", path, 0
 	}
 	END {
 		printf "tmpcleaner: %d files and %d directories disappeared during the run\n", files, directories > "/dev/stderr"
+		if (list == "top") print_top()
 		# -v would decode backslashes in the scratch path; ENVIRON keeps it raw.
 		printf "%d %d %.0f\n", files, directories, bytes > ENVIRON["COUNTS"]
 	}

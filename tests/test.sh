@@ -2055,6 +2055,21 @@ if printf '%s\n' "$run_log" | grep -q 'Removing'; then
 	echo "FAIL: removal debug lines should not leak into the log"
 	fail=1
 fi
+ctrl_top=$(mktemp -d "$(printf '/tmp/tmpcleaner-top-\001\t\177-XXXXXX')")
+ctrl_masked=$(printf '%s' "$ctrl_top" | LC_ALL=C tr '\001-\037\177' '[?*]')
+mkdir -p "$dir/top/sub"
+touch "$dir/top/1" "$dir/top/2" "$dir/top/sub/3" "$ctrl_top/1" "$ctrl_top/2"
+old "$dir/top/1" "$dir/top/2" "$dir/top/sub/3" "$dir/top/sub" "$dir/top" "$ctrl_top/1" "$ctrl_top/2" "$ctrl_top"
+printf 'd "%s/top" - - - amM:12h\nd "%s" - - - amM:12h\n' "$dir" "$ctrl_top" > "$cfg/top.conf"
+status=0
+TMPCLEANER_LIST=top TMPCLEANER_CONF=$cfg/top.conf sh "$here/tmpcleaner" > "$cfg/top.out" 2> "$cfg/top.err" || status=$?
+top_expected=$(printf 'tmpcleaner: 5 files and 1 directories disappeared during the run\ntmpcleaner:   4 under %s\ntmpcleaner:   2 under %s' "$dir" "$ctrl_masked")
+if [ "$status" -ne 0 ] || [ -s "$cfg/top.out" ] || [ "$(cat "$cfg/top.err")" != "$top_expected" ]; then
+	echo "FAIL: TMPCLEANER_LIST=top should log the summary followed by top-level entries in descending count order with control bytes masked"
+	fail=1
+fi
+rm -rf "$dir/top" "$ctrl_top" "$cfg/top.conf" "$cfg/top.out" "$cfg/top.err"
+ctrl_top=
 printf 'd relative-path - - - 1h\n' > "$cfg/bad.conf"
 if TMPCLEANER_CONF=$cfg/bad.conf sh "$here/tmpcleaner" 2>/dev/null; then
 	echo "FAIL: a systemd-tmpfiles error should make tmpcleaner fail"
