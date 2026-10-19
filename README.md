@@ -127,7 +127,7 @@ settings are in [docs/configuration.md](docs/configuration.md).
 | Document | Contents |
 |----------|----------|
 | [docs/installation.md](docs/installation.md#makefile-variables-and-targets) | `srcinfo`, `check-srcinfo`, and `lint` targets |
-| [PKGBUILD](PKGBUILD) | AUR package recipe |
+| [aur/PKGBUILD](aur/PKGBUILD) | AUR package recipe |
 | [tests/test.sh](tests/test.sh) | Test suite run by `make test` |
 
 ## Development

@@ -94,16 +94,18 @@ preview:
 	if [ $$rc -ne 0 ] && [ $$rc -ne 73 ]; then cat preview.txt >&2; exit $$rc; fi; \
 	echo "$$(grep -c 'Would remove' preview.txt) entries would be removed; see preview.txt"
 
-# Maintainer helpers for the AUR package: makepkg is only needed here, not by test.
+# Maintainer helpers for the AUR package in aur/: makepkg is only needed here, not by test.
 srcinfo:
-	@tmp=$$(mktemp ./.SRCINFO.XXXXXX) || exit $$?; \
+	@cd aur || exit $$?; \
+	tmp=$$(mktemp ./.SRCINFO.XXXXXX) || exit $$?; \
 	trap 'status=$$?; rm -f -- "$$tmp"; exit "$$status"' EXIT; \
 	makepkg --printsrcinfo > "$$tmp" || exit $$?; \
 	if [ -e .SRCINFO ]; then chmod --reference=.SRCINFO "$$tmp"; else chmod 644 "$$tmp"; fi && \
 		mv -f -- "$$tmp" .SRCINFO
 
 check-srcinfo:
-	@tmp=$$(mktemp ./.SRCINFO.XXXXXX) || exit $$?; \
+	@cd aur || exit $$?; \
+	tmp=$$(mktemp ./.SRCINFO.XXXXXX) || exit $$?; \
 	trap 'status=$$?; rm -f -- "$$tmp"; exit "$$status"' EXIT; \
 	makepkg --printsrcinfo > "$$tmp" || exit $$?; \
 	diff -u .SRCINFO "$$tmp" || { echo ".SRCINFO is stale; run make srcinfo" >&2; exit 1; }

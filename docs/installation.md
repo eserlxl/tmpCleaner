@@ -17,6 +17,8 @@ Install with an AUR helper (`yay -S linux-tmpcleaner` or `paru -S linux-tmpclean
 git clone https://aur.archlinux.org/linux-tmpcleaner.git && cd linux-tmpcleaner && makepkg -si
 ```
 
+From a checkout of this repository, `cd aur && makepkg -si` builds the same package (from the release tag tarball, not the working tree).
+
 It conflicts with the unrelated AUR package `tmpcleaner`, which installs a command of the same name.
 The package installs `/usr/bin/tmpcleaner`, the systemd units in `/usr/lib/systemd/system`, `/etc/tmpcleaner/tmpcleaner.conf` (tracked by pacman as a backup file so local edits survive upgrades and new defaults arrive as `.pacnew`), and the drop-in directory `/etc/tmpcleaner/tmpcleaner.conf.d`. The timer is **not** enabled automatically; preview what would be removed, keep what you need (or adjust `/etc/tmpcleaner/tmpcleaner.conf`), then enable the timer:
 
@@ -72,7 +74,7 @@ literal dollars in command-line variable values to be doubled, for example
 `make install 'BINDIR=/opt/my $$tools/bin'` installs under `/opt/my $tools/bin`.
 
 Targets: `preview` (dry-run to `preview.txt`), `install`, `install-conf`, `uninstall`, `test`;
-for maintainers, `srcinfo` regenerates `.SRCINFO` from `PKGBUILD` and `check-srcinfo` fails when it is stale; `lint` runs shellcheck at warning level.
+for maintainers, `srcinfo` regenerates `aur/.SRCINFO` from `aur/PKGBUILD` and `check-srcinfo` fails when it is stale; `lint` runs shellcheck at warning level.
 
 ## Uninstall
 

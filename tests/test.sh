@@ -3241,15 +3241,15 @@ rm -rf "$staged"
 # Packaging metadata is checked only after successful generation, and failed
 # regeneration leaves the last complete file and its mode intact.
 srcinfo_root=$(mktemp -d "$cfg/srcinfo.XXXXXX")
-mkdir "$srcinfo_root/tools"
+mkdir "$srcinfo_root/tools" "$srcinfo_root/aur"
 printf 'complete metadata\n' > "$srcinfo_root/original"
-cp "$srcinfo_root/original" "$srcinfo_root/.SRCINFO"
-chmod 644 "$srcinfo_root/.SRCINFO"
+cp "$srcinfo_root/original" "$srcinfo_root/aur/.SRCINFO"
+chmod 644 "$srcinfo_root/aur/.SRCINFO"
 cat > "$srcinfo_root/tools/makepkg" <<'SHIM'
 #!/bin/sh
 [ "$*" = --printsrcinfo ] || exit 64
 case "$SRCINFO_CASE" in
-	match|match-fail) cat original ;;
+	match|match-fail) cat ../original ;;
 	stale) printf 'new complete metadata\n' ;;
 	partial-fail) printf 'partial' ;;
 esac
@@ -3258,7 +3258,7 @@ SHIM
 chmod +x "$srcinfo_root/tools/makepkg"
 for srcinfo_case in match stale match-fail partial-fail; do
 	for srcinfo_target in check-srcinfo srcinfo; do
-		cp "$srcinfo_root/original" "$srcinfo_root/.SRCINFO"
+		cp "$srcinfo_root/original" "$srcinfo_root/aur/.SRCINFO"
 		status=0
 		(cd "$srcinfo_root" && PATH="$srcinfo_root/tools:$PATH" SRCINFO_CASE=$srcinfo_case \
 			make -s -f "$here/Makefile" "$srcinfo_target") > "$srcinfo_root/log" 2>&1 || status=$?
@@ -3272,9 +3272,9 @@ for srcinfo_case in match stale match-fail partial-fail; do
 		else
 			cp "$srcinfo_root/original" "$srcinfo_root/expected"
 		fi
-		if ! cmp -s "$srcinfo_root/expected" "$srcinfo_root/.SRCINFO" ||
-			[ "$(stat -c %a "$srcinfo_root/.SRCINFO")" != 644 ] ||
-			[ -n "$(find "$srcinfo_root" -maxdepth 1 -name '.SRCINFO.*' -print -quit)" ]; then
+		if ! cmp -s "$srcinfo_root/expected" "$srcinfo_root/aur/.SRCINFO" ||
+			[ "$(stat -c %a "$srcinfo_root/aur/.SRCINFO")" != 644 ] ||
+			[ -n "$(find "$srcinfo_root/aur" -maxdepth 1 -name '.SRCINFO.*' -print -quit)" ]; then
 			echo "FAIL: metadata contents/mode or temporary-file cleanup ($srcinfo_case $srcinfo_target)"
 			fail=1
 		fi
@@ -3290,7 +3290,7 @@ rm -rf "$srcinfo_root"
 # The package's post_install message directs new users to preview, keep paths, and enable the timer.
 install_out=$(
 	# shellcheck source=/dev/null
-	. "$here/tmpcleaner.install"
+	. "$here/aur/tmpcleaner.install"
 	post_install
 )
 install_expected=$(printf '%s\n' \
