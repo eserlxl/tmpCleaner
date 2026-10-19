@@ -681,9 +681,9 @@ rules() {
 	fi
 	for cfgfile do
 		if [ "${TMPCLEANER_AGE+x}" ]; then
-			# Set field 6 (the age) of d rules, keeping any age-by letters and
-			# filling omitted mode/user/group fields; a quoted path holding spaces
-			# cannot be split into fields safely, so such a rule is left as is.
+			# Replace the age (field 6) of d rules that have one, keeping any
+			# age-by letters; rules without an age, and quoted paths holding
+			# spaces (which cannot be split into fields safely), are left as is.
 			AGE=$TMPCLEANER_AGE ERR_TAG=$err_tag WARN_TAG=$warn_tag LC_ALL=C awk '
 			{
 				sub(/\015$/, "")
@@ -693,10 +693,9 @@ rules() {
 			$2 ~ /^["\047]/ && $2 !~ /["\047]$/ { print ENVIRON["WARN_TAG"] "tmpcleaner: age override skipped for: " $0 > "/dev/stderr"; print; next }
 			NF < 6 || $6 == "-" { print; next }
 			{
-				for (i = NF + 1; i <= 5; i++) $i = "-"
 				prefix = ""
 				# Keep "~" (spares the immediate entries of a directory) and age-by letters.
-				if (NF >= 6 && match($6, /^~?([abcmABCM]+:)?/)) prefix = substr($6, 1, RLENGTH)
+				if (match($6, /^~?([abcmABCM]+:)?/)) prefix = substr($6, 1, RLENGTH)
 				$6 = prefix ENVIRON["AGE"]
 				print
 			}' "$cfgfile" || return 1
