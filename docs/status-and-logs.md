@@ -47,9 +47,9 @@ run atomically writes `tmpcleaner_removed_files`,
 `tmpcleaner_last_success_timestamp_seconds`, `tmpcleaner_last_exit_status`,
 `tmpcleaner_pressure_mode_active`, and `tmpcleaner_last_run_duration_seconds`
 gauges for the Prometheus `node_exporter` textfile collector. Preview modes
-(`--dry-run`, `--print-rules`, `--print-in-use0`, `--check`) never touch the
-file, and a write failure logs one line to stderr without changing the run's
-exit status.
+(`--dry-run`, `--print-rules`, `--print-in-use0`, `--print-holders0`, `--check`,
+`--check0`) never touch the file, and a write failure logs one line to stderr
+without changing the run's exit status.
 
 `tmpcleaner_removed_bytes` is the summed apparent byte size (`find` `%s`) of
 non-directory entries observed to disappear during the run, or `0` when the

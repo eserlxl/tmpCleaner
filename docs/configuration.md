@@ -114,7 +114,8 @@ counts as 0. At or above the threshold, it overrides every `d` rule's duration,
 including `TMPCLEANER_AGE`, and reports
 `tmpcleaner: /tmp is N% full (blocks B%, inodes I%), using age X` on stderr.
 Below the threshold, the configured age or `TMPCLEANER_AGE` applies; preview
-modes (`--print-rules`, `--print-in-use0`, `--check`, `--dry-run`) report
+modes (`--print-rules`, `--print-in-use0`, `--print-holders0`, `--check`,
+`--check0`, `--dry-run`) report
 `tmpcleaner: /tmp is N% full (blocks B%, inodes I%), below T%; keeping the configured age`
 on stderr, while a real run prints nothing extra.
 
