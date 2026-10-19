@@ -1047,6 +1047,13 @@ if [ "$status" -ne 0 ] || [ "$suggest_unaged_out" != "$suggest_aged_out" ] || [ 
 	echo "FAIL: --suggest-exclusions should not warn when the /tmp rule in --cat-config has age -"
 	fail=1
 fi
+printf 'q /tmp 1777 root root -\nq /tmp 1777 root root 10d\n' > "$cfg/suggest.cat"
+status=0
+suggest_shadowed_out=$(CAT_SHIM_OUT=$cfg/suggest.cat TMPCLEANER_CONF=$cfg/suggest.conf sh "$here/tmpcleaner" --suggest-exclusions 2>"$cfg/suggest.err") || status=$?
+if [ "$status" -ne 0 ] || [ "$suggest_shadowed_out" != "$suggest_aged_out" ] || [ -s "$cfg/suggest.err" ]; then
+	echo "FAIL: --suggest-exclusions should not warn when an unaged /tmp line precedes an aged one"
+	fail=1
+fi
 rm -rf "$suggest_plain" "$suggest_awkward" "$cfg/suggest.conf" "$cfg/suggest.conf.d" "$cfg/suggest.cat" "$cfg/suggest.err" "$cfg/suggest.prom"
 suggest_plain=
 suggest_awkward=

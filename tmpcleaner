@@ -1032,15 +1032,18 @@ function print_top(i, best, g, shown) {
 if [ "${1:-}" = --suggest-exclusions ]; then
 	generate_rules
 	WARN_TAG=$warn_tag LC_ALL=C awk '
-		$1 ~ /^[dDeqQvV][-!=~^+]*$/ && NF >= 6 && $6 != "-" {
+		# The first line for /tmp wins; later duplicates are ignored by systemd-tmpfiles.
+		$1 ~ /^[dDeqQvV][-!=~^+]*$/ {
 			if ($2 ~ /^"[^"]*"$/ || $2 ~ /^\047[^\047]*\047$/) path = substr($2, 2, length($2) - 2)
 			else if ($2 !~ /["\047]/) path = $2
 			else next
 			sub(/\/+$/, "", path)
 			if (path == "/tmp") {
-				warn_tag = ENVIRON["WARN_TAG"]
-				print warn_tag "tmpcleaner: systemd-tmpfiles-clean.timer still removes /tmp entries older than " $6 ", kept paths included: " $0 > "/dev/stderr"
-				print warn_tag "tmpcleaner: see \"Scope\" in what-gets-deleted.md to make tmpcleaner the only /tmp cleaner" > "/dev/stderr"
+				if (NF >= 6 && $6 != "-") {
+					warn_tag = ENVIRON["WARN_TAG"]
+					print warn_tag "tmpcleaner: systemd-tmpfiles-clean.timer still removes /tmp entries older than " $6 ", kept paths included: " $0 > "/dev/stderr"
+					print warn_tag "tmpcleaner: see \"Scope\" in what-gets-deleted.md to make tmpcleaner the only /tmp cleaner" > "/dev/stderr"
+				}
 				exit
 			}
 		}
