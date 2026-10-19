@@ -79,8 +79,19 @@ change it; see [configuration.md](configuration.md).
 - Anything on a different mount below `/tmp` is skipped.
 - Symlinks are never followed, so nothing outside `/tmp` is reached through one.
 - The distribution's own `systemd-tmpfiles-clean.timer` keeps its own `/tmp`
-  rules. `tmpcleaner.conf` is not in a `tmpfiles.d` directory, so its rules
-  apply only to tmpCleaner's runs.
+  rules and ignores tmpCleaner's exclusions and in-use protection.
+  `tmpcleaner.conf` is not in a `tmpfiles.d` directory, so its rules apply only
+  to tmpCleaner's runs. To keep paths longer than the distribution's `/tmp`
+  age, create `/etc/tmpfiles.d/00-tmp.conf` holding the distribution's `/tmp`
+  line (see `systemd-tmpfiles --cat-config | grep ' /tmp '`) with the age
+  replaced by `-`:
+
+  ```text
+  q /tmp 1777 root root -
+  ```
+
+  It wins because `00-tmp.conf` sorts before `tmp.conf`; `/tmp` then ages only
+  while `tmpcleaner.timer` runs.
 
 ## How to keep something
 

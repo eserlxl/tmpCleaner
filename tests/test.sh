@@ -1030,7 +1030,24 @@ if { [ "$status" -ne 0 ] && [ "$status" -ne 73 ]; } ||
 	echo "FAIL: suggested exclusions written to a drop-in should make --dry-run remove nothing under those entries"
 	fail=1
 fi
-rm -rf "$suggest_plain" "$suggest_awkward" "$cfg/suggest.conf" "$cfg/suggest.conf.d" "$cfg/suggest.err" "$cfg/suggest.prom"
+printf 'q /tmp 1777 root root 10d\n' > "$cfg/suggest.cat"
+status=0
+suggest_aged_out=$(CAT_SHIM_OUT=$cfg/suggest.cat TMPCLEANER_CONF=$cfg/suggest.conf sh "$here/tmpcleaner" --suggest-exclusions 2>"$cfg/suggest.err") || status=$?
+suggest_warn_expected=$(printf '%s\n%s' \
+	'tmpcleaner: systemd-tmpfiles-clean.timer still removes /tmp entries older than 10d, kept paths included: q /tmp 1777 root root 10d' \
+	'tmpcleaner: see "Scope" in what-gets-deleted.md to make tmpcleaner the only /tmp cleaner')
+if [ "$status" -ne 0 ] || printf '%s\n' "$suggest_aged_out" | grep -Fq 'systemd-tmpfiles-clean' || [ "$(cat "$cfg/suggest.err")" != "$suggest_warn_expected" ]; then
+	echo "FAIL: --suggest-exclusions should warn on stderr when --cat-config ages /tmp and keep stdout clean"
+	fail=1
+fi
+printf 'q /tmp 1777 root root -\n' > "$cfg/suggest.cat"
+status=0
+suggest_unaged_out=$(CAT_SHIM_OUT=$cfg/suggest.cat TMPCLEANER_CONF=$cfg/suggest.conf sh "$here/tmpcleaner" --suggest-exclusions 2>"$cfg/suggest.err") || status=$?
+if [ "$status" -ne 0 ] || [ "$suggest_unaged_out" != "$suggest_aged_out" ] || [ -s "$cfg/suggest.err" ]; then
+	echo "FAIL: --suggest-exclusions should not warn when the /tmp rule in --cat-config has age -"
+	fail=1
+fi
+rm -rf "$suggest_plain" "$suggest_awkward" "$cfg/suggest.conf" "$cfg/suggest.conf.d" "$cfg/suggest.cat" "$cfg/suggest.err" "$cfg/suggest.prom"
 suggest_plain=
 suggest_awkward=
 [ "$fail" = 0 ] || exit 1
