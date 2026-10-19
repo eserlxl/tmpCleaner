@@ -740,8 +740,8 @@ for raw_file in "$raw_open" "$raw_root/closed" "$raw_root/static"; do
 done
 kill "$raw_pid"; wait "$raw_pid" 2>/dev/null || :
 rm -rf "$raw_root" "$cfg/raw-tmp"
-for opt in --print-in-use0 --print-holders0 --suggest-exclusions --suggest-tmpfiles-override; do
-	for extra in --dry-run --prefix=/tmp --exclude-prefix=/tmp --print-rules --print-in-use0 --print-holders0 --suggest-exclusions --suggest-tmpfiles-override --help '' positional; do
+for opt in --print-in-use0 --print-holders0 --suggest-exclusions; do
+	for extra in --dry-run --prefix=/tmp --exclude-prefix=/tmp --print-rules --print-in-use0 --print-holders0 --suggest-exclusions --help '' positional; do
 		status=0
 		TMPCLEANER_CONF=$cfg/missing.conf sh "$here/tmpcleaner" "$opt" "$extra" > "$cfg/raw.out" 2> "$cfg/raw.err" || status=$?
 		if [ "$status" -ne 2 ] || [ -s "$cfg/raw.out" ] || ! grep -Fq 'accepts no other arguments' "$cfg/raw.err"; then
@@ -998,59 +998,6 @@ if [ "$(printf '%s\n' "$breakdown_out" | grep -c '^tmpcleaner: would remove')" -
 	echo "FAIL: preview should list top-level /tmp entries in descending count order and mask control bytes"
 	fail=1
 fi
-# Override suggestions need only the winning distribution rule, not an in-use scan.
-for rule_type in q D; do
-	printf '%s /tmp 1777 root root 10d\n' "$rule_type" > "$cfg/override.cat"
-	status=0
-	override_out=$(CAT_SHIM_OUT=$cfg/override.cat STAT_SHIM_FAIL=tmp FIND_SHIM_FAIL=walk \
-		TMPCLEANER_METRICS=$cfg/override.prom TMPCLEANER_CONF=$cfg/missing.conf \
-		sh "$here/tmpcleaner" --suggest-tmpfiles-override 2>"$cfg/override.err") || status=$?
-	override_expected=$(printf '# tmpcleaner: shadows "%s /tmp 1777 root root 10d"\n%s /tmp 1777 root root -' "$rule_type" "$rule_type")
-	if [ "$status" -ne 0 ] || [ "$override_out" != "$override_expected" ] ||
-		[ -s "$cfg/override.err" ] || [ -e "$cfg/override.prom" ]; then
-		echo "FAIL: --suggest-tmpfiles-override must preserve $rule_type without scanning or writing metrics"
-		fail=1
-	fi
-done
-printf 'q /tmp 1777 root root -\nq /tmp 1777 root root 10d\n' > "$cfg/override.cat"
-status=0
-override_out=$(CAT_SHIM_OUT=$cfg/override.cat sh "$here/tmpcleaner" --suggest-tmpfiles-override 2>"$cfg/override.err") || status=$?
-if [ "$status" -ne 0 ] || [ -n "$override_out" ] ||
-	[ "$(cat "$cfg/override.err")" != 'tmpcleaner: /tmp has no age in tmpfiles.d; no override needed' ]; then
-	echo 'FAIL: --suggest-tmpfiles-override must not override an unaged winning rule'
-	fail=1
-fi
-printf 'q! /tmp 1777 root root -\nq /tmp 1777 root root 10d\n' > "$cfg/override.cat"
-status=0
-override_out=$(CAT_SHIM_OUT=$cfg/override.cat sh "$here/tmpcleaner" --suggest-tmpfiles-override 2>"$cfg/override.err") || status=$?
-override_expected=$(printf '# tmpcleaner: shadows "q /tmp 1777 root root 10d"\nq /tmp 1777 root root -')
-if [ "$status" -ne 0 ] || [ "$override_out" != "$override_expected" ] || [ -s "$cfg/override.err" ]; then
-	echo 'FAIL: --suggest-tmpfiles-override must skip boot-only (!) rules'
-	fail=1
-fi
-printf 'q /tmp 1777 root root -\ne /tmp - - - 10d\n' > "$cfg/override.cat"
-status=0
-override_out=$(CAT_SHIM_OUT=$cfg/override.cat sh "$here/tmpcleaner" --suggest-tmpfiles-override 2>"$cfg/override.err") || status=$?
-override_expected=$(printf '# tmpcleaner: shadows "e /tmp - - - 10d"\ne /tmp - - - -')
-if [ "$status" -ne 0 ] || [ "$override_out" != "$override_expected" ] || [ -s "$cfg/override.err" ]; then
-	echo 'FAIL: --suggest-tmpfiles-override must report an aged winning e rule after an unaged ownership rule'
-	fail=1
-fi
-printf 'e /tmp - - - -\ne /tmp - - - 10d\n' > "$cfg/override.cat"
-status=0
-override_out=$(CAT_SHIM_OUT=$cfg/override.cat sh "$here/tmpcleaner" --suggest-tmpfiles-override 2>"$cfg/override.err") || status=$?
-if [ "$status" -ne 0 ] || [ -n "$override_out" ] ||
-	[ "$(cat "$cfg/override.err")" != 'tmpcleaner: /tmp has no age in tmpfiles.d; no override needed' ]; then
-	echo 'FAIL: --suggest-tmpfiles-override must not override an unaged winning e rule'
-	fail=1
-fi
-status=0
-override_out=$(CAT_SHIM_FAIL=1 sh "$here/tmpcleaner" --suggest-tmpfiles-override 2>"$cfg/override.err") || status=$?
-if [ "$status" -ne 1 ] || [ -n "$override_out" ]; then
-	echo 'FAIL: --suggest-tmpfiles-override must fail without output when --cat-config fails'
-	fail=1
-fi
-rm -f "$cfg/override.cat" "$cfg/override.err" "$cfg/override.prom"
 suggest_plain=$(mktemp -d /tmp/tmpcleaner-suggest-plain.XXXXXX)
 suggest_awkward=$(mktemp -d '/tmp/tmpcleaner-suggest *%dir.XXXXXX')
 touch "$suggest_plain/a" "$suggest_plain/b" "$suggest_awkward/c"
@@ -1088,7 +1035,7 @@ status=0
 suggest_aged_out=$(CAT_SHIM_OUT=$cfg/suggest.cat TMPCLEANER_CONF=$cfg/suggest.conf sh "$here/tmpcleaner" --suggest-exclusions 2>"$cfg/suggest.err") || status=$?
 suggest_warn_expected=$(printf '%s\n%s' \
 	'tmpcleaner: systemd-tmpfiles-clean.timer still removes /tmp entries older than 10d, kept paths included: q /tmp 1777 root root 10d' \
-	'tmpcleaner: run tmpcleaner --suggest-tmpfiles-override to make tmpcleaner the only /tmp cleaner')
+	'tmpcleaner: /tmp is not long-term storage; keep anything that must outlive this age outside /tmp')
 if [ "$status" -ne 0 ] || printf '%s\n' "$suggest_aged_out" | grep -Fq 'systemd-tmpfiles-clean' || [ "$(cat "$cfg/suggest.err")" != "$suggest_warn_expected" ]; then
 	echo "FAIL: --suggest-exclusions should warn on stderr when --cat-config ages /tmp and keep stdout clean"
 	fail=1
@@ -1105,6 +1052,30 @@ status=0
 suggest_shadowed_out=$(CAT_SHIM_OUT=$cfg/suggest.cat TMPCLEANER_CONF=$cfg/suggest.conf sh "$here/tmpcleaner" --suggest-exclusions 2>"$cfg/suggest.err") || status=$?
 if [ "$status" -ne 0 ] || printf '%s\n' "$suggest_shadowed_out" | grep -Fq 'systemd-tmpfiles-clean' || [ -s "$cfg/suggest.err" ]; then
 	echo "FAIL: --suggest-exclusions should not warn when an unaged /tmp line precedes an aged one"
+	fail=1
+fi
+printf 'q! /tmp 1777 root root -\nq /tmp 1777 root root 10d\n' > "$cfg/suggest.cat"
+status=0
+suggest_boot_out=$(CAT_SHIM_OUT=$cfg/suggest.cat TMPCLEANER_CONF=$cfg/suggest.conf sh "$here/tmpcleaner" --suggest-exclusions 2>"$cfg/suggest.err") || status=$?
+if [ "$status" -ne 0 ] || printf '%s\n' "$suggest_boot_out" | grep -Fq 'systemd-tmpfiles-clean' || [ "$(cat "$cfg/suggest.err")" != "$suggest_warn_expected" ]; then
+	echo "FAIL: --suggest-exclusions should skip boot-only (!) rules when checking /tmp age"
+	fail=1
+fi
+printf 'q /tmp 1777 root root -\ne /tmp - - - 10d\n' > "$cfg/suggest.cat"
+status=0
+suggest_e_out=$(CAT_SHIM_OUT=$cfg/suggest.cat TMPCLEANER_CONF=$cfg/suggest.conf sh "$here/tmpcleaner" --suggest-exclusions 2>"$cfg/suggest.err") || status=$?
+suggest_e_warn_expected=$(printf '%s\n%s' \
+	'tmpcleaner: systemd-tmpfiles-clean.timer still removes /tmp entries older than 10d, kept paths included: e /tmp - - - 10d' \
+	'tmpcleaner: /tmp is not long-term storage; keep anything that must outlive this age outside /tmp')
+if [ "$status" -ne 0 ] || printf '%s\n' "$suggest_e_out" | grep -Fq 'systemd-tmpfiles-clean' || [ "$(cat "$cfg/suggest.err")" != "$suggest_e_warn_expected" ]; then
+	echo "FAIL: --suggest-exclusions should warn about an aged winning e rule after an unaged ownership rule"
+	fail=1
+fi
+printf 'e /tmp - - - -\ne /tmp - - - 10d\n' > "$cfg/suggest.cat"
+status=0
+suggest_unaged_e_out=$(CAT_SHIM_OUT=$cfg/suggest.cat TMPCLEANER_CONF=$cfg/suggest.conf sh "$here/tmpcleaner" --suggest-exclusions 2>"$cfg/suggest.err") || status=$?
+if [ "$status" -ne 0 ] || printf '%s\n' "$suggest_unaged_e_out" | grep -Fq 'systemd-tmpfiles-clean' || [ -s "$cfg/suggest.err" ]; then
+	echo "FAIL: --suggest-exclusions should not warn when an unaged e line precedes an aged e line"
 	fail=1
 fi
 rm -rf "$suggest_plain" "$suggest_awkward" "$cfg/suggest.conf" "$cfg/suggest.conf.d" "$cfg/suggest.cat" "$cfg/suggest.err" "$cfg/suggest.prom"
@@ -2349,10 +2320,6 @@ printf '%s\n' "$help_out" | grep -Fq -- '--suggest-exclusions' || {
 	echo "FAIL: help should mention --suggest-exclusions"
 	fail=1
 }
-printf '%s\n' "$help_out" | grep -Fq -- '--suggest-tmpfiles-override' || {
-	echo "FAIL: help should mention --suggest-tmpfiles-override"
-	fail=1
-}
 printf '%s\n' "$help_out" | grep -Fq -- '--check PATH' || {
 	echo "FAIL: help should mention --check PATH"
 	fail=1
@@ -3222,43 +3189,6 @@ if [ "$install_out" != "$install_expected" ]; then
 	echo "FAIL: post_install must print preview, keep-paths, and enable lines in order"
 	fail=1
 fi
-
-# The package's post_remove message reminds when the override remains, and stays silent when absent.
-post_remove_root=$(mktemp -d "$cfg/post-remove.XXXXXX")
-mkdir "$post_remove_root/pass" "$post_remove_root/fail"
-cat > "$post_remove_root/pass/grep" <<'SHIM'
-#!/bin/sh
-[ "$*" = "-qs ^# tmpcleaner: shadows /etc/tmpfiles.d/00-tmp.conf" ]
-SHIM
-cat > "$post_remove_root/fail/grep" <<'SHIM'
-#!/bin/sh
-exit 1
-SHIM
-chmod +x "$post_remove_root/pass/grep" "$post_remove_root/fail/grep"
-remove_out_pass=$(
-	PATH="$post_remove_root/pass:$PATH"
-	# shellcheck source=/dev/null
-	. "$here/tmpcleaner.install"
-	post_remove
-)
-remove_expected=$(printf '%s\n' \
-	"tmpcleaner: /etc/tmpfiles.d/00-tmp.conf still turns off the distribution's /tmp age." \
-	"  Delete it to let systemd-tmpfiles-clean.timer clean /tmp again.")
-if [ "$remove_out_pass" != "$remove_expected" ]; then
-	echo "FAIL: post_remove must print reminder lines when override remains"
-	fail=1
-fi
-remove_out_fail=$(
-	PATH="$post_remove_root/fail:$PATH"
-	# shellcheck source=/dev/null
-	. "$here/tmpcleaner.install"
-	post_remove
-)
-if [ -n "$remove_out_fail" ]; then
-	echo "FAIL: post_remove must produce no output when override is absent"
-	fail=1
-fi
-rm -rf "$post_remove_root"
 
 # All internal markdown links and heading anchors in README.md and docs/*.md
 # resolve relative to the containing file's directory, and no doc carries a

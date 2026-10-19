@@ -76,8 +76,6 @@ for maintainers, `srcinfo` regenerates `.SRCINFO` from `PKGBUILD` and `check-src
 
 ## Uninstall
 
-Delete `/etc/tmpfiles.d/00-tmp.conf` if you created it with `--suggest-tmpfiles-override`, so the distribution cleans `/tmp` again.
-
 ### Arch Linux (AUR)
 
 ```sh

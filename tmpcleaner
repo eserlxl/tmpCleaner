@@ -28,9 +28,6 @@ Options:
                    Print candidate x exclusion rules for top-level /tmp entries
                    the next run would clean and exit
                    Standalone option; accepts no other arguments
-  --suggest-tmpfiles-override
-                   Print an unaged /tmp rule for /etc/tmpfiles.d/00-tmp.conf
-                   Standalone option; accepts no other arguments
   --check PATH     Report whether an existing absolute /tmp path would be removed
                    Accepts trailing --exclude-prefix=PATH filters
                    Exit 0 if removed, 1 if kept (only), 2 for an error (invalid
@@ -85,7 +82,7 @@ if [ "${1:-}" != --check ] && [ "${1:-}" != --check0 ]; then
 		case "$arg" in
 			--dry-run|--prefix=?*|--exclude-prefix=/*) ;;
 			--print-rules) [ "$arg" = "$1" ] || { echo "${err_tag}tmpcleaner: unsupported argument: $arg" >&2; exit 2; } ;;
-			--print-in-use0|--print-holders0|--suggest-exclusions|--suggest-tmpfiles-override) [ "$#" -eq 1 ] || { echo "${err_tag}tmpcleaner: $arg accepts no other arguments" >&2; exit 2; } ;;
+			--print-in-use0|--print-holders0|--suggest-exclusions) [ "$#" -eq 1 ] || { echo "${err_tag}tmpcleaner: $arg accepts no other arguments" >&2; exit 2; } ;;
 			*) echo "${err_tag}tmpcleaner: unsupported argument: $arg" >&2; exit 2 ;;
 		esac
 	done
@@ -171,7 +168,7 @@ case "${TMPCLEANER_METRICS:-}" in
 esac
 previewing=0
 case "${1:-}" in
-	--print-rules|--print-in-use0|--print-holders0|--suggest-exclusions|--suggest-tmpfiles-override|--check|--check0) previewing=1 ;;
+	--print-rules|--print-in-use0|--print-holders0|--suggest-exclusions|--check|--check0) previewing=1 ;;
 	*)
 		for arg do
 			[ "$arg" = --dry-run ] && previewing=1
@@ -344,21 +341,6 @@ tmp_age_rule() {
 		}
 	' "$1"
 }
-
-if [ "${1:-}" = --suggest-tmpfiles-override ]; then
-	systemd-tmpfiles --cat-config > "$scratch/cat" || exit 1
-	rule=$(tmp_age_rule "$scratch/cat") || exit 1
-	if [ -n "$rule" ]; then
-		printf '%s\n' "$rule" | LC_ALL=C awk '{
-			print "# tmpcleaner: shadows \"" $0 "\""
-			$6 = "-"
-			print
-		}'
-	else
-		echo "${warn_tag}tmpcleaner: /tmp has no age in tmpfiles.d; no override needed" >&2
-	fi
-	exit 0
-fi
 
 dropins() {
 	if [ -e "$conf.d" ] || [ -L "$conf.d" ]; then
@@ -1082,7 +1064,7 @@ if [ "${1:-}" = --suggest-exclusions ]; then
 			print warn_tag "tmpcleaner: systemd-tmpfiles-clean.timer still removes /tmp entries older than " $6 ", kept paths included: " $0 > "/dev/stderr"
 		}
 		END {
-			if (NR) print warn_tag "tmpcleaner: run tmpcleaner --suggest-tmpfiles-override to make tmpcleaner the only /tmp cleaner" > "/dev/stderr"
+			if (NR) print warn_tag "tmpcleaner: /tmp is not long-term storage; keep anything that must outlive this age outside /tmp" > "/dev/stderr"
 		}
 	' || :
 	status=0
