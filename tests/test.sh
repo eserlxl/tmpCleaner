@@ -1836,6 +1836,7 @@ done
 # nsfs and other namespace files report a root like net:[N], not a path.
 printf '%s\n' '1 2 0:1 / / rw - tmpfs tmpfs rw' \
 	'812 25 0:4 net:[4026532401] /run/netns/test rw,nosuid,nodev,noexec - nsfs nsfs rw' \
+	'813 25 0:4 pid_for_children:[4026531836] /run/ns/pidc rw,nosuid,nodev,noexec - nsfs nsfs rw' \
 	> "$cfg/mount.nsfs"
 if ! MOUNTINFO_SHIM_FILE=$cfg/mount.nsfs TMPCLEANER_CONF=$cfg/mount.conf \
 	sh "$here/tmpcleaner" --print-rules > "$cfg/mount.out" 2> "$cfg/mount.err" ||
