@@ -21,17 +21,30 @@ define newline
 endef
 shell_quote = $(if $(findstring $(newline),$(1)),$(error source-install paths cannot contain newlines),'$(subst ','"'"',$(1))')
 
+# The wrapper reads /etc/tmpcleaner by default, so the unit names any other CONFDIR.
 install: install-conf
-	@unit=$$(TMPCLEANER_EXEC=$(call shell_quote,$(BINDIR)/tmpcleaner) LC_ALL=C awk '\
+	@unit=$$(TMPCLEANER_EXEC=$(call shell_quote,$(BINDIR)/tmpcleaner) TMPCLEANER_CONFDIR=$(call shell_quote,$(CONFDIR)) LC_ALL=C awk '\
 		BEGIN { \
 			path = ENVIRON["TMPCLEANER_EXEC"]; \
 			if (substr(path, 1, 1) != "/" || path ~ /[[:cntrl:]\\\042\047]/) { \
 				print "make install: BINDIR must be absolute and contain no quotes, backslashes or control bytes" > "/dev/stderr"; exit 1 \
 			} \
+			confdir = ENVIRON["TMPCLEANER_CONFDIR"]; \
+			if (substr(confdir, 1, 1) != "/") { \
+				print "make install: CONFDIR must be absolute" > "/dev/stderr"; exit 1 \
+			} \
+			for (i = 1; i < 32; i++) escape[sprintf("%c", i)] = sprintf("\\x%02x", i); \
+			escape[sprintf("%c", 127)] = "\\x7f"; escape[sprintf("%c", 92)] = "\\\\"; \
+			escape[sprintf("%c", 34)] = "\\\""; escape["%"] = "%%"; \
 		} \
 		/^ExecStart=\/usr\/local\/bin\/tmpcleaner$$/ { \
 			encoded = path; gsub(/%/, "%%", encoded); \
-			$$0 = "ExecStart=\"" encoded "\""; found = 1 \
+			$$0 = "ExecStart=\"" encoded "\""; found = 1; \
+			if (confdir != "/etc/tmpcleaner") { \
+				encoded = ""; \
+				for (i = 1; i <= length(confdir); i++) { c = substr(confdir, i, 1); encoded = encoded (c in escape ? escape[c] : c) } \
+				$$0 = $$0 "\nEnvironment=\"TMPCLEANER_CONF=" encoded "/tmpcleaner.conf\"" \
+			} \
 		} \
 		{ print } END { if (!found) exit 1 }' tmpcleaner.service && printf x) && \
 		install -Dm755 -- tmpcleaner $(call shell_quote,$(DESTDIR)$(BINDIR)/tmpcleaner) && \

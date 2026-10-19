@@ -60,7 +60,7 @@ disables and stops the timer when `DESTDIR` is empty.
 
 #### Makefile variables and targets
 
-Variables: `PREFIX=/usr/local`, `BINDIR=$(PREFIX)/bin`, `CONFDIR=/etc/tmpcleaner`, `UNITDIR=/etc/systemd/system`, `ENABLE_TIMER=1`, `KEEP_CONFIG=0`, and `DESTDIR=` (staged install; skips `systemctl` calls when non-empty). `install` rewrites `ExecStart=` in the installed service to `$(BINDIR)/tmpcleaner`. `CONFDIR` does not change the wrapper's built-in default path (`/etc/tmpcleaner/tmpcleaner.conf`); if you install with a different `CONFDIR`, set `TMPCLEANER_CONF` in a service drop-in (`sudo systemctl edit tmpcleaner.service`).
+Variables: `PREFIX=/usr/local`, `BINDIR=$(PREFIX)/bin`, `CONFDIR=/etc/tmpcleaner`, `UNITDIR=/etc/systemd/system`, `ENABLE_TIMER=1`, `KEEP_CONFIG=0`, and `DESTDIR=` (staged install; skips `systemctl` calls when non-empty). `install` rewrites `ExecStart=` in the installed service to `$(BINDIR)/tmpcleaner`. The wrapper's built-in default config is `/etc/tmpcleaner/tmpcleaner.conf`; with a different `CONFDIR`, `install` also adds `Environment="TMPCLEANER_CONF=$(CONFDIR)/tmpcleaner.conf"` to the installed service. `CONFDIR` must be absolute; quotes, backslashes, control bytes and `%` are escaped for systemd.
 
 Quote shell arguments when setting paths containing spaces or punctuation.
 Source-install paths cannot contain newlines. `BINDIR` must be absolute and

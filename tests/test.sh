@@ -2517,6 +2517,17 @@ if ! grep -Fxq 'ExecStart="/usr/bin/tmpcleaner"' "$staged_dest$staged_units/tmpc
 	echo "FAIL: staged install should rewrite ExecStart to /usr/bin/tmpcleaner"
 	fail=1
 fi
+if grep -q TMPCLEANER_CONF "$staged_dest$staged_units/tmpcleaner.service"; then
+	echo "FAIL: an install with the default CONFDIR must not set TMPCLEANER_CONF"
+	fail=1
+fi
+PATH="$staged/fakes:$PATH" make -s -C "$here" install DESTDIR="$staged/custom-conf" PREFIX=/usr \
+	UNITDIR=/units CONFDIR='/opt/my 50%conf' >/dev/null
+if [ "$(grep TMPCLEANER_CONF "$staged/custom-conf/units/tmpcleaner.service")" != \
+	'Environment="TMPCLEANER_CONF=/opt/my 50%%conf/tmpcleaner.conf"' ]; then
+	echo "FAIL: an install with a custom CONFDIR must point the unit at its config"
+	fail=1
+fi
 [ -f "$staged_dest$staged_units/tmpcleaner.timer" ] || {
 	echo "FAIL: staged install should install tmpcleaner.timer"
 	fail=1
@@ -2665,6 +2676,15 @@ for bad_bin in "$staged/bad'quote" "$staged/bad\"quote" "$staged/bad\\slash" \
 		fail=1
 	fi
 done
+status=0
+PATH="$staged/fakes:$PATH" make -s -C "$here" install DESTDIR="$staged/refused-conf" BINDIR=/bin \
+	CONFDIR=relative/conf UNITDIR=/units > "$staged/refused.log" 2>&1 || status=$?
+if [ "$status" -eq 0 ] || [ -e "$staged/refused-conf/bin/tmpcleaner" ] ||
+	[ -e "$staged/refused-conf/units/tmpcleaner.service" ] ||
+	! grep -q 'CONFDIR must be absolute' "$staged/refused.log"; then
+	echo 'FAIL: a relative CONFDIR must fail clearly before binary/unit installation'
+	fail=1
+fi
 mkdir "$staged/failing-tools"
 printf '#!/bin/sh\nexit 17\n' > "$staged/failing-tools/awk"
 chmod +x "$staged/failing-tools/awk"
@@ -2706,7 +2726,15 @@ else
 	echo 'SKIP: generated service verification (systemd-analyze unavailable)'
 fi
 grep -v '^ExecStart=' "$here/tmpcleaner.service" > "$staged/unit.expected"
-grep -v '^ExecStart=' "$custom_units/tmpcleaner.service" > "$staged/unit.actual"
+grep -v '^ExecStart=\|^Environment="TMPCLEANER_CONF=' "$custom_units/tmpcleaner.service" > "$staged/unit.actual"
+# systemd decodes \\, \", \xHH and %% inside the quoted value.
+conf_line=$(printf '%s' "$custom_conf/tmpcleaner.conf" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e 's/%/%%/g' \
+	-e "s/$tab/\\\\x09/g" -e "s/$(printf '\001')/\\\\x01/g")
+if [ "$(grep '^Environment="TMPCLEANER_CONF=' "$custom_units/tmpcleaner.service")" != \
+	"Environment=\"TMPCLEANER_CONF=$conf_line\"" ]; then
+	echo 'FAIL: service generation must encode a custom CONFDIR for systemd'
+	fail=1
+fi
 if ! cmp -s "$staged/unit.expected" "$staged/unit.actual" ||
 	[ "$(stat -c %a "$custom_units/tmpcleaner.service")" != 644 ]; then
 	echo 'FAIL: service generation must preserve other lines and installation mode'
