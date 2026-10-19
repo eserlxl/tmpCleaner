@@ -5,7 +5,7 @@ Every `tmpcleaner` option, what `--check` reports, and its exit statuses.
 ## Options
 
 - `-h`, `--help`: Show help and exit (exits 0 even when configuration is missing).
-- `--print-rules`: Print the configured rules and generated in-use exclusions without deleting anything (`sudo tmpcleaner --print-rules`).
+- `--print-rules`: Print the configured rules and generated in-use exclusions without deleting anything (`sudo tmpcleaner --print-rules`). Trailing `--exclude-prefix=PATH` filters add their `x` exclusions to the printed rules; any other trailing argument exits 2 before the configuration is read. It still runs the in-use scan and the exclusion-only rule check, but never cleans.
 - `--print-in-use0`: Export unique in-use `/tmp` paths, byte-sorted in the C locale and terminated by NUL, preserving filename bytes. This standalone option rejects every extra argument (exit 2).
 - `--print-holders0`: Export unique in-use `/tmp` paths with known holder PIDs as NUL-separated `PATH\0PIDS\0` pairs (where `PIDS` is space-separated), byte-sorted by path in the C locale. This standalone option rejects every extra argument (exit 2).
 - `--suggest-exclusions`: Print `# N entries ...` comments and escaped `x` rules for each top-level entry the next run would clean, deletes nothing, and writes no metrics (`sudo tmpcleaner --suggest-exclusions`). This standalone option rejects every extra argument (exit 2); see [How to keep something](what-gets-deleted.md#how-to-keep-something). When the `tmpfiles.d` configuration still gives `/tmp` an age, it also warns on stderr that the distribution's `systemd-tmpfiles-clean.timer` removes older entries, kept ones included; stdout and the exit status are unaffected (see [Scope](what-gets-deleted.md#scope)).
@@ -48,7 +48,7 @@ Use canonical configured roots for reliable preview matching. Roots removed by
 in-use protection or `--exclude-prefix` filtering do not block a check. Other
 modes continue to accept these spellings under the usual safety rules.
 
-Append repeated `--exclude-prefix=PATH` options to `--check` or `--check0` to check paths with the same
+Append repeated `--exclude-prefix=PATH` options to `--check`, `--check0` or `--print-rules` to check or print with the same
 temporary exclusions as a real run, for example
 `sudo tmpcleaner --check /tmp/my-job/file --exclude-prefix=/tmp/my-job`.
 Exclusions use the same canonicalized, literal paths as other modes. Actual

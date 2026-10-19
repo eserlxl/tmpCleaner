@@ -19,6 +19,7 @@ in use by running processes.
 Options:
   -h, --help       Show this help message and exit
   --print-rules    Print generated tmpfiles rules and exit
+                   Accepts trailing --exclude-prefix=PATH filters
   --print-in-use0  Print unique in-use paths as NUL-separated records and exit
                    Standalone option; accepts no other arguments
   --print-holders0 Print in-use paths and holder PIDs as NUL-separated pairs
