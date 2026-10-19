@@ -103,11 +103,14 @@ To write candidate `x` rules for every top-level `/tmp` entry the next run
 would clean, run:
 
 ```sh
-sudo tmpcleaner --suggest-exclusions | sudo tee /etc/tmpcleaner/tmpcleaner.conf.d/50-keep.conf
+sudo tmpcleaner --suggest-exclusions | sudo tee -a /etc/tmpcleaner/tmpcleaner.conf.d/50-keep.conf
 ```
 
 Then edit `/etc/tmpcleaner/tmpcleaner.conf.d/50-keep.conf` and delete the
-blocks you do not want kept.
+blocks you do not want kept. The pipeline appends so re-running only adds new
+entries (delete unwanted blocks by hand); entries currently in use or younger
+than the age are not suggested yet, so re-run it later rather than expecting one
+pass to cover everything.
 
 The next run reads it; nothing needs reloading. Package upgrades keep an edited
 config (pacman writes new defaults to `.pacnew`, `make install` to

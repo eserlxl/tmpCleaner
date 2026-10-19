@@ -3098,7 +3098,7 @@ install_out=$(
 install_expected=$(printf '%s\n' \
 	"tmpcleaner: the timer is not enabled automatically." \
 	"  Preview first: sudo tmpcleaner --dry-run" \
-	"  Keep paths:    sudo tmpcleaner --suggest-exclusions | sudo tee /etc/tmpcleaner/tmpcleaner.conf.d/50-keep.conf" \
+	"  Keep paths:    sudo tmpcleaner --suggest-exclusions | sudo tee -a /etc/tmpcleaner/tmpcleaner.conf.d/50-keep.conf" \
 	"                 then delete the rules for anything you do not need kept" \
 	"  Then enable:   sudo systemctl enable --now tmpcleaner.timer")
 if [ "$install_out" != "$install_expected" ]; then
