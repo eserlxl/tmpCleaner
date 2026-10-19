@@ -790,8 +790,28 @@ if shim env TMPCLEANER_FULL_PERCENT=1 TMPCLEANER_FULL_AGE='1h; x' TMPCLEANER_CON
 	echo "FAIL: invalid pressure age should fail"
 	fail=1
 fi
-percent_only=$(shim env TMPCLEANER_FULL_PERCENT=1 TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --print-rules)
-age_only=$(shim env TMPCLEANER_FULL_AGE=30m TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --print-rules)
+for badvar in "TMPCLEANER_FULL_PERCENT=abc" "TMPCLEANER_FULL_AGE=bogus"; do
+	status=0
+	shim env "$badvar" TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --print-rules >/dev/null 2>&1 || status=$?
+	[ "$status" = 1 ] || {
+		echo "FAIL: lone invalid $badvar should exit 1"
+		fail=1
+	}
+	status=0
+	shim env "$badvar" TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --check "$dir/old.txt" >/dev/null 2>&1 || status=$?
+	[ "$status" = 2 ] || {
+		echo "FAIL: lone invalid $badvar should make --check exit 2"
+		fail=1
+	}
+done
+percent_only=$(shim env TMPCLEANER_FULL_PERCENT=1 TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --print-rules 2>"$cfg/percent_only.err")
+age_only=$(shim env TMPCLEANER_FULL_AGE=30m TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --print-rules 2>"$cfg/age_only.err")
+[ "$(cat "$cfg/percent_only.err")" = 'tmpcleaner: pressure mode needs both TMPCLEANER_FULL_PERCENT and TMPCLEANER_FULL_AGE; ignoring TMPCLEANER_FULL_PERCENT' ] &&
+	[ "$(cat "$cfg/age_only.err")" = 'tmpcleaner: pressure mode needs both TMPCLEANER_FULL_PERCENT and TMPCLEANER_FULL_AGE; ignoring TMPCLEANER_FULL_AGE' ] || {
+	echo "FAIL: lone pressure variable should print a warning"
+	fail=1
+}
+rm -f "$cfg/percent_only.err" "$cfg/age_only.err"
 for partial_rules in "$percent_only" "$age_only"; do
 	[ "$(printf '%s\n' "$partial_rules" | grep '^d ')" = "$configured_age" ] || {
 		echo "FAIL: pressure mode needs both variables to change the age"

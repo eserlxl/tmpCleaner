@@ -93,8 +93,9 @@ sudo env TMPCLEANER_AGE=12h tmpcleaner --dry-run
 Pressure mode is off by default. Set both `TMPCLEANER_FULL_PERCENT` (threshold
 percentage of `/tmp` usage, an integer from 1 to 100) and `TMPCLEANER_FULL_AGE`
 (age duration to use when `/tmp` usage meets or exceeds `TMPCLEANER_FULL_PERCENT`,
-in the same format as `TMPCLEANER_AGE`) to enable it. With either variable unset,
-the usual age applies. When both are set, invalid values stop the run before cleaning.
+in the same format as `TMPCLEANER_AGE`) to enable it. With only one variable
+set, it is ignored with a warning and the usual age applies. Invalid values
+always stop the run before cleaning.
 
 Run `sudo systemctl edit tmpcleaner.service` and add, for example:
 

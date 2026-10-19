@@ -292,15 +292,19 @@ if [ "${TMPCLEANER_AGE+x}" ]; then
 		exit "$errstatus"
 	}
 fi
-if [ "${TMPCLEANER_FULL_PERCENT+x}" ] && [ "${TMPCLEANER_FULL_AGE+x}" ]; then
+if [ "${TMPCLEANER_FULL_PERCENT+x}" ]; then
 	printf '%s\0' "$TMPCLEANER_FULL_PERCENT" | LC_ALL=C grep -zEq '^([1-9][0-9]?|100)$' || {
 		echo "tmpcleaner: invalid TMPCLEANER_FULL_PERCENT: $TMPCLEANER_FULL_PERCENT" >&2
 		exit "$errstatus"
 	}
+fi
+if [ "${TMPCLEANER_FULL_AGE+x}" ]; then
 	printf '%s\0' "$TMPCLEANER_FULL_AGE" | LC_ALL=C grep -zEq '^[0-9]+(us|ms|s|m|min|h|d|w)?$' || {
 		echo "tmpcleaner: invalid TMPCLEANER_FULL_AGE: $TMPCLEANER_FULL_AGE" >&2
 		exit "$errstatus"
 	}
+fi
+if [ "${TMPCLEANER_FULL_PERCENT+x}" ] && [ "${TMPCLEANER_FULL_AGE+x}" ]; then
 	dfout=$(df --output=pcent,ipcent /tmp) || { echo "tmpcleaner: cannot read /tmp usage" >&2; exit "$errstatus"; }
 	usage_line=$(printf '%s\n' "$dfout" | sed -n '2p') || { echo "tmpcleaner: cannot read /tmp usage" >&2; exit "$errstatus"; }
 	parsed=$(printf '%s\n' "$usage_line" | sed -n 's/^[[:space:]]*\([0-9][0-9]*\)%[[:space:]][[:space:]]*\([0-9][0-9]*%\|-\)[[:space:]]*$/\1 \2/p') || { echo "tmpcleaner: cannot read /tmp usage" >&2; exit "$errstatus"; }
@@ -318,6 +322,10 @@ if [ "${TMPCLEANER_FULL_PERCENT+x}" ] && [ "${TMPCLEANER_FULL_AGE+x}" ]; then
 	elif [ "$previewing" = 1 ]; then
 		echo "tmpcleaner: /tmp is $usage% full (blocks $block_use%, inodes $inode_use%), below $TMPCLEANER_FULL_PERCENT%; keeping the configured age" >&2
 	fi
+elif [ "${TMPCLEANER_FULL_PERCENT+x}" ]; then
+	echo "tmpcleaner: pressure mode needs both TMPCLEANER_FULL_PERCENT and TMPCLEANER_FULL_AGE; ignoring TMPCLEANER_FULL_PERCENT" >&2
+elif [ "${TMPCLEANER_FULL_AGE+x}" ]; then
+	echo "tmpcleaner: pressure mode needs both TMPCLEANER_FULL_PERCENT and TMPCLEANER_FULL_AGE; ignoring TMPCLEANER_FULL_AGE" >&2
 fi
 
 control_escapes=$(
