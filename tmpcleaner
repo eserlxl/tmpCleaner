@@ -24,6 +24,10 @@ Options:
   --print-holders0 Print in-use paths and holder PIDs as NUL-separated pairs
                    (PATH\0PIDS\0) and exit
                    Standalone option; accepts no other arguments
+  --suggest-exclusions
+                   Print candidate x exclusion rules for top-level /tmp entries
+                   the next run would clean and exit
+                   Standalone option; accepts no other arguments
   --check PATH     Report whether an existing absolute /tmp path would be removed
                    Accepts trailing --exclude-prefix=PATH filters
                    Exit 0 if removed, 1 if kept (only), 2 for an error (invalid
@@ -78,7 +82,7 @@ if [ "${1:-}" != --check ] && [ "${1:-}" != --check0 ]; then
 		case "$arg" in
 			--dry-run|--prefix=?*|--exclude-prefix=/*) ;;
 			--print-rules) [ "$arg" = "$1" ] || { echo "${err_tag}tmpcleaner: unsupported argument: $arg" >&2; exit 2; } ;;
-			--print-in-use0|--print-holders0) [ "$#" -eq 1 ] || { echo "${err_tag}tmpcleaner: $arg accepts no other arguments" >&2; exit 2; } ;;
+			--print-in-use0|--print-holders0|--suggest-exclusions) [ "$#" -eq 1 ] || { echo "${err_tag}tmpcleaner: $arg accepts no other arguments" >&2; exit 2; } ;;
 			*) echo "${err_tag}tmpcleaner: unsupported argument: $arg" >&2; exit 2 ;;
 		esac
 	done
@@ -164,7 +168,7 @@ case "${TMPCLEANER_METRICS:-}" in
 esac
 previewing=0
 case "${1:-}" in
-	--print-rules|--print-in-use0|--print-holders0|--check|--check0) previewing=1 ;;
+	--print-rules|--print-in-use0|--print-holders0|--suggest-exclusions|--check|--check0) previewing=1 ;;
 	*)
 		for arg do
 			[ "$arg" = --dry-run ] && previewing=1
@@ -613,6 +617,11 @@ in_use() {
 		}'
 }
 
+escape_x_rules() {
+	LC_ALL=C sed -z -e '/[[*?]/s/[][*?\\]/\\&/g' -e 's/[\\"]/\\&/g' \
+		-e "$control_escapes" -e 's/%/%%/g' -e 's/.*/x "&"/' "$@"
+}
+
 rules() {
 	dropins
 	set -- "$conf"
@@ -676,9 +685,7 @@ rules() {
 	find /tmp -xdev -mindepth 2 -maxdepth 3 -name .tmpcleaner-keep -type f -printf '%h\0' \
 		> "$scratch/markers" 2>/dev/null || [ "$?" -eq 1 ] || return 1
 	LC_ALL=C sort -zu "$scratch/inuse" "$scratch/markers" "$scratch/excludes" > "$scratch/sorted" || return 1
-	LC_ALL=C sed -z -e '/[[*?]/s/[][*?\\]/\\&/g' -e 's/[\\"]/\\&/g' \
-		-e "$control_escapes" -e 's/%/%%/g' -e 's/.*/x "&"/' \
-		"$scratch/sorted" > "$scratch/excl" || return 1
+	escape_x_rules "$scratch/sorted" > "$scratch/excl" || return 1
 	tr '\0' '\n' < "$scratch/excl" || return 1
 }
 
@@ -1002,6 +1009,61 @@ function print_top(i, best, g, shown) {
 		delete group[best]
 	}
 }'
+if [ "${1:-}" = --suggest-exclusions ]; then
+	generate_rules
+	status=0
+	preview=$(SYSTEMD_LOG_LEVEL=info SYSTEMD_LOG_TARGET=console SYSTEMD_LOG_COLOR=0 \
+		SYSTEMD_LOG_LOCATION=0 SYSTEMD_LOG_TIME=0 SYSTEMD_LOG_TID=0 \
+		systemd-tmpfiles --clean --dry-run - < "$scratch/rules" 2>&1) || status=$?
+	if [ "$status" -ne 0 ] && [ "$status" -ne 73 ]; then
+		printf '%s\n' "$preview" >&2
+		exit "$errstatus"
+	fi
+	printf '%s\n' "$preview" > "$scratch/preview" || {
+		echo "${err_tag}tmpcleaner: cannot write the --suggest-exclusions scratch file" >&2
+		exit "$errstatus"
+	}
+	COMMENTS=$scratch/suggest-comments PATHS=$scratch/suggest-paths LC_ALL=C awk "$breakdown_awk"'
+	/^Would remove directory "/ && /"$/ { track(substr($0, 25, length($0) - 25)); next }
+	/^Would remove "/ && /"$/ { track(substr($0, 15, length($0) - 15)); next }
+	END {
+		comments = ENVIRON["COMMENTS"]
+		paths = ENVIRON["PATHS"]
+		printf "" > comments
+		printf "" > paths
+		for (;;) {
+			best = ""
+			for (g in group) {
+				if (best == "" || group[g] > group[best] || (group[g] == group[best] && g < best)) best = g
+			}
+			if (best == "") break
+			shown = best
+			gsub(/[\001-\037\177]/, "?", shown)
+			printf "# %d entries would be removed under %s%c", group[best], shown, 0 > comments
+			printf "%s%c", best, 0 > paths
+			delete group[best]
+		}
+		if (close(comments) != 0 || close(paths) != 0) exit 1
+	}
+	' "$scratch/preview" &&
+		escape_x_rules "$scratch/suggest-paths" > "$scratch/suggest-rules" &&
+		COMMENTS=$scratch/suggest-comments RULES=$scratch/suggest-rules LC_ALL=C awk '
+			BEGIN {
+				RS = "\0"
+				comments = ENVIRON["COMMENTS"]
+				rules = ENVIRON["RULES"]
+				while ((c = (getline comment < comments)) > 0) {
+					if ((getline rule < rules) <= 0) exit 1
+					printf "%s\n%s\n", comment, rule
+				}
+				if (c < 0 || (getline rule < rules) != 0 || close(comments) != 0 || close(rules) != 0) exit 1
+			}
+		' || {
+		echo "${err_tag}tmpcleaner: cannot generate exclusion suggestions" >&2
+		exit "$errstatus"
+	}
+	exit 0
+fi
 for arg do
 	if [ "$arg" = --dry-run ]; then
 		generate_rules

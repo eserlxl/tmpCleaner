@@ -99,6 +99,15 @@ the conflicting cleanup rule; see [configuration.md](configuration.md).
 
 A `*.conf` file in `/etc/tmpcleaner/tmpcleaner.conf.d/` works the same and
 survives package upgrades untouched ([configuration.md](configuration.md)).
+To write candidate `x` rules for every top-level `/tmp` entry the next run
+would clean, run:
+
+```sh
+sudo tmpcleaner --suggest-exclusions | sudo tee /etc/tmpcleaner/tmpcleaner.conf.d/50-keep.conf
+```
+
+Then edit `/etc/tmpcleaner/tmpcleaner.conf.d/50-keep.conf` and delete the
+blocks you do not want kept.
 
 The next run reads it; nothing needs reloading. Package upgrades keep an edited
 config (pacman writes new defaults to `.pacnew`, `make install` to

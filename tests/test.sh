@@ -19,7 +19,9 @@ shmdir=
 scope_outside=
 ctrl_top=
 marker_top=
-trap 'kill $pids 2>/dev/null || :; rm -rf "$dir" "$cfg" "$shimdir" "$bindpoint" "$detachpoint" "$sockalias" "$shmdir" "$scope_outside" "$ctrl_top" "$marker_top"' EXIT
+suggest_plain=
+suggest_awkward=
+trap 'kill $pids 2>/dev/null || :; rm -rf "$dir" "$cfg" "$shimdir" "$bindpoint" "$detachpoint" "$sockalias" "$shmdir" "$scope_outside" "$ctrl_top" "$marker_top" "$suggest_plain" "$suggest_awkward"' EXIT
 trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
@@ -727,8 +729,8 @@ for raw_file in "$raw_open" "$raw_root/closed" "$raw_root/static"; do
 done
 kill "$raw_pid"; wait "$raw_pid" 2>/dev/null || :
 rm -rf "$raw_root" "$cfg/raw-tmp"
-for opt in --print-in-use0 --print-holders0; do
-	for extra in --dry-run --prefix=/tmp --exclude-prefix=/tmp --print-rules --print-in-use0 --print-holders0 --help '' positional; do
+for opt in --print-in-use0 --print-holders0 --suggest-exclusions; do
+	for extra in --dry-run --prefix=/tmp --exclude-prefix=/tmp --print-rules --print-in-use0 --print-holders0 --suggest-exclusions --help '' positional; do
 		status=0
 		TMPCLEANER_CONF=$cfg/missing.conf sh "$here/tmpcleaner" "$opt" "$extra" > "$cfg/raw.out" 2> "$cfg/raw.err" || status=$?
 		if [ "$status" -ne 2 ] || [ -s "$cfg/raw.out" ] || ! grep -Fq 'accepts no other arguments' "$cfg/raw.err"; then
@@ -985,6 +987,41 @@ if [ "$(printf '%s\n' "$breakdown_out" | grep -c '^tmpcleaner: would remove')" -
 	echo "FAIL: preview should list top-level /tmp entries in descending count order and mask control bytes"
 	fail=1
 fi
+suggest_plain=$(mktemp -d /tmp/tmpcleaner-suggest-plain.XXXXXX)
+suggest_awkward=$(mktemp -d '/tmp/tmpcleaner-suggest *%dir.XXXXXX')
+touch "$suggest_plain/a" "$suggest_plain/b" "$suggest_awkward/c"
+old "$suggest_plain/a" "$suggest_plain/b" "$suggest_plain" "$suggest_awkward/c" "$suggest_awkward"
+printf 'd /tmp - - - amM:12h\n' > "$cfg/suggest.conf"
+status=0
+suggest_out=$(TMPCLEANER_METRICS=$cfg/suggest.prom TMPCLEANER_CONF=$cfg/suggest.conf sh "$here/tmpcleaner" --suggest-exclusions 2>"$cfg/suggest.err") || status=$?
+suggest_awkward_escaped=$(printf '%s' "$suggest_awkward" | sed -e 's/[][*?\\]/\\&/g' -e 's/[\\"]/\\&/g' -e 's/%/%%/g')
+# ENVIRON, not -v: -v would decode the backslashes the escaped rule must keep.
+suggest_filtered=$(printf '%s\n' "$suggest_out" | P=$suggest_plain A=$suggest_awkward AE=$suggest_awkward_escaped awk '
+	BEGIN { p = ENVIRON["P"]; a = ENVIRON["A"]; ae = ENVIRON["AE"] }
+	$0 == "# 3 entries would be removed under " p || $0 == "x \"" p "\"" ||
+	$0 == "# 2 entries would be removed under " a || $0 == "x \"" ae "\"" { print }')
+suggest_expected=$(printf '# 3 entries would be removed under %s\nx "%s"\n# 2 entries would be removed under %s\nx "%s"' \
+	"$suggest_plain" "$suggest_plain" "$suggest_awkward" "$suggest_awkward_escaped")
+if [ "$status" -ne 0 ] || [ -s "$cfg/suggest.err" ] || [ -e "$cfg/suggest.prom" ] ||
+	[ "$suggest_filtered" != "$suggest_expected" ] ||
+	[ ! -e "$suggest_plain/a" ] || [ ! -e "$suggest_plain/b" ] || [ ! -e "$suggest_awkward/c" ]; then
+	echo "FAIL: --suggest-exclusions should print candidate x rules in count order without deleting or writing metrics"
+	fail=1
+fi
+mkdir -p "$cfg/suggest.conf.d"
+printf '%s\n' "$suggest_out" > "$cfg/suggest.conf.d/50-keep.conf"
+status=0
+suggest_dry=$(TMPCLEANER_CONF=$cfg/suggest.conf sh "$here/tmpcleaner" --dry-run 2>&1) || status=$?
+if { [ "$status" -ne 0 ] && [ "$status" -ne 73 ]; } ||
+	printf '%s\n' "$suggest_dry" | grep -Fq "$suggest_plain" ||
+	printf '%s\n' "$suggest_dry" | grep -Fq "$suggest_awkward" ||
+	[ ! -e "$suggest_plain/a" ] || [ ! -e "$suggest_plain/b" ] || [ ! -e "$suggest_awkward/c" ]; then
+	echo "FAIL: suggested exclusions written to a drop-in should make --dry-run remove nothing under those entries"
+	fail=1
+fi
+rm -rf "$suggest_plain" "$suggest_awkward" "$cfg/suggest.conf" "$cfg/suggest.conf.d" "$cfg/suggest.err" "$cfg/suggest.prom"
+suggest_plain=
+suggest_awkward=
 [ "$fail" = 0 ] || exit 1
 
 argdir=$(mktemp -d "$dir/args.XXXXXX")
@@ -2193,6 +2230,10 @@ printf '%s\n' "$help_out" | grep -Fq -- '--print-rules' || {
 }
 printf '%s\n' "$help_out" | grep -Fq -- '--print-in-use0' || {
 	echo "FAIL: help should mention --print-in-use0"
+	fail=1
+}
+printf '%s\n' "$help_out" | grep -Fq -- '--suggest-exclusions' || {
+	echo "FAIL: help should mention --suggest-exclusions"
 	fail=1
 }
 printf '%s\n' "$help_out" | grep -Fq -- '--check PATH' || {
