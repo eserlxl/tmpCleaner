@@ -26,7 +26,7 @@ sudo tmpcleaner --suggest-exclusions | sudo tee -a /etc/tmpcleaner/tmpcleaner.co
 sudo systemctl enable --now tmpcleaner.timer
 ```
 
-**Migrating from a source install:** remove a previous `make install` first (back up `/etc/tmpcleaner/tmpcleaner.conf`, run `sudo make uninstall`, install the package, then restore the config). Pacman refuses to overwrite untracked files, and units left in `/etc/systemd/system` would shadow the packaged ones in `/usr/lib/systemd/system`.
+**Migrating from a source install:** remove a previous `make install` first (back up `/etc/tmpcleaner/tmpcleaner.conf` and the `/etc/tmpcleaner/tmpcleaner.conf.d/` drop-ins, which hold your kept paths, run `sudo make uninstall`, install the package, then restore both; `sudo make uninstall KEEP_CONFIG=1` leaves them in place instead). Pacman refuses to overwrite untracked files, and units left in `/etc/systemd/system` would shadow the packaged ones in `/usr/lib/systemd/system`.
 
 ### From source
 
