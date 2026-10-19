@@ -3199,6 +3199,43 @@ if [ "$install_out" != "$install_expected" ]; then
 	fail=1
 fi
 
+# The package's post_remove message reminds when the override remains, and stays silent when absent.
+post_remove_root=$(mktemp -d "$cfg/post-remove.XXXXXX")
+mkdir "$post_remove_root/pass" "$post_remove_root/fail"
+cat > "$post_remove_root/pass/grep" <<'SHIM'
+#!/bin/sh
+[ "$*" = "-qs ^# tmpcleaner: shadows /etc/tmpfiles.d/00-tmp.conf" ]
+SHIM
+cat > "$post_remove_root/fail/grep" <<'SHIM'
+#!/bin/sh
+exit 1
+SHIM
+chmod +x "$post_remove_root/pass/grep" "$post_remove_root/fail/grep"
+remove_out_pass=$(
+	PATH="$post_remove_root/pass:$PATH"
+	# shellcheck source=/dev/null
+	. "$here/tmpcleaner.install"
+	post_remove
+)
+remove_expected=$(printf '%s\n' \
+	"tmpcleaner: /etc/tmpfiles.d/00-tmp.conf still turns off the distribution's /tmp age." \
+	"  Delete it to let systemd-tmpfiles-clean.timer clean /tmp again.")
+if [ "$remove_out_pass" != "$remove_expected" ]; then
+	echo "FAIL: post_remove must print reminder lines when override remains"
+	fail=1
+fi
+remove_out_fail=$(
+	PATH="$post_remove_root/fail:$PATH"
+	# shellcheck source=/dev/null
+	. "$here/tmpcleaner.install"
+	post_remove
+)
+if [ -n "$remove_out_fail" ]; then
+	echo "FAIL: post_remove must produce no output when override is absent"
+	fail=1
+fi
+rm -rf "$post_remove_root"
+
 # All internal markdown links and heading anchors in README.md and docs/*.md
 # resolve relative to the containing file's directory, and no doc carries a
 # local-environment path prefix.

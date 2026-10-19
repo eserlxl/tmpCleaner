@@ -83,6 +83,10 @@ endif
 	rm -f -- $(call shell_quote,$(DESTDIR)$(BINDIR)/tmpcleaner)
 ifeq ($(DESTDIR),)
 	systemctl daemon-reload
+	@if grep -qs '^# tmpcleaner: shadows' /etc/tmpfiles.d/00-tmp.conf; then \
+		echo "tmpcleaner: /etc/tmpfiles.d/00-tmp.conf still turns off the distribution's /tmp age."; \
+		echo "  Delete it to let systemd-tmpfiles-clean.timer clean /tmp again."; \
+	fi
 endif
 
 test:

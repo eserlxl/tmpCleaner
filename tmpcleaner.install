@@ -5,3 +5,10 @@ post_install() {
 	echo "                 then delete the rules for anything you do not need kept"
 	echo "  Then enable:   sudo systemctl enable --now tmpcleaner.timer"
 }
+
+post_remove() {
+	if grep -qs '^# tmpcleaner: shadows' /etc/tmpfiles.d/00-tmp.conf; then
+		echo "tmpcleaner: /etc/tmpfiles.d/00-tmp.conf still turns off the distribution's /tmp age."
+		echo "  Delete it to let systemd-tmpfiles-clean.timer clean /tmp again."
+	fi
+}
