@@ -1717,11 +1717,25 @@ if [ "$chrootsock_running" = 1 ] || [ "$sockbatch_running" = 1 ]; then
 fi
 for scanfail in STAT_SHIM_FAIL=tmp STAT_SHIM_FAIL=cached STAT_SHIM_FAIL=verify STAT_SHIM_FAIL=killed STAT_SHIM_FAIL=verify-killed FIND_SHIM_FAIL=walk FIND_SHIM_FAIL=killed FIND_SHIM_FAIL=walk-killed FIND_SHIM_FAIL=markers CAT_SHIM_FAIL=1; do
 	status=0
-	shim_rules=$(shim env "$scanfail" TMPCLEANER_CONF="$conf" sh "$here/tmpcleaner" --print-rules 2>/dev/null) || status=$?
+	shim_rules=$(shim env "$scanfail" TMPCLEANER_CONF="$conf" sh "$here/tmpcleaner" --print-rules 2>"$cfg/rules.err") || status=$?
 	if [ "$status" -ne 1 ] || [ -n "$shim_rules" ]; then
 		echo "FAIL: --print-rules should exit 1 with empty stdout when the scan fails ($scanfail)"
 		fail=1
 	fi
+	case "$scanfail" in
+		CAT_SHIM_FAIL=1)
+			if ! grep -q 'cannot generate cleanup rules' "$cfg/rules.err" || grep -q 'cannot scan processes in use' "$cfg/rules.err"; then
+				echo 'FAIL: --cat-config failure should report rule generation, not an in-use scan'
+				fail=1
+			fi
+			;;
+		STAT_SHIM_FAIL=tmp)
+			if ! grep -q 'cannot scan processes in use' "$cfg/rules.err"; then
+				echo 'FAIL: stat failure should report an in-use scan'
+				fail=1
+			fi
+			;;
+	esac
 	status=0
 	shim env "$scanfail" TMPCLEANER_CONF="$conf" sh "$here/tmpcleaner" --print-in-use0 > "$cfg/raw.out" 2>/dev/null || status=$?
 	if [ "$status" -ne 1 ] || [ -s "$cfg/raw.out" ]; then

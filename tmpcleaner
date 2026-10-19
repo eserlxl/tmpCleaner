@@ -620,7 +620,7 @@ rules() {
 	# LC_ALL=C: names are bytes, not text. In a UTF-8 locale "." skips invalid
 	# bytes, so a name holding one would leave its rule half quoted.
 	[ -z "$check" ] || holders_file=$scratch/holders
-	in_use > "$scratch/inuse" || return 1
+	in_use > "$scratch/inuse" || { scan_failed=1; return 1; }
 	find /tmp -xdev -mindepth 2 -maxdepth 3 -name .tmpcleaner-keep -type f -printf '%h\0' \
 		> "$scratch/markers" 2>/dev/null || [ "$?" -eq 1 ] || return 1
 	LC_ALL=C sort -zu "$scratch/inuse" "$scratch/markers" "$scratch/excludes" > "$scratch/sorted" || return 1
@@ -631,8 +631,13 @@ rules() {
 }
 
 generate_rules() {
+	scan_failed=
 	rules > "$scratch/rules" || {
-		echo "tmpcleaner: cannot scan processes in use; nothing was removed" >&2
+		if [ "$scan_failed" = 1 ]; then
+			echo "tmpcleaner: cannot scan processes in use; nothing was removed" >&2
+		else
+			echo "tmpcleaner: cannot generate cleanup rules; nothing was removed" >&2
+		fi
 		exit "$errstatus"
 	}
 	# An x rule cannot protect a root that another rule cleans directly.
