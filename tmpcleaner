@@ -214,6 +214,9 @@ finish() {
 	exit "$exit_status"
 }
 trap finish EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 metric_started=
 if [ "$previewing" = 0 ] && [ -n "${TMPCLEANER_METRICS:-}" ]; then
 	read -r metric_started _ 2>/dev/null < /proc/uptime || metric_started=

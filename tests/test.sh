@@ -1846,7 +1846,31 @@ if [ -e "$cfg/duration.called" ]; then
 	echo 'FAIL: metrics-disabled run must not invoke the duration calculation'
 	fail=1
 fi
-rm -rf "$dir/duration"
+rm -f "$cfg/duration.prom" "$cfg/term.marker"
+term_tmp=$(mktemp -d "$cfg/term-tmp.XXXXXX")
+# Not through shim(): $! must be the tmpcleaner shell itself, not a wrapper subshell.
+env PATH="$shimdir:$PATH" TMPDIR="$term_tmp" CLEAN_SHIM_MARKER="$cfg/term.marker" CLEAN_SHIM_DELAY=2 \
+	TMPCLEANER_CONF="$cfg/duration.conf" TMPCLEANER_METRICS="$cfg/duration.prom" \
+	sh "$here/tmpcleaner" >/dev/null 2>&1 &
+term_pid=$!
+pids="$pids $term_pid"
+tries=0
+until [ -s "$cfg/term.marker" ]; do
+	tries=$((tries + 1))
+	[ "$tries" -lt 200 ] || { echo 'FAIL: timed out waiting for clean shim'; exit 1; }
+	sleep 0.01
+done
+kill -TERM "$term_pid"
+status=0
+wait "$term_pid" || status=$?
+if [ "$status" -ne 143 ] ||
+	! grep -Fxq 'tmpcleaner_last_exit_status 143' "$cfg/duration.prom" ||
+	! grep -Fxq 'tmpcleaner_last_success_timestamp_seconds 0' "$cfg/duration.prom" ||
+	[ -n "$(find "$term_tmp" -mindepth 1 -print -quit)" ]; then
+	echo 'FAIL: a TERM-killed run must exit 143, publish status 143 with success timestamp 0, and remove its scratch directory'
+	fail=1
+fi
+rm -rf "$dir/duration" "$term_tmp" "$cfg/duration.prom" "$cfg/term.marker"
 size_root=$(mktemp -d "$dir/sizes.XXXXXX")
 mkdir "$size_root/olddir" "$size_root/keepdir"
 printf '1234567' > "$size_root/a"

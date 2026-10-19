@@ -98,8 +98,9 @@ stale success metrics with their nonzero exit status and zero removals when
 cleanup counts were not obtained. Successful cleanup retains its measured
 counts. Invalid CLI usage or an invalid metrics path leaves metrics untouched.
 All preview modes preserve an existing metrics file even when they fail.
-Publication uses the shell's exit handler; unhandled termination or `SIGKILL`
-can prevent that handler from running and leave the previous file in place.
+Publication uses the shell's exit handler: `SIGHUP`, `SIGINT`, and `SIGTERM`
+publish exit status `129`, `130`, and `143`, while `SIGKILL` leaves the
+previous file in place.
 
 The service runs with `ProtectSystem=strict`, which leaves only `/tmp`
 writable, so the drop-in must also allow the collector directory
