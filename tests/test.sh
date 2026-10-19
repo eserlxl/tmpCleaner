@@ -669,8 +669,9 @@ if ! { [ "$(printf '%s\n' "$ws_rules" | grep -c '^d')" = 1 ] &&
 	fail=1
 fi
 rm -f "$cfg/ws.conf"
-if TMPCLEANER_AGE='1h; x' TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --print-rules; then
-	echo "FAIL: invalid age override should fail"
+if TMPCLEANER_AGE='1h; x' TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --print-rules > /dev/null 2> "$cfg/bad.err" ||
+	[ "$(cat "$cfg/bad.err")" != 'tmpcleaner: invalid TMPCLEANER_AGE: 1h; x' ]; then
+	echo "FAIL: invalid age override should fail with its diagnostic"
 	fail=1
 fi
 rules=$(TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --print-rules)
@@ -835,15 +836,18 @@ pr 2>&1 >/dev/null | grep -Fxq 'tmpcleaner: /tmp is 95% full (blocks 50%, inodes
 	fail=1
 }
 setdf ' 95%     -'
-if shim env TMPCLEANER_AGE=bogus TMPCLEANER_FULL_PERCENT=1 TMPCLEANER_FULL_AGE=30m TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --print-rules; then
+if shim env TMPCLEANER_AGE=bogus TMPCLEANER_FULL_PERCENT=1 TMPCLEANER_FULL_AGE=30m TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --print-rules > /dev/null 2> "$cfg/bad.err" ||
+	[ "$(cat "$cfg/bad.err")" != 'tmpcleaner: invalid TMPCLEANER_AGE: bogus' ]; then
 	echo "FAIL: invalid TMPCLEANER_AGE should fail under pressure too"
 	fail=1
 fi
-if shim env TMPCLEANER_FULL_PERCENT=101 TMPCLEANER_FULL_AGE=30m TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --print-rules; then
+if shim env TMPCLEANER_FULL_PERCENT=101 TMPCLEANER_FULL_AGE=30m TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --print-rules > /dev/null 2> "$cfg/bad.err" ||
+	[ "$(cat "$cfg/bad.err")" != 'tmpcleaner: invalid TMPCLEANER_FULL_PERCENT: 101' ]; then
 	echo "FAIL: invalid pressure threshold should fail"
 	fail=1
 fi
-if shim env TMPCLEANER_FULL_PERCENT=1 TMPCLEANER_FULL_AGE='1h; x' TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --print-rules; then
+if shim env TMPCLEANER_FULL_PERCENT=1 TMPCLEANER_FULL_AGE='1h; x' TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --print-rules > /dev/null 2> "$cfg/bad.err" ||
+	[ "$(cat "$cfg/bad.err")" != 'tmpcleaner: invalid TMPCLEANER_FULL_AGE: 1h; x' ]; then
 	echo "FAIL: invalid pressure age should fail"
 	fail=1
 fi
@@ -2405,7 +2409,8 @@ if [ "$status" -ne 2 ]; then
 	fail=1
 fi
 rm -f "$cfg/bad.conf" "$dir/old.txt"
-if TMPCLEANER_CONF=$dir/missing.conf sh "$here/tmpcleaner"; then
+if TMPCLEANER_CONF=$dir/missing.conf sh "$here/tmpcleaner" > /dev/null 2> "$cfg/bad.err" ||
+	[ "$(cat "$cfg/bad.err")" != "tmpcleaner: cannot read $dir/missing.conf" ]; then
 	echo "FAIL: missing config should fail"
 	fail=1
 fi
@@ -2528,7 +2533,7 @@ if [ "$bind_running" = 1 ]; then
 			waited=$((waited + 1))
 			sleep 0.1
 		done
-		TMPCLEANER_CONF=$conf sh "$here/tmpcleaner"
+		TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" 2> "$cfg/alias.err"
 		gone big/f; kept held/f
 		kill "$alias_pid"
 		wait "$alias_pid" 2>/dev/null || :
