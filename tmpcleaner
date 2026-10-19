@@ -320,15 +320,27 @@ fi
 tmp_age_rule() {
 	LC_ALL=C awk '
 		# The first line for /tmp wins; later duplicates are ignored by systemd-tmpfiles.
-		$1 ~ /^[dDeqQvV][-!=~^+]*$/ {
+		# Boot-only (!) lines are skipped, and e lines form their own class.
+		$1 ~ /^[dDeqQv][-!=~^+$?]*$/ && $1 !~ /!/ {
 			if ($2 ~ /^"[^"]*"$/ || $2 ~ /^\047[^\047]*\047$/) path = substr($2, 2, length($2) - 2)
 			else if ($2 !~ /["\047]/) path = $2
 			else next
 			sub(/\/+$/, "", path)
 			if (path == "/tmp") {
-				if (NF >= 6 && $6 != "-") print
-				exit
+				if (substr($1, 1, 1) == "e") {
+					if (!seen_e++) {
+						e_line = $0
+						e_age = (NF >= 6 && $6 != "-")
+					}
+				} else if (!seen_own++) {
+					own_line = $0
+					own_age = (NF >= 6 && $6 != "-")
+				}
 			}
+		}
+		END {
+			if (own_age) print own_line
+			if (e_age) print e_line
 		}
 	' "$1"
 }
@@ -1069,7 +1081,9 @@ if [ "${1:-}" = --suggest-exclusions ]; then
 		{
 			warn_tag = ENVIRON["WARN_TAG"]
 			print warn_tag "tmpcleaner: systemd-tmpfiles-clean.timer still removes /tmp entries older than " $6 ", kept paths included: " $0 > "/dev/stderr"
-			print warn_tag "tmpcleaner: run tmpcleaner --suggest-tmpfiles-override to make tmpcleaner the only /tmp cleaner" > "/dev/stderr"
+		}
+		END {
+			if (NR) print warn_tag "tmpcleaner: run tmpcleaner --suggest-tmpfiles-override to make tmpcleaner the only /tmp cleaner" > "/dev/stderr"
 		}
 	' || :
 	status=0

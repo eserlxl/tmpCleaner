@@ -1020,6 +1020,30 @@ if [ "$status" -ne 0 ] || [ -n "$override_out" ] ||
 	echo 'FAIL: --suggest-tmpfiles-override must not override an unaged winning rule'
 	fail=1
 fi
+printf 'q! /tmp 1777 root root -\nq /tmp 1777 root root 10d\n' > "$cfg/override.cat"
+status=0
+override_out=$(CAT_SHIM_OUT=$cfg/override.cat sh "$here/tmpcleaner" --suggest-tmpfiles-override 2>"$cfg/override.err") || status=$?
+override_expected=$(printf '# tmpcleaner: shadows "q /tmp 1777 root root 10d"\nq /tmp 1777 root root -')
+if [ "$status" -ne 0 ] || [ "$override_out" != "$override_expected" ] || [ -s "$cfg/override.err" ]; then
+	echo 'FAIL: --suggest-tmpfiles-override must skip boot-only (!) rules'
+	fail=1
+fi
+printf 'q /tmp 1777 root root -\ne /tmp - - - 10d\n' > "$cfg/override.cat"
+status=0
+override_out=$(CAT_SHIM_OUT=$cfg/override.cat sh "$here/tmpcleaner" --suggest-tmpfiles-override 2>"$cfg/override.err") || status=$?
+override_expected=$(printf '# tmpcleaner: shadows "e /tmp - - - 10d"\ne /tmp - - - -')
+if [ "$status" -ne 0 ] || [ "$override_out" != "$override_expected" ] || [ -s "$cfg/override.err" ]; then
+	echo 'FAIL: --suggest-tmpfiles-override must report an aged winning e rule after an unaged ownership rule'
+	fail=1
+fi
+printf 'e /tmp - - - -\ne /tmp - - - 10d\n' > "$cfg/override.cat"
+status=0
+override_out=$(CAT_SHIM_OUT=$cfg/override.cat sh "$here/tmpcleaner" --suggest-tmpfiles-override 2>"$cfg/override.err") || status=$?
+if [ "$status" -ne 0 ] || [ -n "$override_out" ] ||
+	[ "$(cat "$cfg/override.err")" != 'tmpcleaner: /tmp has no age in tmpfiles.d; no override needed' ]; then
+	echo 'FAIL: --suggest-tmpfiles-override must not override an unaged winning e rule'
+	fail=1
+fi
 status=0
 override_out=$(CAT_SHIM_FAIL=1 sh "$here/tmpcleaner" --suggest-tmpfiles-override 2>"$cfg/override.err") || status=$?
 if [ "$status" -ne 1 ] || [ -n "$override_out" ]; then
