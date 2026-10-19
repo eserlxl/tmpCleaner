@@ -21,6 +21,9 @@ Options:
   --print-rules    Print generated tmpfiles rules and exit
   --print-in-use0  Print unique in-use paths as NUL-separated records and exit
                    Standalone option; accepts no other arguments
+  --print-holders0 Print in-use paths and holder PIDs as NUL-separated pairs
+                   (PATH\0PIDS\0) and exit
+                   Standalone option; accepts no other arguments
   --check PATH     Report whether an existing absolute /tmp path would be removed
                    Accepts trailing --exclude-prefix=PATH filters
                    Exit 0 if removed, 1 if kept (only), 2 for an error (invalid
@@ -62,7 +65,7 @@ if [ "${1:-}" != --check ]; then
 		case "$arg" in
 			--dry-run|--prefix=?*|--exclude-prefix=/*) ;;
 			--print-rules) [ "$arg" = "$1" ] || { echo "tmpcleaner: unsupported argument: $arg" >&2; exit 2; } ;;
-			--print-in-use0) [ "$#" -eq 1 ] || { echo "tmpcleaner: --print-in-use0 accepts no other arguments" >&2; exit 2; } ;;
+			--print-in-use0|--print-holders0) [ "$#" -eq 1 ] || { echo "tmpcleaner: $arg accepts no other arguments" >&2; exit 2; } ;;
 			*) echo "tmpcleaner: unsupported argument: $arg" >&2; exit 2 ;;
 		esac
 	done
@@ -73,6 +76,8 @@ nl='
 errstatus=1
 check=
 holders_file=
+export_holders=
+[ "${1:-}" != --print-holders0 ] || export_holders=1
 if [ "${1:-}" = --check ]; then
 	errstatus=2
 	cr=$(printf '\r')
@@ -131,7 +136,7 @@ case "${TMPCLEANER_METRICS:-}" in
 esac
 previewing=0
 case "${1:-}" in
-	--print-rules|--print-in-use0|--check) previewing=1 ;;
+	--print-rules|--print-in-use0|--print-holders0|--check) previewing=1 ;;
 	*)
 		for arg do
 			[ "$arg" = --dry-run ] && previewing=1
@@ -619,7 +624,7 @@ rules() {
 	# C-escape \ " and all control bytes for the quoted field and double % (specifier).
 	# LC_ALL=C: names are bytes, not text. In a UTF-8 locale "." skips invalid
 	# bytes, so a name holding one would leave its rule half quoted.
-	[ -z "$check" ] || holders_file=$scratch/holders
+	[ -z "$check$export_holders" ] || holders_file=$scratch/holders
 	in_use > "$scratch/inuse" || { scan_failed=1; return 1; }
 	find /tmp -xdev -mindepth 2 -maxdepth 3 -name .tmpcleaner-keep -type f -printf '%h\0' \
 		> "$scratch/markers" 2>/dev/null || [ "$?" -eq 1 ] || return 1
@@ -742,6 +747,34 @@ if [ "${1:-}" = --print-in-use0 ]; then
 	generate_rules
 	filter_in_use || exit 1
 	cat "$scratch/export-sorted"
+	exit
+fi
+
+if [ "${1:-}" = --print-holders0 ]; then
+	generate_rules
+	filter_in_use || exit 1
+	[ ! -f "$scratch/holders" ] ||
+		HOLDERS=$scratch/holders LC_ALL=C awk '
+			BEGIN {
+				RS = "\0"
+				holders_file = ENVIRON["HOLDERS"]
+				while ((getline hpath < holders_file) > 0 && (getline hpids < holders_file) > 0) {
+					n = split(hpids, pid_list, " ")
+					for (i = 1; i <= n; i++) {
+						pid = pid_list[i]
+						if (pid == "" || ((hpath, pid) in seen)) continue
+						seen[hpath, pid] = 1
+						pids[hpath] = (hpath in pids) ? pids[hpath] " " pid : pid
+					}
+				}
+				close(holders_file)
+			}
+			$0 in pids { printf "%s%c%s%c", $0, 0, pids[$0], 0 }
+		' "$scratch/export-sorted" > "$scratch/holders-sorted" || {
+		echo "tmpcleaner: cannot export in-use holders" >&2
+		exit 1
+	}
+	[ ! -f "$scratch/holders-sorted" ] || cat "$scratch/holders-sorted"
 	exit
 fi
 

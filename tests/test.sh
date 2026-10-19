@@ -696,18 +696,46 @@ if [ "$status" -ne 0 ] || [ -s "$cfg/raw.err" ] || [ -e "$cfg/raw.prom" ] || [ -
 	echo 'FAIL: raw inventory must be unique sorted NUL records with exact held paths and no synthetic exclusions'
 	fail=1
 fi
+status=0
+TMPDIR=$cfg/raw-tmp TMPCLEANER_CONF=$cfg/raw.conf TMPCLEANER_LIST=nul TMPCLEANER_METRICS=$cfg/raw.prom \
+	CLEAN_SHIM_MARKER=$cfg/raw.clean sh "$here/tmpcleaner" --print-holders0 > "$cfg/holders.out" 2> "$cfg/holders.err" || status=$?
+if [ "$status" -ne 0 ] || [ -s "$cfg/holders.err" ] || [ -e "$cfg/raw.prom" ] || [ -e "$cfg/raw.clean" ] ||
+	! RAW_OPEN=$raw_open RAW_CWD=$raw_cwd RAW_ROOT=$raw_root RAW_PID=$raw_pid LC_ALL=C awk '
+		BEGIN { RS = "\0" }
+		NR % 2 == 1 {
+			path = $0
+			if (prev != "" && path <= prev) bad++
+			prev = path
+			if (path == ENVIRON["RAW_ROOT"] "/closed" || path == ENVIRON["RAW_ROOT"] "/static" ||
+				index(path, ENVIRON["RAW_ROOT"] "/tmp") == 1) bad++
+			next
+		}
+		{
+			if ($0 !~ /^[0-9]+( [0-9]+)*$/) bad++
+			has_pid = (" " $0 " " ~ " " ENVIRON["RAW_PID"] " ")
+			if (path == ENVIRON["RAW_OPEN"] && has_pid) opened++
+			if (path == ENVIRON["RAW_CWD"] && has_pid) cwd++
+		}
+		END { exit !(NR >= 4 && NR % 2 == 0 && opened == 1 && cwd == 1 && !bad) }
+	' "$cfg/holders.out" ||
+	[ "$(tail -c 1 "$cfg/holders.out" | od -An -tu1 | tr -d ' ')" != 0 ]; then
+	echo 'FAIL: --print-holders0 must emit byte-sorted PATH\0PIDS\0 pairs with holder PID and no scratch paths'
+	fail=1
+fi
 for raw_file in "$raw_open" "$raw_root/closed" "$raw_root/static"; do
 	[ "$(cat "$raw_file")" = unchanged ] || { echo 'FAIL: raw inventory changed a fixture file'; fail=1; }
 done
 kill "$raw_pid"; wait "$raw_pid" 2>/dev/null || :
 rm -rf "$raw_root" "$cfg/raw-tmp"
-for extra in --dry-run --prefix=/tmp --exclude-prefix=/tmp --print-rules --print-in-use0 --help '' positional; do
-	status=0
-	TMPCLEANER_CONF=$cfg/missing.conf sh "$here/tmpcleaner" --print-in-use0 "$extra" > "$cfg/raw.out" 2> "$cfg/raw.err" || status=$?
-	if [ "$status" -ne 2 ] || [ -s "$cfg/raw.out" ] || ! grep -Fq 'accepts no other arguments' "$cfg/raw.err"; then
-		echo 'FAIL: raw inventory must reject extra arguments before reading configuration'
-		fail=1
-	fi
+for opt in --print-in-use0 --print-holders0; do
+	for extra in --dry-run --prefix=/tmp --exclude-prefix=/tmp --print-rules --print-in-use0 --print-holders0 --help '' positional; do
+		status=0
+		TMPCLEANER_CONF=$cfg/missing.conf sh "$here/tmpcleaner" "$opt" "$extra" > "$cfg/raw.out" 2> "$cfg/raw.err" || status=$?
+		if [ "$status" -ne 2 ] || [ -s "$cfg/raw.out" ] || ! grep -Fq 'accepts no other arguments' "$cfg/raw.err"; then
+			echo "FAIL: $opt must reject extra arguments before reading configuration"
+			fail=1
+		fi
+	done
 done
 for list in 0 2 yes "1${nl}"; do
 	status=0
