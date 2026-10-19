@@ -819,7 +819,9 @@ generate_rules() {
 		echo "${err_tag}tmpcleaner: cannot apply path protections; nothing was removed" >&2
 		exit "$errstatus"
 	}
-	if ! systemd-tmpfiles --clean - < "$scratch/keep-rules" 2> "$scratch/keep-errors"; then
+	# A prefix no keep rule can match: lines are parsed, but globs are not opened
+	# (an unreadable match would otherwise be reported as a parse error).
+	if ! systemd-tmpfiles --clean --prefix=/proc/tmpcleaner-parse-probe - < "$scratch/keep-rules" 2> "$scratch/keep-errors"; then
 		ERR_TAG=$err_tag LC_ALL=C awk '
 			NR == FNR { lines[NR] = $0; next }
 			match($0, /<stdin>:[0-9]+:/) {

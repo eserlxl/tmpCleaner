@@ -101,7 +101,7 @@ if [ "\$*" = --cat-config ]; then
 	cat "\$CAT_SHIM_OUT"
 	exit 0
 fi
-if [ "\$*" = "--clean -" ]; then
+if [ "\$*" = "--clean --prefix=/proc/tmpcleaner-parse-probe -" ] || [ "\$*" = "--clean -" ]; then
 	shim_in=\$(mktemp)
 	cat > "\$shim_in"
 	exec < "\$shim_in"
@@ -1695,6 +1695,23 @@ for dropin_mode in real dry check rules raw; do
 	fi
 done
 rm -rf "$dropin_root" "$cfg/conf.d" "$cfg/badkeep.conf" "$cfg/badkeep.conf.d" "$cfg/dropin.out" "$cfg/dropin.err" "$cfg/dropin.clean"
+# The keep-rule probe uses the real parser. A glob match it cannot open must not
+# be reported as a parse failure.
+unread_root=$(mktemp -d "$dir/unread-keep.XXXXXX")
+mkdir "$unread_root/private-abc"
+chmod 000 "$unread_root/private-abc"
+printf 'X %s/private-*\n' "$unread_root" > "$cfg/unread.cat"
+status=0
+CAT_SHIM_OUT=$cfg/unread.cat TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --print-rules \
+	> "$cfg/unread.out" 2> "$cfg/unread.err" || status=$?
+chmod 700 "$unread_root/private-abc"
+if [ "$status" -ne 0 ] ||
+	grep -Fq 'an exclusion rule failed to parse' "$cfg/unread.err" ||
+	! grep -Fxq "X $unread_root/private-*" "$cfg/unread.out"; then
+	echo 'FAIL: unreadable glob keep target must not fail a preview as a parse error'
+	fail=1
+fi
+rm -rf "$unread_root" "$cfg/unread.cat" "$cfg/unread.out" "$cfg/unread.err"
 # Nested mount roots cannot bypass the /tmp-only inode index or -xdev walk.
 cat > "$cfg/mount-roots.sh" <<'MOUNT_TEST'
 set -eu
