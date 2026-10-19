@@ -74,6 +74,7 @@ an optional unit: `us`, `ms`, `s`, `m`, `min`, `h`, `d`, or `w` (seconds when
 omitted). An empty or invalid value stops the run before cleaning; when unset,
 the configured ages apply. A rule whose quoted path holds spaces keeps its
 configured age, with a warning.
+`d` rules without an age (`-` or omitted) are left as they are.
 
 For the service, run `sudo systemctl edit tmpcleaner.service` and add:
 

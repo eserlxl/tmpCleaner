@@ -630,10 +630,16 @@ printf '%s\n' "$age_rules" | grep -Eq "^d $dir - - - amM:8h$" || {
 	echo "FAIL: age override should preserve age-by letters and set 8h"
 	fail=1
 }
+printf 'd %s/no-age - - - -\nd %s/omitted-age - - -\nd %s/aged - - - amM:6h\n' "$dir" "$dir" "$dir" > "$cfg/no-age.conf"
+age_rules=$(TMPCLEANER_AGE=8h TMPCLEANER_CONF=$cfg/no-age.conf sh "$here/tmpcleaner" --print-rules | grep '^d')
+expected=$(printf 'd %s/no-age - - - -\nd %s/omitted-age - - -\nd %s/aged - - - amM:8h' "$dir" "$dir" "$dir")
+[ "$age_rules" = "$expected" ] || {
+	echo "FAIL: age override should leave rules without an age unchanged"
+	fail=1
+}
 # Tabs and trailing whitespace must not leave the old age behind as an extra field.
-# The override sets the age field itself: a short rule gains it, and a
-# trailing argument field is left alone.
-for rule in "d $dir|d $dir - - - 8h" "d $dir - - - amM:6h -|d $dir - - - amM:8h -" \
+# The override sets an existing age field and leaves a trailing argument alone.
+for rule in "d $dir|d $dir" "d $dir - - - amM:6h -|d $dir - - - amM:8h -" \
 	"d $dir - - - ~amM:6h|d $dir - - - ~amM:8h" "d- $dir - - - amM:12h|d- $dir - - - amM:8h"; do
 	printf '%s\n' "${rule%%|*}" > "$cfg/short.conf"
 	got=$(TMPCLEANER_AGE=8h TMPCLEANER_CONF=$cfg/short.conf sh "$here/tmpcleaner" --print-rules | grep '^d')
