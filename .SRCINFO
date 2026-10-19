@@ -16,6 +16,6 @@ pkgbase = linux-tmpcleaner
 	conflicts = tmpcleaner
 	backup = etc/tmpcleaner/tmpcleaner.conf
 	source = linux-tmpcleaner-1.2.0.tar.gz::https://github.com/eserlxl/tmpCleaner/archive/refs/tags/v1.2.0.tar.gz
-	sha256sums = SKIP
+	sha256sums = 423613df3b4aa4a37e9224d2da969468d2b535e7448bbd12d43c1c4d60d53394
 
 pkgname = linux-tmpcleaner
