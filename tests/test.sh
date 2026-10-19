@@ -1807,6 +1807,24 @@ for tail in 'tmpfs rw' 'tmpfs   rw'; do
 		fail=1
 	fi
 done
+# nsfs and other namespace files report a root like net:[N], not a path.
+printf '%s\n' '1 2 0:1 / / rw - tmpfs tmpfs rw' \
+	'812 25 0:4 net:[4026532401] /run/netns/test rw,nosuid,nodev,noexec - nsfs nsfs rw' \
+	> "$cfg/mount.nsfs"
+if ! MOUNTINFO_SHIM_FILE=$cfg/mount.nsfs TMPCLEANER_CONF=$cfg/mount.conf \
+	sh "$here/tmpcleaner" --print-rules > "$cfg/mount.out" 2> "$cfg/mount.err" ||
+	! grep -Fq "d $dir - - - 12h" "$cfg/mount.out" || [ -s "$cfg/mount.err" ]; then
+	echo 'FAIL: nsfs mountinfo root net:[N] must be accepted'
+	fail=1
+fi
+printf '1 2 0:1 relative /tmp rw - tmpfs tmpfs rw\n' > "$cfg/mount.relative"
+status=0
+MOUNTINFO_SHIM_FILE=$cfg/mount.relative TMPCLEANER_CONF=$cfg/mount.conf \
+	sh "$here/tmpcleaner" --print-rules > "$cfg/mount.out" 2> "$cfg/mount.err" || status=$?
+if [ "$status" -ne 1 ] || [ -s "$cfg/mount.out" ] || ! grep -Fq 'invalid mountinfo:' "$cfg/mount.err"; then
+	echo 'FAIL: relative mountinfo root must fail closed'
+	fail=1
+fi
 rm -rf "$dir/mount-roots"
 mkdir "$dir/heldparent"
 ln "$dir/open a%b.txt" "$dir/heldparent/open a%b.txt"
