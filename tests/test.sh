@@ -751,6 +751,16 @@ shim env TMPCLEANER_FULL_PERCENT=90 TMPCLEANER_FULL_AGE=30m TMPCLEANER_CONF="$co
 	echo "FAIL: --dry-run should report below-threshold usage"
 	fail=1
 }
+shim env TMPCLEANER_FULL_PERCENT=90 TMPCLEANER_FULL_AGE=30m TMPCLEANER_CONF="$conf" sh "$here/tmpcleaner" --print-in-use0 2>&1 >/dev/null |
+	grep -Fxq 'tmpcleaner: /tmp is 50% full (blocks 50%, inodes 0%), below 90%; keeping the configured age' || {
+	echo "FAIL: --print-in-use0 should report below-threshold usage"
+	fail=1
+}
+{ shim env TMPCLEANER_FULL_PERCENT=90 TMPCLEANER_FULL_AGE=30m TMPCLEANER_CONF="$conf" sh "$here/tmpcleaner" --check "$dir/old.txt" 2>&1 >/dev/null || :; } |
+	grep -Fxq 'tmpcleaner: /tmp is 50% full (blocks 50%, inodes 0%), below 90%; keeping the configured age' || {
+	echo "FAIL: --check should report below-threshold usage"
+	fail=1
+}
 lowscratch=$(mktemp -d /tmp/tmpcleaner-low.XXXXXX)
 sed "s#$dir#$lowscratch#" "$conf" > "$cfg/low.conf"
 low_err=$(shim env TMPCLEANER_METRICS=$cfg/pressure.prom TMPCLEANER_FULL_PERCENT=90 TMPCLEANER_FULL_AGE=30m TMPCLEANER_CONF="$cfg/low.conf" sh "$here/tmpcleaner" 2>&1 >/dev/null)
