@@ -28,6 +28,9 @@ Options:
                    Print candidate x exclusion rules for top-level /tmp entries
                    the next run would clean and exit
                    Standalone option; accepts no other arguments
+  --suggest-tmpfiles-override
+                   Print an unaged /tmp rule for /etc/tmpfiles.d/00-tmp.conf
+                   Standalone option; accepts no other arguments
   --check PATH     Report whether an existing absolute /tmp path would be removed
                    Accepts trailing --exclude-prefix=PATH filters
                    Exit 0 if removed, 1 if kept (only), 2 for an error (invalid
@@ -82,7 +85,7 @@ if [ "${1:-}" != --check ] && [ "${1:-}" != --check0 ]; then
 		case "$arg" in
 			--dry-run|--prefix=?*|--exclude-prefix=/*) ;;
 			--print-rules) [ "$arg" = "$1" ] || { echo "${err_tag}tmpcleaner: unsupported argument: $arg" >&2; exit 2; } ;;
-			--print-in-use0|--print-holders0|--suggest-exclusions) [ "$#" -eq 1 ] || { echo "${err_tag}tmpcleaner: $arg accepts no other arguments" >&2; exit 2; } ;;
+			--print-in-use0|--print-holders0|--suggest-exclusions|--suggest-tmpfiles-override) [ "$#" -eq 1 ] || { echo "${err_tag}tmpcleaner: $arg accepts no other arguments" >&2; exit 2; } ;;
 			*) echo "${err_tag}tmpcleaner: unsupported argument: $arg" >&2; exit 2 ;;
 		esac
 	done
@@ -168,7 +171,7 @@ case "${TMPCLEANER_METRICS:-}" in
 esac
 previewing=0
 case "${1:-}" in
-	--print-rules|--print-in-use0|--print-holders0|--suggest-exclusions|--check|--check0) previewing=1 ;;
+	--print-rules|--print-in-use0|--print-holders0|--suggest-exclusions|--suggest-tmpfiles-override|--check|--check0) previewing=1 ;;
 	*)
 		for arg do
 			[ "$arg" = --dry-run ] && previewing=1
@@ -312,6 +315,37 @@ if [ -n "$check0" ]; then
 		check0_read=1
 	done < "$scratch/check0-paths"
 	[ "$check0_read" = 1 ] || { echo "${err_tag}tmpcleaner: --check0 requires at least one path on stdin" >&2; exit 2; }
+fi
+
+tmp_age_rule() {
+	LC_ALL=C awk '
+		# The first line for /tmp wins; later duplicates are ignored by systemd-tmpfiles.
+		$1 ~ /^[dDeqQvV][-!=~^+]*$/ {
+			if ($2 ~ /^"[^"]*"$/ || $2 ~ /^\047[^\047]*\047$/) path = substr($2, 2, length($2) - 2)
+			else if ($2 !~ /["\047]/) path = $2
+			else next
+			sub(/\/+$/, "", path)
+			if (path == "/tmp") {
+				if (NF >= 6 && $6 != "-") print
+				exit
+			}
+		}
+	' "$1"
+}
+
+if [ "${1:-}" = --suggest-tmpfiles-override ]; then
+	systemd-tmpfiles --cat-config > "$scratch/cat" || exit 1
+	rule=$(tmp_age_rule "$scratch/cat") || exit 1
+	if [ -n "$rule" ]; then
+		printf '%s\n' "$rule" | LC_ALL=C awk '{
+			print "# tmpcleaner: shadows \"" $0 "\""
+			$6 = "-"
+			print
+		}'
+	else
+		echo "${warn_tag}tmpcleaner: /tmp has no age in tmpfiles.d; no override needed" >&2
+	fi
+	exit 0
 fi
 
 dropins() {
@@ -1031,23 +1065,13 @@ function print_top(i, best, g, shown) {
 }'
 if [ "${1:-}" = --suggest-exclusions ]; then
 	generate_rules
-	WARN_TAG=$warn_tag LC_ALL=C awk '
-		# The first line for /tmp wins; later duplicates are ignored by systemd-tmpfiles.
-		$1 ~ /^[dDeqQvV][-!=~^+]*$/ {
-			if ($2 ~ /^"[^"]*"$/ || $2 ~ /^\047[^\047]*\047$/) path = substr($2, 2, length($2) - 2)
-			else if ($2 !~ /["\047]/) path = $2
-			else next
-			sub(/\/+$/, "", path)
-			if (path == "/tmp") {
-				if (NF >= 6 && $6 != "-") {
-					warn_tag = ENVIRON["WARN_TAG"]
-					print warn_tag "tmpcleaner: systemd-tmpfiles-clean.timer still removes /tmp entries older than " $6 ", kept paths included: " $0 > "/dev/stderr"
-					print warn_tag "tmpcleaner: see \"Scope\" in what-gets-deleted.md to make tmpcleaner the only /tmp cleaner" > "/dev/stderr"
-				}
-				exit
-			}
+	tmp_age_rule "$scratch/cat" | WARN_TAG=$warn_tag LC_ALL=C awk '
+		{
+			warn_tag = ENVIRON["WARN_TAG"]
+			print warn_tag "tmpcleaner: systemd-tmpfiles-clean.timer still removes /tmp entries older than " $6 ", kept paths included: " $0 > "/dev/stderr"
+			print warn_tag "tmpcleaner: run tmpcleaner --suggest-tmpfiles-override to make tmpcleaner the only /tmp cleaner" > "/dev/stderr"
 		}
-	' "$scratch/cat" || :
+	' || :
 	status=0
 	preview=$(SYSTEMD_LOG_LEVEL=info SYSTEMD_LOG_TARGET=console SYSTEMD_LOG_COLOR=0 \
 		SYSTEMD_LOG_LOCATION=0 SYSTEMD_LOG_TIME=0 SYSTEMD_LOG_TID=0 \

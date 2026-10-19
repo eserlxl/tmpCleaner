@@ -82,16 +82,16 @@ change it; see [configuration.md](configuration.md).
   rules and ignores tmpCleaner's exclusions and in-use protection.
   `tmpcleaner.conf` is not in a `tmpfiles.d` directory, so its rules apply only
   to tmpCleaner's runs. To keep paths longer than the distribution's `/tmp`
-  age, create `/etc/tmpfiles.d/00-tmp.conf` holding the distribution's `/tmp`
-  line (see `systemd-tmpfiles --cat-config | grep ' /tmp '`) with the age
-  replaced by `-`:
+  age, create `/etc/tmpfiles.d/00-tmp.conf` from the distribution's winning
+  `/tmp` line with the age replaced by `-`, running as root:
 
-  ```text
-  q /tmp 1777 root root -
+  ```sh
+  sudo tmpcleaner --suggest-tmpfiles-override | sudo tee -a /etc/tmpfiles.d/00-tmp.conf
   ```
 
   It wins because `00-tmp.conf` sorts before `tmp.conf`; `/tmp` then ages only
-  while `tmpcleaner.timer` runs.
+  while `tmpcleaner.timer` runs. The pipeline appends: once the override is in
+  place a re-run prints nothing, and appending keeps the file intact.
 
 ## How to keep something
 
