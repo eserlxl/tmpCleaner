@@ -302,9 +302,12 @@ if [ -n "$check0" ]; then
 		}
 	' "$scratch/check0-in" || exit 2
 	tr '\0' '\n' < "$scratch/check0-in" > "$scratch/check0-paths" || exit 2
+	check0_read=0
 	while IFS= read -r requested || [ -n "$requested" ]; do
 		canonicalize_check
+		check0_read=1
 	done < "$scratch/check0-paths"
+	[ "$check0_read" = 1 ] || { echo "${err_tag}tmpcleaner: --check0 requires at least one path on stdin" >&2; exit 2; }
 fi
 
 dropins() {

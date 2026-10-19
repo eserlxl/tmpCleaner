@@ -1180,6 +1180,14 @@ for bad_check0 in "$dir/missing" relative "$newline"; do
 		fail=1
 	fi
 done
+status=0
+printf '' | TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --check0 \
+	> "$cfg/check0.out" 2> "$cfg/check0.err" || status=$?
+if [ "$status" -ne 2 ] || [ -s "$cfg/check0.out" ] ||
+	[ "$(cat "$cfg/check0.err")" != 'tmpcleaner: --check0 requires at least one path on stdin' ]; then
+	echo "FAIL: --check0 should exit 2 with empty stdout on empty stdin"
+	fail=1
+fi
 ctrl_missing=$(printf '%s/missing-\033]0;pwned\007\177x' "$dir")
 ctrl_missing_expected="tmpcleaner: --check path does not exist: $dir/missing-?]0;pwned??x"
 for ctrl_mode in check0 check; do

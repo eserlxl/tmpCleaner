@@ -37,8 +37,9 @@ with the same rules as `--check` (any invalid path exits 2 naming it, before any
 verdict is printed), runs rule generation and the dry-run preview once, and
 prints `removed\0PATH\0` or `kept\0PATH\0` per input path in input order with
 `PATH` exactly as given. Kept reasons are not printed (use `--check` for one
-path's reason). It exits 0 when every path would be removed, 1 when at least one
-is kept, and 2 on any error.
+path's reason). It requires at least one path on standard input; an empty list
+exits 2 before configuration is read. It exits 0 when every path would be removed,
+1 when at least one is kept, and 2 on any error.
 
 Checks also exit 2 when any retained cleanup root uses a noncanonical spelling:
 `.` or `..` components, duplicate or trailing slashes, or a symlink alias.
