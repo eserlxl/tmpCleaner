@@ -1149,6 +1149,36 @@ for exclusion_case in exact ancestor descendant multiple symlink dotdot unrelate
 		fail=1
 	fi
 done
+status=0
+printf '%s\0' "$dir/old.txt" "$dir/open a%b.txt" "$dir/olddir/f" |
+	TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --check0 "--exclude-prefix=$dir/olddir/f" \
+	> "$cfg/check0.out" 2> "$cfg/check0.err" || status=$?
+printf 'removed\0%s\0kept\0%s\0kept\0%s\0' "$dir/old.txt" "$dir/open a%b.txt" "$dir/olddir/f" > "$cfg/check0.expected"
+if [ "$status" -ne 1 ] || ! cmp -s "$cfg/check0.expected" "$cfg/check0.out" || [ -s "$cfg/check0.err" ] ||
+	[ ! -e "$dir/old.txt" ] || [ ! -e "$dir/open a%b.txt" ] || [ ! -e "$dir/olddir/f" ]; then
+	echo "FAIL: --check0 should emit removed/kept records in input order and exit 1 when any path is kept"
+	fail=1
+fi
+status=0
+printf '%s\0' "$dir/old.txt" "$dir/olddir/f" |
+	TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --check0 \
+	> "$cfg/check0.out" 2> "$cfg/check0.err" || status=$?
+printf 'removed\0%s\0removed\0%s\0' "$dir/old.txt" "$dir/olddir/f" > "$cfg/check0.expected"
+if [ "$status" -ne 0 ] || ! cmp -s "$cfg/check0.expected" "$cfg/check0.out" || [ -s "$cfg/check0.err" ]; then
+	echo "FAIL: --check0 should exit 0 when all paths would be removed"
+	fail=1
+fi
+for bad_check0 in "$dir/missing" relative "$newline"; do
+	status=0
+	printf '%s\0' "$dir/old.txt" "$bad_check0" |
+		TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --check0 \
+		> "$cfg/check0.out" 2> "$cfg/check0.err" || status=$?
+	if [ "$status" -ne 2 ] || [ -s "$cfg/check0.out" ] || ! grep -Fq "$bad_check0" "$cfg/check0.err"; then
+		echo "FAIL: --check0 should exit 2 with empty stdout and name invalid path ($bad_check0)"
+		fail=1
+	fi
+done
+rm -f "$cfg/check0.out" "$cfg/check0.err" "$cfg/check0.expected"
 for arg in --prefix=/tmp --dry-run --remove --help --exclude-prefix --exclude-prefix= --exclude-prefix=relative extra; do
 	status=0
 	check_err=$(TMPCLEANER_CONF=$dir/missing.conf sh "$here/tmpcleaner" --check "$dir/old.txt" \

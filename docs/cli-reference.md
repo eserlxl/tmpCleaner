@@ -9,6 +9,7 @@ Every `tmpcleaner` option, what `--check` reports, and its exit statuses.
 - `--print-in-use0`: Export unique in-use `/tmp` paths, byte-sorted in the C locale and terminated by NUL, preserving filename bytes. This standalone option rejects every extra argument (exit 2).
 - `--print-holders0`: Export unique in-use `/tmp` paths with known holder PIDs as NUL-separated `PATH\0PIDS\0` pairs (where `PIDS` is space-separated), byte-sorted by path in the C locale. This standalone option rejects every extra argument (exit 2).
 - `--check PATH`: Report whether an existing absolute `/tmp` path would be removed without deleting anything (`sudo tmpcleaner --check /tmp/my-job/file`).
+- `--check0`: Judge NUL-terminated `/tmp` paths from standard input in one scan and print `removed\0PATH\0` or `kept\0PATH\0` records without deleting anything (`find /tmp/my-job -print0 | sudo tmpcleaner --check0`).
 - `--dry-run`, `--prefix=PATH`, `--exclude-prefix=PATH`: `--dry-run` previews what would be removed without deleting and prints a summary (`tmpcleaner: would remove N files and M directories`, followed by up to 10 top-level `/tmp` entries ordered by descending count then name as `tmpcleaner:   <count> under <path>`, with control bytes in `<path>` printed as `?`) to stderr; `--prefix=PATH` only applies rules with that prefix (passed to `systemd-tmpfiles`); `--exclude-prefix=PATH` (absolute path, `=` form only; parent directories are canonicalized so `..` components and symlinked parents still match) keeps PATH and everything below it, in addition to the in-use protection, and never lets a path that is in use be removed (`sudo tmpcleaner --dry-run --exclude-prefix=/tmp/my-job`); any other argument (for example `--remove`, `--create`, `--purge`, `--boot`, `--root=...`, `--replace=...`, or a positional config file) exits 2 before any config is read or anything is cleaned.
 
 `--check PATH` requires an existing absolute path under `/tmp`. It prints
@@ -31,13 +32,21 @@ never a false "kept"; paths containing newlines (LF) or carriage returns (CR),
 directories holding such names, and paths whose directories cannot be read
 cannot be judged and exit 2.
 
+`--check0` reads NUL-terminated paths from standard input, validates every one
+with the same rules as `--check` (any invalid path exits 2 naming it, before any
+verdict is printed), runs rule generation and the dry-run preview once, and
+prints `removed\0PATH\0` or `kept\0PATH\0` per input path in input order with
+`PATH` exactly as given. Kept reasons are not printed (use `--check` for one
+path's reason). It exits 0 when every path would be removed, 1 when at least one
+is kept, and 2 on any error.
+
 Checks also exit 2 when any retained cleanup root uses a noncanonical spelling:
 `.` or `..` components, duplicate or trailing slashes, or a symlink alias.
 Use canonical configured roots for reliable preview matching. Roots removed by
 in-use protection or `--exclude-prefix` filtering do not block a check. Other
 modes continue to accept these spellings under the usual safety rules.
 
-Append repeated `--exclude-prefix=PATH` options to check a path with the same
+Append repeated `--exclude-prefix=PATH` options to `--check` or `--check0` to check paths with the same
 temporary exclusions as a real run, for example
 `sudo tmpcleaner --check /tmp/my-job/file --exclude-prefix=/tmp/my-job`.
 Exclusions use the same canonicalized, literal paths as other modes. Actual

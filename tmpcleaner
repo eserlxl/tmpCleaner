@@ -30,6 +30,10 @@ Options:
                    path or usage, unreadable config, invalid TMPCLEANER_* value,
                    missing /proc, a failed in-use scan, or a systemd-tmpfiles
                    failure other than 73)
+  --check0         Judge NUL-separated /tmp paths from stdin in one scan and
+                   print removed\0PATH\0 or kept\0PATH\0 records
+                   Accepts trailing --exclude-prefix=PATH filters
+                   Exit 0 if all removed, 1 if any kept, 2 for an error
 
 Passed through to systemd-tmpfiles (any other argument is rejected with exit 2):
   --dry-run                Preview what would be removed without deleting
@@ -69,7 +73,7 @@ if [ -n "${JOURNAL_STREAM:-}" ] &&
 	warn_tag='<4>'
 fi
 
-if [ "${1:-}" != --check ]; then
+if [ "${1:-}" != --check ] && [ "${1:-}" != --check0 ]; then
 	for arg do
 		case "$arg" in
 			--dry-run|--prefix=?*|--exclude-prefix=/*) ;;
@@ -84,26 +88,15 @@ nl='
 '
 errstatus=1
 check=
+check0=
 holders_file=
 export_holders=
 [ "${1:-}" != --print-holders0 ] || export_holders=1
-if [ "${1:-}" = --check ]; then
-	errstatus=2
-	cr=$(printf '\r')
-	[ "$#" -ge 2 ] || { echo "${err_tag}tmpcleaner: --check requires one absolute path under /tmp" >&2; exit 2; }
-	requested=$2
-	shift 2
-	for arg do
-		case "$arg" in
-			--exclude-prefix=/*) ;;
-			*) echo "${err_tag}tmpcleaner: unsupported argument: $arg" >&2; exit 2 ;;
-		esac
-	done
+canonicalize_check() {
 	case "$requested" in
 		/tmp/*) ;;
-		*) echo "${err_tag}tmpcleaner: --check requires an absolute path under /tmp" >&2; exit 2 ;;
+		*) echo "${err_tag}tmpcleaner: --check requires an absolute path under /tmp${check0:+: $requested}" >&2; exit 2 ;;
 	esac
-	# The sentinel keeps trailing newlines that command substitution would strip.
 	# Resolve symlinked parent directories (the preview prints real paths) but
 	# keep the last component itself, which systemd-tmpfiles handles as is.
 	# The sentinel keeps trailing newlines that command substitution would strip.
@@ -126,12 +119,37 @@ if [ "${1:-}" = --check ]; then
 		exit 2
 	}
 	case "$check" in
-		*"$nl"*|*"$cr"*) echo "${err_tag}tmpcleaner: --check cannot match a path that contains a newline or carriage return" >&2; exit 2 ;;
+		*"$nl"*|*"$cr"*) echo "${err_tag}tmpcleaner: --check cannot match a path that contains a newline or carriage return${check0:+: $requested}" >&2; exit 2 ;;
 	esac
 	case "$check" in
 		/tmp/*) ;;
 		*) echo "${err_tag}tmpcleaner: --check path must be under /tmp: $requested" >&2; exit 2 ;;
 	esac
+}
+if [ "${1:-}" = --check ]; then
+	errstatus=2
+	cr=$(printf '\r')
+	[ "$#" -ge 2 ] || { echo "${err_tag}tmpcleaner: --check requires one absolute path under /tmp" >&2; exit 2; }
+	requested=$2
+	shift 2
+	for arg do
+		case "$arg" in
+			--exclude-prefix=/*) ;;
+			*) echo "${err_tag}tmpcleaner: unsupported argument: $arg" >&2; exit 2 ;;
+		esac
+	done
+	canonicalize_check
+elif [ "${1:-}" = --check0 ]; then
+	errstatus=2
+	cr=$(printf '\r')
+	check0=1
+	shift
+	for arg do
+		case "$arg" in
+			--exclude-prefix=/*) ;;
+			*) echo "${err_tag}tmpcleaner: unsupported argument: $arg" >&2; exit 2 ;;
+		esac
+	done
 fi
 
 case "${TMPCLEANER_METRICS:-}" in
@@ -145,14 +163,14 @@ case "${TMPCLEANER_METRICS:-}" in
 esac
 previewing=0
 case "${1:-}" in
-	--print-rules|--print-in-use0|--print-holders0|--check) previewing=1 ;;
+	--print-rules|--print-in-use0|--print-holders0|--check|--check0) previewing=1 ;;
 	*)
 		for arg do
 			[ "$arg" = --dry-run ] && previewing=1
 		done
 		;;
 esac
-[ -z "$check" ] || previewing=1
+[ -z "$check$check0" ] || previewing=1
 write_metrics() {
 	mtmp=
 	metric_duration=$(START=$metric_started LC_ALL=C awk '
@@ -270,6 +288,20 @@ if [ "$#" -gt 0 ]; then
 			*) set -- "$@" "$arg" ;;
 		esac
 	done
+fi
+if [ -n "$check0" ]; then
+	cat > "$scratch/check0-in" || exit 2
+	ERR_TAG=$err_tag LC_ALL=C awk '
+		BEGIN { RS = "\0" }
+		/\n/ {
+			print ENVIRON["ERR_TAG"] "tmpcleaner: --check cannot match a path that contains a newline or carriage return: " $0 > "/dev/stderr"
+			exit 1
+		}
+	' "$scratch/check0-in" || exit 2
+	tr '\0' '\n' < "$scratch/check0-in" > "$scratch/check0-paths" || exit 2
+	while IFS= read -r requested || [ -n "$requested" ]; do
+		canonicalize_check
+	done < "$scratch/check0-paths"
 fi
 
 dropins() {
@@ -655,7 +687,7 @@ generate_rules() {
 		exit "$errstatus"
 	}
 	# An x rule cannot protect a root that another rule cleans directly.
-	CHECKING=$check PROTECTED=$scratch/sorted ERR_TAG=$err_tag LC_ALL=C awk '
+	CHECKING=$check$check0 PROTECTED=$scratch/sorted ERR_TAG=$err_tag LC_ALL=C awk '
 		function quote(s, parts, n, i, word) {
 			n = split(s, parts, "\047")
 			word = "\047" parts[1]
@@ -793,19 +825,7 @@ if [ "${1:-}" = --print-rules ]; then
 	exit 0
 fi
 
-if [ -n "$check" ]; then
-	generate_rules
-	# 73: an unprivileged check cannot open root-only directories; the rest is valid.
-	status=0
-	# The parser reads info-level lines verbatim: a caller's log level, target
-	# or line prefixes would hide them and turn every answer into "kept".
-	preview=$(SYSTEMD_LOG_LEVEL=info SYSTEMD_LOG_TARGET=console SYSTEMD_LOG_COLOR=0 \
-		SYSTEMD_LOG_LOCATION=0 SYSTEMD_LOG_TIME=0 SYSTEMD_LOG_TID=0 \
-		systemd-tmpfiles --clean --dry-run - < "$scratch/rules" 2>&1) || status=$?
-	if [ "$status" -ne 0 ] && [ "$status" -ne 73 ]; then
-		printf '%s\n' "$preview" >&2
-		exit "$errstatus"
-	fi
+judge_check() {
 	# A directory goes only if everything beneath it goes too: the preview
 	# announces old directories even when a kept entry will block the rmdir.
 	# Preview lines are text a crafted name can forge, so errors may only lean
@@ -821,7 +841,7 @@ if [ -n "$check" ]; then
 	entries=0
 	if [ -d "$check" ] && [ ! -L "$check" ]; then
 		if [ -n "$(find "$check" -mindepth 1 \( -name "*$nl*" -o -name "*$cr*" \) -print -quit 2>/dev/null)" ]; then
-			echo "${err_tag}tmpcleaner: --check cannot judge a directory holding names with newlines or carriage returns" >&2
+			echo "${err_tag}tmpcleaner: --check cannot judge a directory holding names with newlines or carriage returns${check0:+: $requested}" >&2
 			exit 2
 		fi
 		entries=$(find "$check" -mindepth 1 -printf . 2>/dev/null) || {
@@ -830,11 +850,6 @@ if [ -n "$check" ]; then
 		}
 		entries=${#entries}
 	fi
-	# A failed write is an error, not a verdict: only awk's 0 and 1 may answer.
-	printf '%s\n' "$preview" > "$scratch/preview" || {
-		echo "${err_tag}tmpcleaner: cannot write the --check scratch file" >&2
-		exit "$errstatus"
-	}
 	verdict=0
 	CHECK=$check ENTRIES=$entries LC_ALL=C awk '
 		BEGIN {
@@ -847,6 +862,45 @@ if [ -n "$check" ]; then
 		/"$/ && (index($0, "Would remove \"" path "/") == 1 || index($0, "Would remove directory \"" path "/") == 1) { inside++ }
 		END { exit !(found_file || (found_directory && inside >= ENVIRON["ENTRIES"] + 0)) }
 		' "$scratch/preview" || verdict=$?
+}
+
+if [ -n "$check$check0" ]; then
+	generate_rules
+	# 73: an unprivileged check cannot open root-only directories; the rest is valid.
+	status=0
+	# The parser reads info-level lines verbatim: a caller's log level, target
+	# or line prefixes would hide them and turn every answer into "kept".
+	preview=$(SYSTEMD_LOG_LEVEL=info SYSTEMD_LOG_TARGET=console SYSTEMD_LOG_COLOR=0 \
+		SYSTEMD_LOG_LOCATION=0 SYSTEMD_LOG_TIME=0 SYSTEMD_LOG_TID=0 \
+		systemd-tmpfiles --clean --dry-run - < "$scratch/rules" 2>&1) || status=$?
+	if [ "$status" -ne 0 ] && [ "$status" -ne 73 ]; then
+		printf '%s\n' "$preview" >&2
+		exit "$errstatus"
+	fi
+	# A failed write is an error, not a verdict: only awk's 0 and 1 may answer.
+	printf '%s\n' "$preview" > "$scratch/preview" || {
+		echo "${err_tag}tmpcleaner: cannot write the --check scratch file" >&2
+		exit "$errstatus"
+	}
+	if [ -n "$check0" ]; then
+		: > "$scratch/verdicts"
+		any_kept=0
+		while IFS= read -r requested || [ -n "$requested" ]; do
+			canonicalize_check
+			judge_check
+			case "$verdict" in
+				0) printf 'removed\0%s\0' "$requested" >> "$scratch/verdicts" ;;
+				1)
+					printf 'kept\0%s\0' "$requested" >> "$scratch/verdicts"
+					any_kept=1
+					;;
+				*) exit 2 ;;
+			esac
+		done < "$scratch/check0-paths"
+		cat "$scratch/verdicts"
+		exit "$any_kept"
+	fi
+	judge_check
 	# The checked name may come from /tmp too: mask control bytes like the reasons.
 	shown=$(printf '%s' "$requested" | LC_ALL=C tr '\001-\037\177' '[?*]')
 	case "$verdict" in
