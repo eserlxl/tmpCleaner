@@ -38,7 +38,8 @@ Every option is in the [command-line reference](docs/cli-reference.md).
 On Arch Linux, install the [`linux-tmpcleaner`](https://aur.archlinux.org/packages/linux-tmpcleaner)
 AUR package (`yay -S linux-tmpcleaner` or `paru -S linux-tmpcleaner`). The
 timer is **not** enabled automatically: preview with `sudo tmpcleaner --dry-run`,
-add exclusions if needed, then enable it as in the quick start.
+keep what you need with `--suggest-exclusions`, then enable it as in the quick
+start.
 
 From a checkout, save a preview to `preview.txt`, then install; `make install`
 **enables the timer at once**:
@@ -53,7 +54,8 @@ the installed configuration with `sudo /usr/local/bin/tmpcleaner --dry-run`,
 then run `sudo systemctl enable --now tmpcleaner.timer` when ready.
 Value `0` does not stop an already running timer; the default remains `1`.
 
-Linux with systemd >= 249 (>= 256 for `--dry-run` and `--check`) and GNU
+Linux with systemd >= 249 (>= 256 for the previews: `--dry-run`, `--check`,
+`--check0` and `--suggest-exclusions`) and GNU
 coreutils >= 8.32 are required. Requirements, Makefile variables, migrating
 from a source install to the package, and uninstalling are in
 [docs/installation.md](docs/installation.md).
@@ -90,11 +92,19 @@ for anything that must survive even while no program uses it:
 x /tmp/my-long-job-*
 ```
 
+`sudo tmpcleaner --suggest-exclusions` prints ready-to-paste `x` rules for
+everything the next run would remove, as in the quick start.
 A `*.conf` file in `/etc/tmpcleaner/tmpcleaner.conf.d/` works the same and
 survives package upgrades (see [docs/configuration.md](docs/configuration.md)).
 Without root, a job can instead create a regular `.tmpcleaner-keep` file in its
-`/tmp/<dir>` or `/tmp/<dir>/<subdir>` directory and remove it when done (read by
-tmpCleaner only, not by the distribution's own cleaner).
+`/tmp/<dir>` or `/tmp/<dir>/<subdir>` directory and remove it when done.
+
+> [!WARNING]
+> Exclusions, `.tmpcleaner-keep` markers and in-use protection apply only to
+> tmpCleaner's runs. The distribution's own `systemd-tmpfiles-clean.timer` still
+> removes `/tmp` entries older than its own age (10 days on Arch), kept ones
+> included. `/tmp` is not long-term storage: keep data that must last longer
+> elsewhere.
 
 Age overrides, the opt-in pressure mode (a shorter age when `/tmp` is nearly
 full, which applies to **every unprotected file**), and the other service
