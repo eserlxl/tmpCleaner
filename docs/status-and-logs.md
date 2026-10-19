@@ -5,6 +5,7 @@ Timer status, the per-run summary, Prometheus metrics, scratch space, and the ru
 ```sh
 systemctl list-timers tmpcleaner.timer
 journalctl -u tmpcleaner.service
+journalctl -p warning -u tmpcleaner.service
 ```
 
 Each real run logs one summary, including runs that remove nothing:
@@ -23,8 +24,11 @@ another program deletes in that second is counted too. The line counts
 disappearances, so it is not proof that tmpcleaner deleted a given path.
 Cleanup roots must follow the
 [literal path grammar](cli-reference.md); unsupported encoded or ambiguous
-roots stop the run before cleaning. `systemd-tmpfiles` itself logs to
-the journal as usual, so warnings keep their severity.
+roots stop the run before cleaning. When `JOURNAL_STREAM` matches stderr,
+`tmpcleaner` prefixes its own warnings with `<4>` and errors with `<3>` so
+`journalctl -p warning -u tmpcleaner.service` shows only warnings and errors;
+`systemd-tmpfiles` itself logs to the journal as usual, so warnings keep their
+severity.
 
 `TMPCLEANER_LIST=1` adds escaped path records on stderr. `TMPCLEANER_LIST=nul`
 instead exports each path observed to disappear once as raw bytes plus NUL on

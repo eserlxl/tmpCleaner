@@ -4,7 +4,7 @@
 # cannot be backdated, so the test drops b/B/c/C from the age-by field and
 # keeps the rest as configured.
 set -eu
-unset TMPCLEANER_AGE TMPCLEANER_FULL_PERCENT TMPCLEANER_FULL_AGE TMPCLEANER_LIST TMPCLEANER_METRICS
+unset TMPCLEANER_AGE TMPCLEANER_FULL_PERCENT TMPCLEANER_FULL_AGE TMPCLEANER_LIST TMPCLEANER_METRICS JOURNAL_STREAM
 here=$(cd "$(dirname "$0")/.." && pwd)
 dir=$(mktemp -d /tmp/tmpcleaner-test.XXXXXX)
 # Fixture configs live in a private directory, never at a guessable /tmp path.
@@ -856,6 +856,39 @@ age_only=$(shim env TMPCLEANER_FULL_AGE=30m TMPCLEANER_CONF=$conf sh "$here/tmpc
 	fail=1
 }
 rm -f "$cfg/percent_only.err" "$cfg/age_only.err"
+: > "$cfg/journal.err"
+: > "$cfg/journal.other"
+journal_stream=$(stat -L -c '%d:%i' "$cfg/journal.err")
+journal_other=$(stat -L -c '%d:%i' "$cfg/journal.other")
+status=0
+JOURNAL_STREAM=$journal_stream TMPCLEANER_LIST=bogus TMPCLEANER_CONF=$conf \
+	sh "$here/tmpcleaner" --print-rules >/dev/null 2>"$cfg/journal.err" || status=$?
+if [ "$status" -ne 1 ] ||
+	[ "$(cat "$cfg/journal.err")" != '<3>tmpcleaner: invalid TMPCLEANER_LIST (expected 1, top, nul or empty)' ]; then
+	echo "FAIL: JOURNAL_STREAM matching stderr should prefix errors with <3>"
+	fail=1
+fi
+JOURNAL_STREAM=$journal_stream shim env TMPCLEANER_FULL_PERCENT=1 TMPCLEANER_CONF=$conf \
+	sh "$here/tmpcleaner" --print-rules >/dev/null 2>"$cfg/journal.err"
+if [ "$(cat "$cfg/journal.err")" != '<4>tmpcleaner: pressure mode needs both TMPCLEANER_FULL_PERCENT and TMPCLEANER_FULL_AGE; ignoring TMPCLEANER_FULL_PERCENT' ]; then
+	echo "FAIL: JOURNAL_STREAM matching stderr should prefix warnings with <4>"
+	fail=1
+fi
+status=0
+JOURNAL_STREAM=$journal_other TMPCLEANER_LIST=bogus TMPCLEANER_CONF=$conf \
+	sh "$here/tmpcleaner" --print-rules >/dev/null 2>"$cfg/journal.err" || status=$?
+if [ "$status" -ne 1 ] ||
+	[ "$(cat "$cfg/journal.err")" != 'tmpcleaner: invalid TMPCLEANER_LIST (expected 1, top, nul or empty)' ]; then
+	echo "FAIL: JOURNAL_STREAM naming another file should not prefix errors"
+	fail=1
+fi
+JOURNAL_STREAM=$journal_other shim env TMPCLEANER_FULL_PERCENT=1 TMPCLEANER_CONF=$conf \
+	sh "$here/tmpcleaner" --print-rules >/dev/null 2>"$cfg/journal.err"
+if [ "$(cat "$cfg/journal.err")" != 'tmpcleaner: pressure mode needs both TMPCLEANER_FULL_PERCENT and TMPCLEANER_FULL_AGE; ignoring TMPCLEANER_FULL_PERCENT' ]; then
+	echo "FAIL: JOURNAL_STREAM naming another file should not prefix warnings"
+	fail=1
+fi
+rm -f "$cfg/journal.err" "$cfg/journal.other"
 for partial_rules in "$percent_only" "$age_only"; do
 	[ "$(printf '%s\n' "$partial_rules" | grep '^d ')" = "$configured_age" ] || {
 		echo "FAIL: pressure mode needs both variables to change the age"

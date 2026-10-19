@@ -61,13 +61,21 @@ EOF
 		;;
 esac
 
+err_tag=
+warn_tag=
+if [ -n "${JOURNAL_STREAM:-}" ] &&
+	[ "$JOURNAL_STREAM" = "$(stat -L -c '%d:%i' "/proc/$$/fd/2" 2>/dev/null)" ]; then
+	err_tag='<3>'
+	warn_tag='<4>'
+fi
+
 if [ "${1:-}" != --check ]; then
 	for arg do
 		case "$arg" in
 			--dry-run|--prefix=?*|--exclude-prefix=/*) ;;
-			--print-rules) [ "$arg" = "$1" ] || { echo "tmpcleaner: unsupported argument: $arg" >&2; exit 2; } ;;
-			--print-in-use0|--print-holders0) [ "$#" -eq 1 ] || { echo "tmpcleaner: $arg accepts no other arguments" >&2; exit 2; } ;;
-			*) echo "tmpcleaner: unsupported argument: $arg" >&2; exit 2 ;;
+			--print-rules) [ "$arg" = "$1" ] || { echo "${err_tag}tmpcleaner: unsupported argument: $arg" >&2; exit 2; } ;;
+			--print-in-use0|--print-holders0) [ "$#" -eq 1 ] || { echo "${err_tag}tmpcleaner: $arg accepts no other arguments" >&2; exit 2; } ;;
+			*) echo "${err_tag}tmpcleaner: unsupported argument: $arg" >&2; exit 2 ;;
 		esac
 	done
 fi
@@ -82,18 +90,18 @@ export_holders=
 if [ "${1:-}" = --check ]; then
 	errstatus=2
 	cr=$(printf '\r')
-	[ "$#" -ge 2 ] || { echo "tmpcleaner: --check requires one absolute path under /tmp" >&2; exit 2; }
+	[ "$#" -ge 2 ] || { echo "${err_tag}tmpcleaner: --check requires one absolute path under /tmp" >&2; exit 2; }
 	requested=$2
 	shift 2
 	for arg do
 		case "$arg" in
 			--exclude-prefix=/*) ;;
-			*) echo "tmpcleaner: unsupported argument: $arg" >&2; exit 2 ;;
+			*) echo "${err_tag}tmpcleaner: unsupported argument: $arg" >&2; exit 2 ;;
 		esac
 	done
 	case "$requested" in
 		/tmp/*) ;;
-		*) echo "tmpcleaner: --check requires an absolute path under /tmp" >&2; exit 2 ;;
+		*) echo "${err_tag}tmpcleaner: --check requires an absolute path under /tmp" >&2; exit 2 ;;
 	esac
 	# The sentinel keeps trailing newlines that command substitution would strip.
 	# Resolve symlinked parent directories (the preview prints real paths) but
@@ -107,22 +115,22 @@ if [ "${1:-}" = --check ]; then
 		*) parent=${path%/*} ;;
 	esac
 	check=$(realpath -e -- "${parent:-/}" 2>/dev/null && printf x) || {
-		echo "tmpcleaner: --check path does not exist: $requested" >&2
+		echo "${err_tag}tmpcleaner: --check path does not exist: $requested" >&2
 		exit 2
 	}
 	check=${check%x}
 	check=${check%"$nl"}
 	[ -z "$base" ] || check=${check%/}/$base
 	[ -e "$check" ] || [ -L "$check" ] || {
-		echo "tmpcleaner: --check path does not exist: $requested" >&2
+		echo "${err_tag}tmpcleaner: --check path does not exist: $requested" >&2
 		exit 2
 	}
 	case "$check" in
-		*"$nl"*|*"$cr"*) echo "tmpcleaner: --check cannot match a path that contains a newline or carriage return" >&2; exit 2 ;;
+		*"$nl"*|*"$cr"*) echo "${err_tag}tmpcleaner: --check cannot match a path that contains a newline or carriage return" >&2; exit 2 ;;
 	esac
 	case "$check" in
 		/tmp/*) ;;
-		*) echo "tmpcleaner: --check path must be under /tmp: $requested" >&2; exit 2 ;;
+		*) echo "${err_tag}tmpcleaner: --check path must be under /tmp: $requested" >&2; exit 2 ;;
 	esac
 fi
 
@@ -130,10 +138,10 @@ case "${TMPCLEANER_METRICS:-}" in
 	'') ;;
 	/?*.prom)
 		case "$TMPCLEANER_METRICS" in
-			/.prom|*/.prom|*"$nl"*) echo "tmpcleaner: invalid TMPCLEANER_METRICS (expected absolute *.prom path)" >&2; exit "$errstatus" ;;
+			/.prom|*/.prom|*"$nl"*) echo "${err_tag}tmpcleaner: invalid TMPCLEANER_METRICS (expected absolute *.prom path)" >&2; exit "$errstatus" ;;
 		esac
 		;;
-	*) echo "tmpcleaner: invalid TMPCLEANER_METRICS (expected absolute *.prom path)" >&2; exit "$errstatus" ;;
+	*) echo "${err_tag}tmpcleaner: invalid TMPCLEANER_METRICS (expected absolute *.prom path)" >&2; exit "$errstatus" ;;
 esac
 previewing=0
 case "${1:-}" in
@@ -206,7 +214,7 @@ EOF
 		:
 	else
 		rm -f "${mtmp:-}" 2>/dev/null || :
-		echo "tmpcleaner: cannot write metrics to $TMPCLEANER_METRICS" >&2
+		echo "${warn_tag}tmpcleaner: cannot write metrics to $TMPCLEANER_METRICS" >&2
 	fi
 }
 scratch='' metric_files=0 metric_directories=0 metric_bytes=0 metric_protected=0 metric_marked=0 metric_pressure_active=0
@@ -233,7 +241,7 @@ fi
 scratch=$(mktemp -d 2>/dev/null) && { printf x > "$scratch/excludes"; } 2>/dev/null || {
 	[ -z "$scratch" ] || rm -rf "$scratch"
 	scratch=$(mktemp -d -p /dev/shm 2>/dev/null)
-} || { echo "tmpcleaner: cannot create a scratch directory" >&2; exit "$errstatus"; }
+} || { echo "${err_tag}tmpcleaner: cannot create a scratch directory" >&2; exit "$errstatus"; }
 printf '%s\0' "$scratch" > "$scratch/excludes"
 if [ "$#" -gt 0 ]; then
 	n=$#
@@ -251,7 +259,7 @@ if [ "$#" -gt 0 ]; then
 					*) parent=${path%/*} ;;
 				esac
 				excl=$(realpath -m -- "${parent:-/}" 2>/dev/null && printf x) || {
-					echo "tmpcleaner: cannot canonicalize --exclude-prefix: $path" >&2
+					echo "${err_tag}tmpcleaner: cannot canonicalize --exclude-prefix: $path" >&2
 					exit "$errstatus"
 				}
 				excl=${excl%x}
@@ -267,7 +275,7 @@ fi
 dropins() {
 	if [ -e "$conf.d" ] || [ -L "$conf.d" ]; then
 		[ -d "$conf.d" ] && [ -r "$conf.d" ] && [ -x "$conf.d" ] || {
-			echo "tmpcleaner: cannot read $conf.d" >&2
+			echo "${err_tag}tmpcleaner: cannot read $conf.d" >&2
 			exit "$errstatus"
 		}
 		saved_lc_all=${LC_ALL+x}:${LC_ALL-}
@@ -276,7 +284,7 @@ dropins() {
 			[ -e "$dropin" ] || [ -L "$dropin" ] || continue
 			[ -d "$dropin" ] && continue
 			[ -f "$dropin" ] && [ -r "$dropin" ] || {
-				echo "tmpcleaner: cannot read $dropin" >&2
+				echo "${err_tag}tmpcleaner: cannot read $dropin" >&2
 				exit "$errstatus"
 			}
 		done
@@ -285,36 +293,36 @@ dropins() {
 }
 
 conf=${TMPCLEANER_CONF:-/etc/tmpcleaner/tmpcleaner.conf}
-[ -r "$conf" ] || { echo "tmpcleaner: cannot read $conf" >&2; exit "$errstatus"; }
+[ -r "$conf" ] || { echo "${err_tag}tmpcleaner: cannot read $conf" >&2; exit "$errstatus"; }
 dropins
 case "${TMPCLEANER_LIST:-}" in
 	''|1|top|nul) ;;
-	*) echo "tmpcleaner: invalid TMPCLEANER_LIST (expected 1, top, nul or empty)" >&2; exit "$errstatus" ;;
+	*) echo "${err_tag}tmpcleaner: invalid TMPCLEANER_LIST (expected 1, top, nul or empty)" >&2; exit "$errstatus" ;;
 esac
 # Check the user's own value before pressure mode may replace it.
 if [ "${TMPCLEANER_AGE+x}" ]; then
 	printf '%s\0' "$TMPCLEANER_AGE" | LC_ALL=C grep -zEq '^[0-9]+(us|ms|s|m|min|h|d|w)?$' || {
-		echo "tmpcleaner: invalid TMPCLEANER_AGE: $TMPCLEANER_AGE" >&2
+		echo "${err_tag}tmpcleaner: invalid TMPCLEANER_AGE: $TMPCLEANER_AGE" >&2
 		exit "$errstatus"
 	}
 fi
 if [ "${TMPCLEANER_FULL_PERCENT+x}" ]; then
 	printf '%s\0' "$TMPCLEANER_FULL_PERCENT" | LC_ALL=C grep -zEq '^([1-9][0-9]?|100)$' || {
-		echo "tmpcleaner: invalid TMPCLEANER_FULL_PERCENT: $TMPCLEANER_FULL_PERCENT" >&2
+		echo "${err_tag}tmpcleaner: invalid TMPCLEANER_FULL_PERCENT: $TMPCLEANER_FULL_PERCENT" >&2
 		exit "$errstatus"
 	}
 fi
 if [ "${TMPCLEANER_FULL_AGE+x}" ]; then
 	printf '%s\0' "$TMPCLEANER_FULL_AGE" | LC_ALL=C grep -zEq '^[0-9]+(us|ms|s|m|min|h|d|w)?$' || {
-		echo "tmpcleaner: invalid TMPCLEANER_FULL_AGE: $TMPCLEANER_FULL_AGE" >&2
+		echo "${err_tag}tmpcleaner: invalid TMPCLEANER_FULL_AGE: $TMPCLEANER_FULL_AGE" >&2
 		exit "$errstatus"
 	}
 fi
 if [ "${TMPCLEANER_FULL_PERCENT+x}" ] && [ "${TMPCLEANER_FULL_AGE+x}" ]; then
-	dfout=$(df --output=pcent,ipcent /tmp) || { echo "tmpcleaner: cannot read /tmp usage" >&2; exit "$errstatus"; }
-	usage_line=$(printf '%s\n' "$dfout" | sed -n '2p') || { echo "tmpcleaner: cannot read /tmp usage" >&2; exit "$errstatus"; }
-	parsed=$(printf '%s\n' "$usage_line" | sed -n 's/^[[:space:]]*\([0-9][0-9]*\)%[[:space:]][[:space:]]*\([0-9][0-9]*%\|-\)[[:space:]]*$/\1 \2/p') || { echo "tmpcleaner: cannot read /tmp usage" >&2; exit "$errstatus"; }
-	[ -n "$parsed" ] || { echo "tmpcleaner: cannot read /tmp usage" >&2; exit "$errstatus"; }
+	dfout=$(df --output=pcent,ipcent /tmp) || { echo "${err_tag}tmpcleaner: cannot read /tmp usage" >&2; exit "$errstatus"; }
+	usage_line=$(printf '%s\n' "$dfout" | sed -n '2p') || { echo "${err_tag}tmpcleaner: cannot read /tmp usage" >&2; exit "$errstatus"; }
+	parsed=$(printf '%s\n' "$usage_line" | sed -n 's/^[[:space:]]*\([0-9][0-9]*\)%[[:space:]][[:space:]]*\([0-9][0-9]*%\|-\)[[:space:]]*$/\1 \2/p') || { echo "${err_tag}tmpcleaner: cannot read /tmp usage" >&2; exit "$errstatus"; }
+	[ -n "$parsed" ] || { echo "${err_tag}tmpcleaner: cannot read /tmp usage" >&2; exit "$errstatus"; }
 	block_use=${parsed% *}
 	inode_use=${parsed#* }
 	inode_use=${inode_use%\%}
@@ -329,9 +337,9 @@ if [ "${TMPCLEANER_FULL_PERCENT+x}" ] && [ "${TMPCLEANER_FULL_AGE+x}" ]; then
 		echo "tmpcleaner: /tmp is $usage% full (blocks $block_use%, inodes $inode_use%), below $TMPCLEANER_FULL_PERCENT%; keeping the configured age" >&2
 	fi
 elif [ "${TMPCLEANER_FULL_PERCENT+x}" ]; then
-	echo "tmpcleaner: pressure mode needs both TMPCLEANER_FULL_PERCENT and TMPCLEANER_FULL_AGE; ignoring TMPCLEANER_FULL_PERCENT" >&2
+	echo "${warn_tag}tmpcleaner: pressure mode needs both TMPCLEANER_FULL_PERCENT and TMPCLEANER_FULL_AGE; ignoring TMPCLEANER_FULL_PERCENT" >&2
 elif [ "${TMPCLEANER_FULL_AGE+x}" ]; then
-	echo "tmpcleaner: pressure mode needs both TMPCLEANER_FULL_PERCENT and TMPCLEANER_FULL_AGE; ignoring TMPCLEANER_FULL_AGE" >&2
+	echo "${warn_tag}tmpcleaner: pressure mode needs both TMPCLEANER_FULL_PERCENT and TMPCLEANER_FULL_AGE; ignoring TMPCLEANER_FULL_AGE" >&2
 fi
 
 control_escapes=$(
@@ -344,7 +352,7 @@ control_escapes=$(
 )
 
 # Without /proc no in-use file could be protected.
-[ -e /proc/self/mountinfo ] || { echo "tmpcleaner: /proc is not available" >&2; exit "$errstatus"; }
+[ -e /proc/self/mountinfo ] || { echo "${err_tag}tmpcleaner: /proc is not available" >&2; exit "$errstatus"; }
 
 # Match targets by device and inode: link texts can outlive their bind mounts.
 # Every find and stat batch starts with a known-good target after a marker so
@@ -583,13 +591,13 @@ rules() {
 			# Set field 6 (the age) of d rules, keeping any age-by letters and
 			# filling omitted mode/user/group fields; a quoted path holding spaces
 			# cannot be split into fields safely, so such a rule is left as is.
-			AGE=$TMPCLEANER_AGE LC_ALL=C awk '
+			AGE=$TMPCLEANER_AGE ERR_TAG=$err_tag WARN_TAG=$warn_tag LC_ALL=C awk '
 			{
 				sub(/\015$/, "")
-				if ($0 ~ /[\013\014\015]/) { print "tmpcleaner: raw CR, FF or VT in rule" > "/dev/stderr"; exit 1 }
+				if ($0 ~ /[\013\014\015]/) { print ENVIRON["ERR_TAG"] "tmpcleaner: raw CR, FF or VT in rule" > "/dev/stderr"; exit 1 }
 			}
 			$1 !~ /^d[-!=~^+]*$/ { print; next }
-			$2 ~ /^["\047]/ && $2 !~ /["\047]$/ { print "tmpcleaner: age override skipped for: " $0 > "/dev/stderr"; print; next }
+			$2 ~ /^["\047]/ && $2 !~ /["\047]$/ { print ENVIRON["WARN_TAG"] "tmpcleaner: age override skipped for: " $0 > "/dev/stderr"; print; next }
 			NF < 6 || $6 == "-" { print; next }
 			{
 				for (i = NF + 1; i <= 5; i++) $i = "-"
@@ -640,14 +648,14 @@ generate_rules() {
 	scan_failed=
 	rules > "$scratch/rules" || {
 		if [ "$scan_failed" = 1 ]; then
-			echo "tmpcleaner: cannot scan processes in use; nothing was removed" >&2
+			echo "${err_tag}tmpcleaner: cannot scan processes in use; nothing was removed" >&2
 		else
-			echo "tmpcleaner: cannot generate cleanup rules; nothing was removed" >&2
+			echo "${err_tag}tmpcleaner: cannot generate cleanup rules; nothing was removed" >&2
 		fi
 		exit "$errstatus"
 	}
 	# An x rule cannot protect a root that another rule cleans directly.
-	CHECKING=$check PROTECTED=$scratch/sorted LC_ALL=C awk '
+	CHECKING=$check PROTECTED=$scratch/sorted ERR_TAG=$err_tag LC_ALL=C awk '
 		function quote(s, parts, n, i, word) {
 			n = split(s, parts, "\047")
 			word = "\047" parts[1]
@@ -663,7 +671,7 @@ generate_rules() {
 		}
 		function under(path, prefix) { return prefix == "/" || path == prefix || index(path, prefix "/") == 1 }
 		function refuse(reason) {
-			print "tmpcleaner: cannot safely interpret rule with in-use protection: " (reason ? reason ": " : "") $0 > "/dev/stderr"
+			print ENVIRON["ERR_TAG"] "tmpcleaner: cannot safely interpret rule with in-use protection: " (reason ? reason ": " : "") $0 > "/dev/stderr"
 			exit 1
 		}
 		BEGIN {
@@ -721,14 +729,14 @@ generate_rules() {
 			if (ENVIRON["CHECKING"] != "" && path != canonical) refuse("noncanonical cleanup root in --check")
 			print
 		}' "$scratch/rules" > "$scratch/filtered" && mv "$scratch/filtered" "$scratch/rules" || {
-		echo "tmpcleaner: cannot apply path protections; nothing was removed" >&2
+		echo "${err_tag}tmpcleaner: cannot apply path protections; nothing was removed" >&2
 		exit "$errstatus"
 	}
 }
 
 filter_in_use() {
 	canonical_scratch=$(realpath -e -- "$scratch" 2>/dev/null && printf x) || {
-		[ "$previewing" = 0 ] || echo "tmpcleaner: cannot canonicalize scratch directory" >&2
+		[ "$previewing" = 0 ] || echo "${err_tag}tmpcleaner: cannot canonicalize scratch directory" >&2
 		return 1
 	}
 	canonical_scratch=${canonical_scratch%x}
@@ -739,7 +747,7 @@ filter_in_use() {
 		$0 != canonical && index($0, canonical "/") != 1 { printf "%s%c", $0, 0 }
 	' "$scratch/inuse" > "$scratch/export" &&
 		LC_ALL=C sort -zu "$scratch/export" > "$scratch/export-sorted" || {
-		[ "$previewing" = 0 ] || echo "tmpcleaner: cannot export in-use paths" >&2
+		[ "$previewing" = 0 ] || echo "${err_tag}tmpcleaner: cannot export in-use paths" >&2
 		return 1
 	}
 }
@@ -772,7 +780,7 @@ if [ "${1:-}" = --print-holders0 ]; then
 			}
 			$0 in pids { printf "%s%c%s%c", $0, 0, pids[$0], 0 }
 		' "$scratch/export-sorted" > "$scratch/holders-sorted" || {
-		echo "tmpcleaner: cannot export in-use holders" >&2
+		echo "${err_tag}tmpcleaner: cannot export in-use holders" >&2
 		exit 1
 	}
 	[ ! -f "$scratch/holders-sorted" ] || cat "$scratch/holders-sorted"
@@ -806,25 +814,25 @@ if [ -n "$check" ]; then
 	# entries with newlines or carriage returns (their lines cannot be read) stop the check.
 	dir=${check%/*}
 	while [ -n "$dir" ]; do
-		[ -r "$dir" ] || { echo "tmpcleaner: --check cannot read $requested" >&2; exit 2; }
+		[ -r "$dir" ] || { echo "${err_tag}tmpcleaner: --check cannot read $requested" >&2; exit 2; }
 		[ "$dir" = /tmp ] && break
 		dir=${dir%/*}
 	done
 	entries=0
 	if [ -d "$check" ] && [ ! -L "$check" ]; then
 		if [ -n "$(find "$check" -mindepth 1 \( -name "*$nl*" -o -name "*$cr*" \) -print -quit 2>/dev/null)" ]; then
-			echo "tmpcleaner: --check cannot judge a directory holding names with newlines or carriage returns" >&2
+			echo "${err_tag}tmpcleaner: --check cannot judge a directory holding names with newlines or carriage returns" >&2
 			exit 2
 		fi
 		entries=$(find "$check" -mindepth 1 -printf . 2>/dev/null) || {
-			echo "tmpcleaner: --check cannot read $requested" >&2
+			echo "${err_tag}tmpcleaner: --check cannot read $requested" >&2
 			exit 2
 		}
 		entries=${#entries}
 	fi
 	# A failed write is an error, not a verdict: only awk's 0 and 1 may answer.
 	printf '%s\n' "$preview" > "$scratch/preview" || {
-		echo "tmpcleaner: cannot write the --check scratch file" >&2
+		echo "${err_tag}tmpcleaner: cannot write the --check scratch file" >&2
 		exit "$errstatus"
 	}
 	verdict=0
