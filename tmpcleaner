@@ -820,9 +820,15 @@ generate_rules() {
 		echo "${err_tag}tmpcleaner: cannot apply path protections; nothing was removed" >&2
 		exit "$errstatus"
 	}
-	# A prefix no keep rule can match: lines are parsed, but globs are not opened
-	# (an unreadable match would otherwise be reported as a parse error).
-	if ! systemd-tmpfiles --clean --prefix=/proc/tmpcleaner-parse-probe - < "$scratch/keep-rules" 2> "$scratch/keep-errors"; then
+	# A non-matching --prefix drops each line before mode, user, group and age
+	# are checked. Status 73 with no <stdin>:N: line is an unprivileged open of
+	# a root-only directory, not a bad keep rule.
+	keep_status=0
+	systemd-tmpfiles --clean - < "$scratch/keep-rules" 2> "$scratch/keep-errors" || keep_status=$?
+	if [ "$keep_status" -eq 73 ] && ! grep -Eq '<stdin>:[0-9]+:' "$scratch/keep-errors"; then
+		keep_status=0
+	fi
+	if [ "$keep_status" -ne 0 ]; then
 		ERR_TAG=$err_tag LC_ALL=C awk '
 			NR == FNR { lines[NR] = $0; next }
 			match($0, /<stdin>:[0-9]+:/) {

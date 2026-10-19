@@ -1695,6 +1695,32 @@ for dropin_mode in real dry check rules raw; do
 	fi
 done
 rm -rf "$dropin_root" "$cfg/conf.d" "$cfg/badkeep.conf" "$cfg/badkeep.conf.d" "$cfg/dropin.out" "$cfg/dropin.err" "$cfg/dropin.clean"
+# A non-matching probe prefix used to skip user and age checks on keep lines.
+field_root=$(mktemp -d "$dir/keep-field.XXXXXX")
+mkdir "$field_root/keep"
+old "$field_root/keep"
+printf 'd %s - - - amM:12h\n' "$field_root" > "$cfg/field.conf"
+mkdir -p "$cfg/field.conf.d"
+for bad_line in "x $field_root/keep - nosuchuser - -" "x $field_root/keep - - - badage"; do
+	printf '%s\n' "$bad_line" > "$cfg/field.conf.d/50-bad.conf"
+	for field_mode in rules real; do
+		case "$field_mode" in
+			rules) set -- --print-rules ;;
+			real) set -- ;;
+		esac
+		status=0
+		TMPCLEANER_CONF=$cfg/field.conf sh "$here/tmpcleaner" "$@" \
+			> "$cfg/field.out" 2> "$cfg/field.err" || status=$?
+		if [ "$status" -ne 1 ] || [ -s "$cfg/field.out" ] ||
+			[ ! -d "$field_root/keep" ] ||
+			! grep -Fxq "tmpcleaner: cannot parse exclusion rule: $bad_line" "$cfg/field.err" ||
+			! grep -Fxq 'tmpcleaner: an exclusion rule failed to parse; nothing was removed' "$cfg/field.err"; then
+			echo "FAIL: invalid keep-rule field must stop $field_mode ($bad_line)"
+			fail=1
+		fi
+	done
+done
+rm -rf "$field_root" "$cfg/field.conf" "$cfg/field.conf.d" "$cfg/field.out" "$cfg/field.err"
 # The keep-rule probe uses the real parser. A glob match it cannot open must not
 # be reported as a parse failure.
 unread_root=$(mktemp -d "$dir/unread-keep.XXXXXX")
