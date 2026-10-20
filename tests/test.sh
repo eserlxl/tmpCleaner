@@ -3238,69 +3238,31 @@ grep -Fxq 'ExecStart=/usr/local/bin/tmpcleaner' "$here/tmpcleaner.service" || {
 }
 rm -rf "$staged"
 
-# Packaging metadata is checked only after successful generation, and failed
-# regeneration leaves the last complete file and its mode intact.
-srcinfo_root=$(mktemp -d "$cfg/srcinfo.XXXXXX")
-mkdir "$srcinfo_root/tools" "$srcinfo_root/aur"
-printf 'complete metadata\n' > "$srcinfo_root/original"
-cp "$srcinfo_root/original" "$srcinfo_root/aur/.SRCINFO"
-chmod 644 "$srcinfo_root/aur/.SRCINFO"
-cat > "$srcinfo_root/tools/makepkg" <<'SHIM'
-#!/bin/sh
-[ "$*" = --printsrcinfo ] || exit 64
-case "$SRCINFO_CASE" in
-	match|match-fail) cat ../original ;;
-	stale) printf 'new complete metadata\n' ;;
-	partial-fail) printf 'partial' ;;
-esac
-case "$SRCINFO_CASE" in *-fail) exit 42 ;; esac
-SHIM
-chmod +x "$srcinfo_root/tools/makepkg"
-for srcinfo_case in match stale match-fail partial-fail; do
-	for srcinfo_target in check-srcinfo srcinfo; do
-		cp "$srcinfo_root/original" "$srcinfo_root/aur/.SRCINFO"
-		status=0
-		(cd "$srcinfo_root" && PATH="$srcinfo_root/tools:$PATH" SRCINFO_CASE=$srcinfo_case \
-			make -s -f "$here/Makefile" "$srcinfo_target") > "$srcinfo_root/log" 2>&1 || status=$?
-		if [ "$srcinfo_case" = match ] || { [ "$srcinfo_case" = stale ] && [ "$srcinfo_target" = srcinfo ]; }; then
-			[ "$status" -eq 0 ] || { echo "FAIL: successful metadata generation ($srcinfo_case $srcinfo_target)"; fail=1; }
-		else
-			[ "$status" -ne 0 ] || { echo "FAIL: metadata check/generator failure was hidden ($srcinfo_case $srcinfo_target)"; fail=1; }
-		fi
-		if [ "$srcinfo_case" = stale ] && [ "$srcinfo_target" = srcinfo ]; then
-			printf 'new complete metadata\n' > "$srcinfo_root/expected"
-		else
-			cp "$srcinfo_root/original" "$srcinfo_root/expected"
-		fi
-		if ! cmp -s "$srcinfo_root/expected" "$srcinfo_root/aur/.SRCINFO" ||
-			[ "$(stat -c %a "$srcinfo_root/aur/.SRCINFO")" != 644 ] ||
-			[ -n "$(find "$srcinfo_root/aur" -maxdepth 1 -name '.SRCINFO.*' -print -quit)" ]; then
-			echo "FAIL: metadata contents/mode or temporary-file cleanup ($srcinfo_case $srcinfo_target)"
-			fail=1
-		fi
-		if [ "$srcinfo_case:$srcinfo_target" = stale:check-srcinfo ] &&
-			! grep -Fq '.SRCINFO is stale; run make srcinfo' "$srcinfo_root/log"; then
-			echo 'FAIL: stale metadata check must retain the update diagnostic'
-			fail=1
-		fi
-	done
-done
-rm -rf "$srcinfo_root"
-
-# The package's post_install message directs new users to preview, keep paths, and enable the timer.
-install_out=$(
-	# shellcheck source=/dev/null
-	. "$here/aur/tmpcleaner.install"
-	post_install
-)
+# post_install text lives in aur/aurgen.install.yaml and is printed verbatim.
+# It must name this tree's timer unit and still tell new users to preview, keep paths, then enable.
+timer_unit=$(basename "$here/tmpcleaner.timer")
+install_status=0
+install_out=$(awk '
+	/^  install_messages:/ { msgs = 1; post = 0; next }
+	msgs && /^  [^ ]/ { msgs = 0; post = 0; next }
+	msgs && /^    post_install:/ { post = 1; next }
+	msgs && post && /^    [^ ]/ { post = 0; next }
+	post && /^      - / {
+		line = substr($0, 9)
+		n = length(line)
+		q = substr(line, 1, 1)
+		if ((q != "\047" && q != "\"") || substr(line, n, 1) != q || n < 2) exit 2
+		print substr(line, 2, n - 2)
+	}
+' "$here/aur/aurgen.install.yaml") || install_status=$?
 install_expected=$(printf '%s\n' \
 	"tmpcleaner: the timer is not enabled automatically." \
 	"  Preview first: sudo tmpcleaner --dry-run" \
 	"  Keep paths:    sudo tmpcleaner --suggest-exclusions | sudo tee -a /etc/tmpcleaner/tmpcleaner.conf.d/50-keep.conf" \
 	"                 then delete the rules for anything you do not need kept" \
-	"  Then enable:   sudo systemctl enable --now tmpcleaner.timer")
-if [ "$install_out" != "$install_expected" ]; then
-	echo "FAIL: post_install must print preview, keep-paths, and enable lines in order"
+	"  Then enable:   sudo systemctl enable --now $timer_unit")
+if [ "$install_status" -ne 0 ] || [ "$install_out" != "$install_expected" ]; then
+	echo "FAIL: post_install must name $timer_unit and print preview, keep-paths, and enable lines in order"
 	fail=1
 fi
 

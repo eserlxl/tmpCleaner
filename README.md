@@ -126,8 +126,8 @@ settings are in [docs/configuration.md](docs/configuration.md).
 
 | Document | Contents |
 |----------|----------|
-| [docs/installation.md](docs/installation.md#makefile-variables-and-targets) | `srcinfo`, `check-srcinfo`, and `lint` targets |
-| [aur/PKGBUILD](aur/PKGBUILD) | AUR package recipe |
+| [docs/installation.md](docs/installation.md#makefile-variables-and-targets) | AURGen packaging flow and the `lint` target |
+| [aur/aurgen.install.yaml](aur/aurgen.install.yaml) | AUR package recipe |
 | [tests/test.sh](tests/test.sh) | Test suite run by `make test` |
 
 ## Development
@@ -137,8 +137,10 @@ The local gate runs before every push or release:
 ```sh
 make lint            # shellcheck at warning level
 make test
-make check-srcinfo   # fails when .SRCINFO is stale
+aurgen test          # dry-runs every AURGen mode
 ```
+
+Publishing: edit `aur/aurgen.install.yaml`, tag the release, run `aurgen aur`, test with `aurgen local` or `aurgen test`, and publish with `aurgen aur-deploy`.
 
 `make test` runs the rules against a scratch directory (no root needed), including a file
 held open and a directory used by a background process.
