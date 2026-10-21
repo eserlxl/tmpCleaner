@@ -129,6 +129,7 @@ settings are in [docs/configuration.md](docs/configuration.md).
 | [docs/installation.md](docs/installation.md#makefile-variables-and-targets) | AURGen packaging flow and the `lint` target |
 | [aur/aurgen.install.yaml](aur/aurgen.install.yaml) | AUR package recipe |
 | [tests/test.sh](tests/test.sh) | Test suite run by `make test` |
+| [tests/check-package.sh](tests/check-package.sh) | Hermetic smoke checks run by `make check-package` in the AUR package's check() |
 
 ## Development
 

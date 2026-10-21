@@ -73,7 +73,7 @@ Spaces, percent signs and literal dollar signs are supported. GNU make requires
 literal dollars in command-line variable values to be doubled, for example
 `make install 'BINDIR=/opt/my $$tools/bin'` installs under `/opt/my $tools/bin`.
 
-Targets: `preview` (dry-run to `preview.txt`), `install`, `install-conf`, `uninstall`, `test`;
+Targets: `preview` (dry-run to `preview.txt`), `install`, `install-conf`, `uninstall`, `test`, `check-package` (hermetic smoke checks for the AUR package check());
 `lint` runs shellcheck at warning level. To publish the AUR package, edit `aur/aurgen.install.yaml`, tag the release, run `aurgen aur`, test with `aurgen local` or `aurgen test`, and publish with `aurgen aur-deploy`.
 
 ## Uninstall

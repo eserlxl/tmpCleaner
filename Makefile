@@ -88,9 +88,9 @@ endif
 test:
 	sh tests/test.sh
 
-# Package-time suite for makepkg check(): the whole suite already runs from an
-# unpacked tree with no git, network, root or user home.
-check: test
+# Hermetic smoke checks for makepkg check(); test is the full developer suite.
+check-package:
+	sh tests/check-package.sh
 
 # 73 is systemd-tmpfiles' status when an unprivileged preview cannot open root-only dirs.
 preview:
@@ -100,6 +100,6 @@ preview:
 
 # Warning level and above; notes and style hints stay advisory.
 lint:
-	shellcheck -s sh -S warning tmpcleaner tests/test.sh
+	shellcheck -s sh -S warning tmpcleaner tests/test.sh tests/check-package.sh
 
-.PHONY: install install-conf uninstall test check preview lint
+.PHONY: install install-conf uninstall test check-package preview lint
