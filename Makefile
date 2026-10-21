@@ -88,6 +88,10 @@ endif
 test:
 	sh tests/test.sh
 
+# Package-time suite for makepkg check(): the whole suite already runs from an
+# unpacked tree with no git, network, root or user home.
+check: test
+
 # 73 is systemd-tmpfiles' status when an unprivileged preview cannot open root-only dirs.
 preview:
 	@TMPCLEANER_CONF=./tmpcleaner.conf sh ./tmpcleaner --dry-run > preview.txt 2>&1; rc=$$?; \
@@ -98,4 +102,4 @@ preview:
 lint:
 	shellcheck -s sh -S warning tmpcleaner tests/test.sh
 
-.PHONY: install install-conf uninstall test preview lint
+.PHONY: install install-conf uninstall test check preview lint
