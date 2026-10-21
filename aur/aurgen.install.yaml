@@ -99,8 +99,8 @@ optional_data:
 # AUR Integration Configuration
 # This section controls AUR repository deployment behavior
 aur_integration:
-  # Local AUR repositories directory
-  aur_repo_dir: /opt/AUR
+  # Local AUR repositories directory: unset, aurgen's default
+  # (${XDG_DATA_HOME:-~/.local/share}/aurgen/aur) applies
   # Auto-push to AUR after deployment
   auto_push: true
   # Commit message template (use {version} for version placeholder)
