@@ -141,6 +141,10 @@ canonicalize_check() {
 	check=${check%"$nl"}
 	[ -z "$base" ] || check=${check%/}/$base
 	[ -e "$check" ] || [ -L "$check" ] || {
+		if [ ! -x "${check%/*}" ]; then
+			echo "${err_tag}tmpcleaner: --check cannot read $shown" >&2
+			exit 2
+		fi
 		echo "${err_tag}tmpcleaner: --check path does not exist: $shown" >&2
 		exit 2
 	}
