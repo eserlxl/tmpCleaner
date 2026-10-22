@@ -5,7 +5,8 @@
 # timestamps, so a long-running job could otherwise lose files under its feet.
 # Only --dry-run and --prefix=PATH are passed through to systemd-tmpfiles to
 # narrow what it applies; --exclude-prefix=PATH adds an exclusion for an
-# absolute PATH and everything below it.
+# absolute PATH and everything below it, and --exclude-from0=FILE adds one for
+# every NUL-terminated path in FILE.
 set -eu
 
 case "${1:-}" in
@@ -19,7 +20,8 @@ in use by running processes.
 Options:
   -h, --help       Show this help message and exit
   --print-rules    Print generated tmpfiles rules and exit
-                   Accepts trailing --exclude-prefix=PATH filters
+                   Accepts trailing --exclude-prefix=PATH and
+                   --exclude-from0=FILE filters
   --print-in-use0  Print unique in-use paths as NUL-separated records and exit
                    Standalone option; accepts no other arguments
   --print-holders0 Print in-use paths and holder PIDs as NUL-separated pairs
@@ -30,20 +32,24 @@ Options:
                    the next run would clean and exit
                    Standalone option; accepts no other arguments
   --check PATH     Report whether an existing absolute /tmp path would be removed
-                   Accepts trailing --exclude-prefix=PATH filters
+                   Accepts trailing --exclude-prefix=PATH and
+                   --exclude-from0=FILE filters
                    Exit 0 if removed, 1 if kept (only), 2 for an error (invalid
                    path or usage, unreadable config, invalid TMPCLEANER_* value,
                    missing /proc, a failed in-use scan, or a systemd-tmpfiles
                    failure other than 73)
   --check0         Judge NUL-separated /tmp paths from stdin in one scan and
                    print removed\0PATH\0 or kept\0PATH\0 records
-                   Accepts trailing --exclude-prefix=PATH filters
+                   Accepts trailing --exclude-prefix=PATH and
+                   --exclude-from0=FILE filters
                    Exit 0 if all removed, 1 if any kept, 2 for an error
 
 Passed through to systemd-tmpfiles (any other argument is rejected with exit 2):
   --dry-run                Preview what would be removed without deleting
   --prefix=PATH            Only apply rules with the prefix PATH
   --exclude-prefix=PATH    Keep the absolute path PATH and everything below it
+  --exclude-from0=FILE     Keep every NUL-terminated path in the absolute FILE as
+                           --exclude-prefix=PATH does
 
 A regular .tmpcleaner-keep file in /tmp/<dir> or /tmp/<dir>/<subdir> keeps that directory.
 When the in-use scan fails, nothing is removed and every mode exits non-zero.
@@ -83,7 +89,7 @@ if [ "${1:-}" = --print-rules ]; then
 	shift
 	for arg do
 		case "$arg" in
-			--exclude-prefix=/*) ;;
+			--exclude-prefix=/*|--exclude-from0=/*) ;;
 			*) echo "${err_tag}tmpcleaner: unsupported argument: $arg" >&2; exit 2 ;;
 		esac
 	done
@@ -91,7 +97,7 @@ if [ "${1:-}" = --print-rules ]; then
 elif [ "${1:-}" != --check ] && [ "${1:-}" != --check0 ]; then
 	for arg do
 		case "$arg" in
-			--dry-run|--prefix=?*|--exclude-prefix=/*) ;;
+			--dry-run|--prefix=?*|--exclude-prefix=/*|--exclude-from0=/*) ;;
 			--print-in-use0|--print-holders0|--suggest-exclusions) [ "$#" -eq 1 ] || { echo "${err_tag}tmpcleaner: $arg accepts no other arguments" >&2; exit 2; } ;;
 			*) echo "${err_tag}tmpcleaner: unsupported argument: $arg" >&2; exit 2 ;;
 		esac
@@ -164,7 +170,7 @@ if [ "${1:-}" = --check ]; then
 	shift 2
 	for arg do
 		case "$arg" in
-			--exclude-prefix=/*) ;;
+			--exclude-prefix=/*|--exclude-from0=/*) ;;
 			*) echo "${err_tag}tmpcleaner: unsupported argument: $arg" >&2; exit 2 ;;
 		esac
 	done
@@ -176,7 +182,7 @@ elif [ "${1:-}" = --check0 ]; then
 	shift
 	for arg do
 		case "$arg" in
-			--exclude-prefix=/*) ;;
+			--exclude-prefix=/*|--exclude-from0=/*) ;;
 			*) echo "${err_tag}tmpcleaner: unsupported argument: $arg" >&2; exit 2 ;;
 		esac
 	done
@@ -291,6 +297,27 @@ scratch=$(mktemp -d 2>/dev/null) && { printf x > "$scratch/excludes"; } 2>/dev/n
 	scratch=$(mktemp -d -p /dev/shm 2>/dev/null)
 } || { echo "${err_tag}tmpcleaner: cannot create a scratch directory" >&2; exit "$errstatus"; }
 printf '%s\0' "$scratch" > "$scratch/excludes"
+add_exclusion() {
+	path=$2
+	while [ "$path" != / ] && [ "${path%/}" != "$path" ]; do path=${path%/}; done
+	base=${path##*/}
+	case "$base" in
+		.|..) parent=$path base= ;;
+		*) parent=${path%/*} ;;
+	esac
+	excl=$(realpath -m -- "${parent:-/}" 2>/dev/null && printf x) || {
+		echo "${err_tag}tmpcleaner: cannot canonicalize $1: $path" >&2
+		exit "$errstatus"
+	}
+	excl=${excl%x}
+	excl=${excl%"$nl"}
+	[ -z "$base" ] || excl=${excl%/}/$base
+	case "$excl" in
+		/tmp|/tmp/*) ;;
+		*) echo "${err_tag}tmpcleaner: $1 must be under /tmp: $path" >&2; exit "$errstatus" ;;
+	esac
+	printf '%s\0' "$excl" >> "$scratch/excludes"
+}
 if [ "$#" -gt 0 ]; then
 	n=$#
 	while [ "$n" -gt 0 ]; do
@@ -298,26 +325,31 @@ if [ "$#" -gt 0 ]; then
 		shift
 		n=$((n - 1))
 		case "$arg" in
-			--exclude-prefix=*)
-				path=${arg#--exclude-prefix=}
-				while [ "$path" != / ] && [ "${path%/}" != "$path" ]; do path=${path%/}; done
-				base=${path##*/}
-				case "$base" in
-					.|..) parent=$path base= ;;
-					*) parent=${path%/*} ;;
-				esac
-				excl=$(realpath -m -- "${parent:-/}" 2>/dev/null && printf x) || {
-					echo "${err_tag}tmpcleaner: cannot canonicalize --exclude-prefix: $path" >&2
+			--exclude-prefix=*) add_exclusion --exclude-prefix "${arg#--exclude-prefix=}" ;;
+			--exclude-from0=*)
+				file=${arg#--exclude-from0=}
+				# Validate a private copy so the file cannot change between the checks and the read.
+				if [ ! -f "$file" ] || [ ! -r "$file" ] || ! cat 2>/dev/null < "$file" > "$scratch/exclude-from0"; then
+					echo "${err_tag}tmpcleaner: --exclude-from0 requires a readable regular file: $file" >&2
 					exit "$errstatus"
-				}
-				excl=${excl%x}
-				excl=${excl%"$nl"}
-				[ -z "$base" ] || excl=${excl%/}/$base
-				case "$excl" in
-					/tmp|/tmp/*) ;;
-					*) echo "${err_tag}tmpcleaner: --exclude-prefix must be under /tmp: $path" >&2; exit "$errstatus" ;;
+				fi
+				case "$(tail -c 1 < "$scratch/exclude-from0" | od -An -tx1)" in
+					''|*00) ;;
+					*) echo "${err_tag}tmpcleaner: --exclude-from0 file ends with an unterminated record: $file" >&2; exit "$errstatus" ;;
 				esac
-				printf '%s\0' "$excl" >> "$scratch/excludes"
+				ERR_TAG=$err_tag LC_ALL=C awk '
+					BEGIN { RS = "\0" }
+					/[\n\r]/ {
+						shown = $0
+						gsub(/[\001-\037\177]/, "?", shown)
+						print ENVIRON["ERR_TAG"] "tmpcleaner: --exclude-from0 cannot hold a path that contains a newline or carriage return: " shown > "/dev/stderr"
+						exit 1
+					}
+				' "$scratch/exclude-from0" || exit "$errstatus"
+				tr '\0' '\n' < "$scratch/exclude-from0" > "$scratch/exclude-from0-paths" || exit "$errstatus"
+				while IFS= read -r record; do
+					add_exclusion --exclude-from0 "$record"
+				done < "$scratch/exclude-from0-paths"
 				;;
 			*) set -- "$@" "$arg" ;;
 		esac

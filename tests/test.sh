@@ -1113,7 +1113,7 @@ old "$argdir/old.txt" "$argdir/held.txt"
 sleep infinity 3<"$argdir/held.txt" & arg_held_pid=$!
 pids="$pids $arg_held_pid"
 cp "$conf" "$cfg/other.conf"
-for arg in --remove --create --purge --boot --root=/ --prefix --prefix= --exclude-prefix --exclude-prefix= --exclude-prefix=old.txt "$cfg/other.conf"; do
+for arg in --remove --create --purge --boot --root=/ --prefix --prefix= --exclude-prefix --exclude-prefix= --exclude-prefix=old.txt --exclude-from0 --exclude-from0=list "$cfg/other.conf"; do
 	status=0
 	arg_err=$(TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" "$arg" 2>&1 >/dev/null) || status=$?
 	if [ "$status" -ne 2 ] || [ ! -e "$argdir/old.txt" ] || ! printf '%s\n' "$arg_err" | grep -Fq 'unsupported argument'; then
@@ -1121,7 +1121,7 @@ for arg in --remove --create --purge --boot --root=/ --prefix --prefix= --exclud
 		fail=1
 	fi
 done
-for arg in --dry-run --prefix=/tmp --print-rules --remove --help --exclude-prefix --exclude-prefix= --exclude-prefix=relative extra ''; do
+for arg in --dry-run --prefix=/tmp --print-rules --remove --help --exclude-prefix --exclude-prefix= --exclude-prefix=relative --exclude-from0 --exclude-from0=relative extra ''; do
 	for with_excl in 0 1; do
 		if [ "$with_excl" = 1 ]; then
 			set -- --print-rules --exclude-prefix=/tmp/x "$arg"
@@ -1340,6 +1340,93 @@ if [ "$status" -ne 0 ] || ! cmp -s "$cfg/check0.expected" "$cfg/check0.out" || [
 	echo "FAIL: --check0 should exit 0 when all paths would be removed"
 	fail=1
 fi
+# --exclude-from0 keeps every NUL-terminated path in its file like --exclude-prefix.
+from0=$(mktemp -d "$dir/from0.XXXXXX")
+touch "$from0/a b" "$from0/p%q" "$from0/plain" "$from0/gone"
+old "$from0/a b" "$from0/p%q" "$from0/plain" "$from0/gone"
+printf 'd %s - - - amM:12h\n' "$from0" > "$cfg/from0.conf"
+printf '%s\0' "$from0/a b" "$from0/p%q" "$from0/plain" > "$cfg/from0.list"
+status=0
+from0_out=$(TMPCLEANER_CONF=$cfg/from0.conf sh "$here/tmpcleaner" --print-rules "--exclude-from0=$cfg/from0.list") || status=$?
+if [ "$status" -ne 0 ] || ! printf '%s\n' "$from0_out" | grep -Fxq "x \"$from0/a b\"" ||
+	! printf '%s\n' "$from0_out" | grep -Fxq "x \"$from0/p%%q\"" ||
+	! printf '%s\n' "$from0_out" | grep -Fxq "x \"$from0/plain\""; then
+	echo "FAIL: --print-rules --exclude-from0 should print an x rule for every listed path"
+	fail=1
+fi
+status=0
+from0_out=$(TMPCLEANER_CONF=$cfg/from0.conf sh "$here/tmpcleaner" --dry-run "--exclude-from0=$cfg/from0.list" 2>&1) || status=$?
+if [ "$status" -ne 0 ] || ! printf '%s\n' "$from0_out" | grep -Fq "$from0/gone" ||
+	printf '%s\n' "$from0_out" | grep -Fq -e "$from0/a b" -e "$from0/p%q" -e "$from0/plain"; then
+	echo "FAIL: --dry-run --exclude-from0 should omit every listed path and still announce the rest"
+	fail=1
+fi
+status=0
+printf '%s\0' "$from0/a b" "$from0/gone" "$from0/p%q" |
+	TMPCLEANER_CONF=$cfg/from0.conf sh "$here/tmpcleaner" --check0 "--exclude-from0=$cfg/from0.list" \
+	> "$cfg/check0.out" 2> "$cfg/check0.err" || status=$?
+printf 'kept\0%s\0removed\0%s\0kept\0%s\0' "$from0/a b" "$from0/gone" "$from0/p%q" > "$cfg/check0.expected"
+if [ "$status" -ne 1 ] || ! cmp -s "$cfg/check0.expected" "$cfg/check0.out" || [ -s "$cfg/check0.err" ]; then
+	echo "FAIL: --check0 with stdin should honor --exclude-from0"
+	fail=1
+fi
+status=0
+from0_out=$(TMPCLEANER_CONF=$cfg/from0.conf sh "$here/tmpcleaner" --check "$from0/plain" "--exclude-from0=$cfg/from0.list" 2>"$cfg/check.err") || status=$?
+if [ "$status" -ne 1 ] || [ "$from0_out" != "kept: $from0/plain" ] ||
+	[ "$(cat "$cfg/check.err")" != 'tmpcleaner: kept by an explicit --exclude-prefix' ]; then
+	echo "FAIL: --check should report a path listed in --exclude-from0 as explicitly excluded"
+	fail=1
+fi
+mkdir "$cfg/from0.dir"
+for from0_case in outside unterminated newline missing directory; do
+	from0_file=$cfg/from0.bad
+	case "$from0_case" in
+		outside)
+			printf '%s\0' "$from0/plain" /var/x > "$from0_file"
+			expected_err='tmpcleaner: --exclude-from0 must be under /tmp: /var/x'
+			;;
+		unterminated)
+			printf '%s\0%s' "$from0/plain" "$from0/a b" > "$from0_file"
+			expected_err="tmpcleaner: --exclude-from0 file ends with an unterminated record: $from0_file"
+			;;
+		newline)
+			printf '%s\0%s\0' "$from0/plain" "$from0/a
+b" > "$from0_file"
+			expected_err="tmpcleaner: --exclude-from0 cannot hold a path that contains a newline or carriage return: $from0/a?b"
+			;;
+		missing)
+			from0_file=$cfg/from0.missing
+			expected_err="tmpcleaner: --exclude-from0 requires a readable regular file: $from0_file"
+			;;
+		directory)
+			from0_file=$cfg/from0.dir
+			expected_err="tmpcleaner: --exclude-from0 requires a readable regular file: $from0_file"
+			;;
+	esac
+	for mode in --print-rules --dry-run clean --check --check0; do
+		expected_status=1
+		case "$mode" in
+			clean) set -- ;;
+			--check) set -- --check "$from0/gone"; expected_status=2 ;;
+			--check0) set -- --check0; expected_status=2 ;;
+			*) set -- "$mode" ;;
+		esac
+		status=0
+		from0_err=$(printf '%s\0' "$from0/gone" | TMPCLEANER_CONF=$cfg/from0.conf sh "$here/tmpcleaner" "$@" \
+			"--exclude-from0=$from0_file" 2>&1 >/dev/null) || status=$?
+		if [ "$status" -ne "$expected_status" ] || [ "$from0_err" != "$expected_err" ] || [ ! -e "$from0/gone" ]; then
+			echo "FAIL: $mode --exclude-from0 ($from0_case) should be rejected with exit $expected_status before cleaning (got $status: $from0_err)"
+			fail=1
+		fi
+	done
+done
+status=0
+TMPCLEANER_CONF=$cfg/from0.conf sh "$here/tmpcleaner" "--exclude-from0=$cfg/from0.list" > /dev/null 2>&1 || status=$?
+if [ "$status" -ne 0 ] || [ -e "$from0/gone" ] || [ ! -e "$from0/a b" ] || [ ! -e "$from0/p%q" ] || [ ! -e "$from0/plain" ]; then
+	echo "FAIL: a real run with --exclude-from0 should keep every listed path and clean the rest"
+	fail=1
+fi
+rm -rf "$from0" "$cfg/from0.conf" "$cfg/from0.list" "$cfg/from0.bad" "$cfg/from0.dir"
 # A large batch must read the preview once, with directory counts and duplicates intact.
 batch=$dir/check0-batch
 mkdir -p "$batch/gone/deep" "$batch/partial" "$batch/gone-sibling"
@@ -2600,6 +2687,10 @@ printf '%s\n' "$help_out" | grep -Fq -- '--prefix=PATH' || {
 }
 printf '%s\n' "$help_out" | grep -Fq -- '--exclude-prefix=PATH' || {
 	echo "FAIL: help should mention --exclude-prefix=PATH"
+	fail=1
+}
+printf '%s\n' "$help_out" | grep -Fq -- '--exclude-from0=FILE' || {
+	echo "FAIL: help should mention --exclude-from0=FILE"
 	fail=1
 }
 printf '%s\n' "$help_out" | grep -Fq -- 'rejected' || {
