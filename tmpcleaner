@@ -1350,9 +1350,37 @@ if [ "${1:-}" = --suggest-exclusions ]; then
 	}
 	exit 0
 fi
+snapshot_roots() {
+	# Snapshot every supported age-cleanup root (normally just /tmp).
+	LC_ALL=C awk 'substr($1, 1, 1) ~ /^[dDevqQCrR]$/ {
+		# A quoted root may hold spaces, so take everything between its quotes.
+		if ($2 ~ /^"/ && match($0, /"[^"]*"/)) root = substr($0, RSTART + 1, RLENGTH - 2)
+		else if ($2 ~ /^\047/ && match($0, /\047[^\047]*\047/)) root = substr($0, RSTART + 1, RLENGTH - 2)
+		else root = $2
+		gsub(/%%/, "%", root)
+		print root
+	}' \
+		"$scratch/rules" > "$scratch/roots"
+}
+snapshot() {
+	[ -z "${2:-}" ] || : > "$2"
+	while IFS= read -r root; do
+		# Keep overlapping walks identical without following root symlinks.
+		root=$(realpath -ms -- "$root" 2>/dev/null) || continue
+		if [ -n "${2:-}" ]; then
+			: > "$scratch/root-sizes"
+			find "$root" -xdev -samefile "$scratch" -prune -o -printf '%y %p\0' -fprintf "$scratch/root-sizes" '%s %y %p\0' 2>/dev/null || :
+			cat "$scratch/root-sizes" >> "$2"
+		else
+			find "$root" -xdev -samefile "$scratch" -prune -o -printf '%y %p\0' 2>/dev/null || :
+		fi
+	done < "$scratch/roots" | LC_ALL=C sort -zu > "$1"
+}
 for arg do
 	if [ "$arg" = --dry-run ]; then
 		generate_rules
+		snapshot_roots
+		snapshot "$scratch/before" "$scratch/sizes"
 		status=0
 		# The summary reads info-level lines verbatim, as the --check preview does.
 		SYSTEMD_LOG_LEVEL=info SYSTEMD_LOG_TARGET=console SYSTEMD_LOG_COLOR=0 \
@@ -1361,7 +1389,18 @@ for arg do
 		cat "$scratch/stderr" >&2
 		# Preview lines are text a crafted name could inflate, so the count is an
 		# estimate, like the --check preview parser.
-		LC_ALL=C awk "$breakdown_awk"'
+		SIZES=$scratch/sizes LC_ALL=C awk "$breakdown_awk"'
+		BEGIN {
+			RS = "\0"
+			sizes_file = ENVIRON["SIZES"]
+			while ((getline record < sizes_file) > 0) {
+				sep = index(record, " ")
+				if (sep > 1 && substr(record, sep + 1, 1) != "d")
+					sizes[substr(record, sep + 3)] = substr(record, 1, sep - 1) + 0
+			}
+			close(sizes_file)
+			RS = "\n"
+		}
 		# Only a line that closes its quote names a whole path for the breakdown.
 		/^Would remove directory "/ {
 			directories++
@@ -1370,11 +1409,15 @@ for arg do
 		}
 		/^Would remove "/ {
 			files++
-			if (/"$/) track(substr($0, 15, length($0) - 15))
+			if (/"$/) {
+				path = substr($0, 15, length($0) - 15)
+				bytes += sizes[path]
+				track(path)
+			}
 			next
 		}
 		END {
-			printf "tmpcleaner: would remove %d files and %d directories\n", files, directories > "/dev/stderr"
+			printf "tmpcleaner: would remove %d files and %d directories (about %.0f bytes)\n", files, directories, bytes > "/dev/stderr"
 			print_top()
 		}
 		' "$scratch/stderr"
@@ -1395,30 +1438,7 @@ fi
 if [ -n "${TMPCLEANER_METRICS:-}" ] && marked=$(LC_ALL=C sort -zu "$scratch/markers" 2>/dev/null | LC_ALL=C awk 'BEGIN { RS = "\0" } END { print NR + 0 }' 2>/dev/null); then
 	metric_marked=$marked
 fi
-# Snapshot every supported age-cleanup root (normally just /tmp).
-LC_ALL=C awk 'substr($1, 1, 1) ~ /^[dDevqQCrR]$/ {
-	# A quoted root may hold spaces, so take everything between its quotes.
-	if ($2 ~ /^"/ && match($0, /"[^"]*"/)) root = substr($0, RSTART + 1, RLENGTH - 2)
-	else if ($2 ~ /^\047/ && match($0, /\047[^\047]*\047/)) root = substr($0, RSTART + 1, RLENGTH - 2)
-	else root = $2
-	gsub(/%%/, "%", root)
-	print root
-}' \
-	"$scratch/rules" > "$scratch/roots"
-snapshot() {
-	[ -z "${2:-}" ] || : > "$2"
-	while IFS= read -r root; do
-		# Keep overlapping walks identical without following root symlinks.
-		root=$(realpath -ms -- "$root" 2>/dev/null) || continue
-		if [ -n "${2:-}" ]; then
-			: > "$scratch/root-sizes"
-			find "$root" -xdev -samefile "$scratch" -prune -o -printf '%y %p\0' -fprintf "$scratch/root-sizes" '%s %y %p\0' 2>/dev/null || :
-			cat "$scratch/root-sizes" >> "$2"
-		else
-			find "$root" -xdev -samefile "$scratch" -prune -o -printf '%y %p\0' 2>/dev/null || :
-		fi
-	done < "$scratch/roots" | LC_ALL=C sort -zu > "$1"
-}
+snapshot_roots
 sizes_file=
 if [ -n "${TMPCLEANER_METRICS:-}" ]; then
 	sizes_file=$scratch/sizes

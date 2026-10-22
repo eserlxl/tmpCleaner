@@ -993,7 +993,7 @@ preview=$(TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --dry-run 2>&1) || status=
 preview_files=$(printf '%s\n' "$preview" | grep -c '^Would remove ".*"$')
 preview_dirs=$(printf '%s\n' "$preview" | grep -c '^Would remove directory ".*"$')
 if [ "$status" -ne 0 ] || ! { [ "$(printf '%s\n' "$preview" | grep -c '^tmpcleaner: would remove [0-9]')" = 1 ] &&
-	printf '%s\n' "$preview" | grep -Fxq "tmpcleaner: would remove $(printf '%s\n' "$preview" | grep -c '^Would remove "') files and $(printf '%s\n' "$preview" | grep -c '^Would remove directory "') directories" &&
+	printf '%s\n' "$preview" | grep -Eq "^tmpcleaner: would remove $(printf '%s\n' "$preview" | grep -c '^Would remove "') files and $(printf '%s\n' "$preview" | grep -c '^Would remove directory "') directories \(about [0-9]+ bytes\)$" &&
 	printf '%s\n' "$preview" | grep -Fxq "tmpcleaner:   $((preview_files + preview_dirs)) under $dir"; }; then
 	echo "FAIL: preview should exit 0 and announce removal counts"
 	fail=1
@@ -1006,6 +1006,24 @@ echo "$preview" | grep -q 'Would remove.*old\.txt' || {
 	echo "FAIL: old.txt should still exist"
 	fail=1
 }
+# The byte estimate counts only removable non-directory entries.
+size_root=$(mktemp -d "$dir/dry-sizes.XXXXXX")
+mkdir "$size_root/olddir"
+head -c 1000 /dev/zero > "$size_root/a"
+head -c 2345 /dev/zero > "$size_root/olddir/old file"
+printf 'kept bytes' > "$size_root/fresh"
+old "$size_root/a" "$size_root/olddir/old file" "$size_root/olddir"
+printf 'd "%s" - - - amM:12h\n' "$size_root" > "$cfg/dry-size.conf"
+status=0
+TMPCLEANER_CONF=$cfg/dry-size.conf sh "$here/tmpcleaner" --dry-run \
+	> "$cfg/dry-size.out" 2> "$cfg/dry-size.err" || status=$?
+if [ "$status" -ne 0 ] || [ -s "$cfg/dry-size.out" ] ||
+	! grep -Fxq 'tmpcleaner: would remove 2 files and 1 directories (about 3345 bytes)' "$cfg/dry-size.err" ||
+	[ ! -f "$size_root/a" ] || [ ! -f "$size_root/olddir/old file" ] || [ ! -f "$size_root/fresh" ]; then
+	echo 'FAIL: --dry-run must estimate apparent bytes without deleting files'
+	fail=1
+fi
+rm -rf "$size_root" "$cfg/dry-size.conf" "$cfg/dry-size.out" "$cfg/dry-size.err"
 ctrl_top=$(mktemp -d "$(printf '/tmp/tmpcleaner-ctrl-\001\t\177-XXXXXX')")
 touch "$ctrl_top/a" "$ctrl_top/b"
 old "$ctrl_top/a" "$ctrl_top/b" "$ctrl_top"
