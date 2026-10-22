@@ -806,7 +806,7 @@ rules() {
 	# keep their meaning; skip a bare /tmp so no rule can exclude the whole tree.
 	systemd-tmpfiles --cat-config > "$scratch/cat" || return 1
 	WITH_SOURCES=$with_sources LC_ALL=C awk '
-		/^# \// {
+		/^# \/[^ ]*\.conf$/ {
 			source = substr($0, 3)
 			gsub(/[[:cntrl:]]/, "?", source)
 			source_printed = 0
@@ -842,7 +842,7 @@ rules() {
 	LC_ALL=C sort -zu "$scratch/inuse" "$scratch/markers" "$scratch/excludes" > "$scratch/sorted" || return 1
 	escape_x_rules "$scratch/sorted" > "$scratch/excl" || return 1
 	if [ -n "$with_sources" ]; then
-		printf '# source: generated (in-use, markers, --exclude-prefix)\n' || return 1
+		printf '# source: generated (in-use, markers, --exclude-prefix, --exclude-from0)\n' || return 1
 	fi
 	tr '\0' '\n' < "$scratch/excl" || return 1
 }

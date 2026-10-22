@@ -1154,13 +1154,13 @@ sources_dropin=$(printf '50-keep\r.conf')
 mkdir "$sources_conf.d"
 printf 'd %s - - - amM:12h' "$dir" > "$sources_conf"
 printf 'x %s/source-dropin' "$dir" > "$sources_conf.d/$sources_dropin"
-printf '# /usr/lib/tmpfiles.d/ignored.conf\nx /tmp\nx /var/tmp/other\n# /usr/lib/tmpfiles.d/package\t.conf\nx %s/source-package\nX %s/source-second\n' \
+printf '# /usr/lib/tmpfiles.d/ignored.conf\nx /tmp\nx /var/tmp/other\n# /usr/lib/tmpfiles.d/package\t.conf\n# /tmp/.X11-unix is shared\nx %s/source-package\nX %s/source-second\n' \
 	"$dir" "$dir" > "$cfg/sources.cat"
 sources_expected=$(printf '%s\n' \
 	"# source: $cfg/sources???.conf" "d $dir - - - amM:12h" \
 	"# source: $cfg/sources???.conf.d/50-keep?.conf" "x $dir/source-dropin" \
 	'# source: /usr/lib/tmpfiles.d/package?.conf' "x $dir/source-package" "X $dir/source-second" \
-	'# source: generated (in-use, markers, --exclude-prefix)')
+	'# source: generated (in-use, markers, --exclude-prefix, --exclude-from0)')
 status=0
 sources_out=$(CAT_SHIM_OUT=$cfg/sources.cat TMPCLEANER_CONF=$sources_conf sh "$here/tmpcleaner" \
 	--print-rules --with-sources "--exclude-prefix=$dir/source-explicit") || status=$?
