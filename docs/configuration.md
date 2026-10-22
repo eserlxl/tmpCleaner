@@ -94,8 +94,9 @@ sudo env TMPCLEANER_AGE=12h tmpcleaner --dry-run
 
 ## Expire abandoned markers
 
-Set `TMPCLEANER_MARKER_AGE` to a non-negative integer followed by `m`, `min`,
-`h`, `d`, or `w` (whole minutes or larger units), for example `1h`. Only markers
+Set `TMPCLEANER_MARKER_AGE` to a positive integer of at most six digits
+followed by `m`, `min`, `h`, `d`, or `w` (whole minutes or larger units), for
+example `1h`; zero and longer numbers are invalid. Only markers
 modified within that duration protect their directories. A long-running job
 can renew protection by touching its `.tmpcleaner-keep` file before it expires.
 Expired markers no longer exclude the directory; the usual cleanup age and

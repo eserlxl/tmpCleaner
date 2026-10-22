@@ -2960,7 +2960,7 @@ if [ "$status" -ne 1 ] || ! printf 'removed\0%s\0kept\0%s\0' "$dir/job/old" "$ma
 	echo 'FAIL: --check0 must expire stale markers and keep fresh markers'
 	fail=1
 fi
-for marker_age in bogus '' 30s 1 1.5h; do
+for marker_age in bogus '' 30s 1 1.5h 9999999w 0h 000m; do
 	status=0
 	TMPCLEANER_MARKER_AGE=$marker_age TMPCLEANER_CONF=$cfg/marker.conf sh "$here/tmpcleaner" \
 		--check "$dir/job/old" > /dev/null 2>"$cfg/check.err" || status=$?

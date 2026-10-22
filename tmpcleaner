@@ -468,7 +468,9 @@ if [ "${TMPCLEANER_AGE+x}" ]; then
 	}
 fi
 if [ "${TMPCLEANER_MARKER_AGE+x}" ]; then
-	printf '%s\0' "$TMPCLEANER_MARKER_AGE" | LC_ALL=C grep -zEq '^[0-9]+(m|min|h|d|w)$' || {
+	# Six digits keep -mmin within what find accepts; zero would expire every marker.
+	printf '%s\0' "$TMPCLEANER_MARKER_AGE" | LC_ALL=C grep -zEq '^[0-9]{1,6}(m|min|h|d|w)$' &&
+		! printf '%s\0' "$TMPCLEANER_MARKER_AGE" | LC_ALL=C grep -zEq '^0+[a-z]' || {
 		echo "${err_tag}tmpcleaner: invalid TMPCLEANER_MARKER_AGE: $TMPCLEANER_MARKER_AGE" >&2
 		exit "$errstatus"
 	}
