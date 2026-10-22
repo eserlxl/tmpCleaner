@@ -1371,6 +1371,19 @@ for bad_check0 in "$dir/missing" relative "$newline"; do
 		fail=1
 	fi
 done
+mkdir -p "$dir/locked/sub"
+touch "$dir/locked/sub/f"
+chmod 000 "$dir/locked"
+if [ "$(id -u)" -ne 0 ]; then
+	status=0
+	check_err=$(TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --check "$dir/locked/sub/f" 2>&1) || status=$?
+	if [ "$status" -ne 2 ] || ! printf '%s\n' "$check_err" | grep -Fq -- "--check cannot read $dir/locked/sub/f"; then
+		echo "FAIL: --check under a non-searchable directory should report it as unreadable"
+		fail=1
+	fi
+fi
+chmod 700 "$dir/locked"
+rm -rf "$dir/locked"
 status=0
 printf '' | TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --check0 \
 	> "$cfg/check0.out" 2> "$cfg/check0.err" || status=$?

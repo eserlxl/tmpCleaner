@@ -122,7 +122,18 @@ canonicalize_check() {
 		.|..) parent=$path base= ;;
 		*) parent=${path%/*} ;;
 	esac
+	# realpath reports the same failure for a missing path and for an ancestor
+	# the caller cannot search. Walk up to the deepest existing directory
+	# (never above /tmp) and call an unsearchable one unreadable.
 	check=$(realpath -e -- "${parent:-/}" 2>/dev/null && printf x) || {
+		dir=${parent:-/}
+		while [ ! -e "$dir" ] && [ "$dir" != /tmp ]; do
+			dir=${dir%/*}
+		done
+		if [ -e "$dir" ] && [ ! -x "$dir" ]; then
+			echo "${err_tag}tmpcleaner: --check cannot read $shown" >&2
+			exit 2
+		fi
 		echo "${err_tag}tmpcleaner: --check path does not exist: $shown" >&2
 		exit 2
 	}
