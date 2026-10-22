@@ -388,7 +388,7 @@ dropins() {
 }
 
 conf=${TMPCLEANER_CONF:-/etc/tmpcleaner/tmpcleaner.conf}
-[ -r "$conf" ] || { echo "${err_tag}tmpcleaner: cannot read $conf" >&2; exit "$errstatus"; }
+{ [ -f "$conf" ] && [ -r "$conf" ]; } || { echo "${err_tag}tmpcleaner: cannot read $conf" >&2; exit "$errstatus"; }
 dropins
 case "${TMPCLEANER_LIST:-}" in
 	''|1|top|nul) ;;

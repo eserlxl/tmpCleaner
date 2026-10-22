@@ -2519,6 +2519,18 @@ if TMPCLEANER_CONF=$dir/missing.conf sh "$here/tmpcleaner" > /dev/null 2> "$cfg/
 	echo "FAIL: missing config should fail"
 	fail=1
 fi
+status=0
+TMPCLEANER_CONF=$cfg TMPCLEANER_AGE=1h sh "$here/tmpcleaner" --print-rules > /dev/null 2> "$cfg/bad.err" || status=$?
+if [ "$status" -ne 1 ] || [ "$(cat "$cfg/bad.err")" != "tmpcleaner: cannot read $cfg" ]; then
+	echo "FAIL: directory TMPCLEANER_CONF with TMPCLEANER_AGE should exit 1"
+	fail=1
+fi
+status=0
+TMPCLEANER_CONF=$cfg sh "$here/tmpcleaner" --print-rules > /dev/null 2> "$cfg/bad.err" || status=$?
+if [ "$status" -ne 1 ] || [ "$(cat "$cfg/bad.err")" != "tmpcleaner: cannot read $cfg" ]; then
+	echo "FAIL: directory TMPCLEANER_CONF should exit 1"
+	fail=1
+fi
 help_out=$(TMPCLEANER_CONF=$dir/missing.conf sh "$here/tmpcleaner" --help) || {
 	echo "FAIL: --help should exit 0 without config"
 	fail=1
