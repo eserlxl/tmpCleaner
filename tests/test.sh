@@ -2736,6 +2736,29 @@ if [ "$status" -ne 0 ] || [ "$check_out" != "would be removed: $dir/symlink-job/
 	echo 'FAIL: --check must report a symlinked .tmpcleaner-keep directory as removable'
 	fail=1
 fi
+# --check names the first x/X rule that keeps a path or one of its ancestors.
+mkdir -p "$dir/rulekeep/keep" "$dir/rulekeep/job-1"
+printf 'kept\n' > "$dir/rulekeep/keep/f"
+printf 'kept\n' > "$dir/rulekeep/job-1/f"
+printf 'new\n' > "$dir/rulekeep/new"
+old "$dir/rulekeep/keep/f" "$dir/rulekeep/job-1/f"
+printf 'd %s/rulekeep - - - amM:12h\nx %s/rulekeep/keep\nx %s/rulekeep/job-*\n' \
+	"$dir" "$dir" "$dir" > "$cfg/rulekeep.conf"
+for name in keep/f job-1/f new; do
+	case "$name" in
+		keep/f) expected_err="tmpcleaner: kept by configuration rule: x $dir/rulekeep/keep" ;;
+		job-1/f) expected_err="tmpcleaner: kept by configuration rule: x $dir/rulekeep/job-*" ;;
+		*) expected_err='tmpcleaner: not old enough, or kept by a configuration rule' ;;
+	esac
+	status=0
+	check_out=$(TMPCLEANER_CONF=$cfg/rulekeep.conf sh "$here/tmpcleaner" --check "$dir/rulekeep/$name" 2>"$cfg/check.err") || status=$?
+	if [ "$status" -ne 1 ] || [ "$check_out" != "kept: $dir/rulekeep/$name" ] ||
+		[ "$(cat "$cfg/check.err")" != "$expected_err" ]; then
+		echo "FAIL: --check must name the configuration rule that keeps rulekeep/$name"
+		fail=1
+	fi
+done
+rm -rf "$dir/rulekeep"
 status=0
 shim env FIND_SHIM_FAIL=markers-unreadable TMPCLEANER_CONF=$cfg/marker.conf \
 	TMPCLEANER_METRICS=$cfg/marker-with.prom sh "$here/tmpcleaner" >/dev/null 2>&1 || status=$?
