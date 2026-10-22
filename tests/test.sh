@@ -2968,21 +2968,52 @@ confpath="$confdest/target [safe]"
 mkdir "$confsource"
 cp "$here/Makefile" "$here/tmpcleaner.conf" "$confsource"
 
-# Relative config paths must fail before either install target writes anything.
+# Relative install paths must fail before either install target writes anything.
 mkdir "$confdir/cwd"
 for conf_target in install-conf install; do
-	for relative_dest in "$confdest" ''; do
+	for relative_path in BINDIR=rel/bin CONFDIR=rel/conf UNITDIR=rel/units; do
+		path_var=${relative_path%%=*}
 		status=0
 		conf_log=$(cd "$confdir/cwd" && make -s -C "$confsource" "$conf_target" \
-			DESTDIR="$relative_dest" CONFDIR=rel/conf 2>&1) || status=$?
+			DESTDIR="$confdest" "$relative_path" 2>&1) || status=$?
 		if [ "$status" -eq 0 ] ||
-			! printf '%s\n' "$conf_log" | grep -Fq 'CONFDIR must be absolute' ||
+			! printf '%s\n' "$conf_log" | grep -Fq "$path_var must be absolute" ||
 			[ -e "$confdest" ] || [ -e "${confdest}rel" ] ||
 			[ -e "$confdest/rel" ] || [ -e "$confdir/cwd/rel" ] || [ -e "$confsource/rel" ]; then
-			echo "FAIL: $conf_target must reject relative CONFDIR before writing files (DESTDIR=$relative_dest)"
+			echo "FAIL: $conf_target must reject relative $path_var before writing files"
 			fail=1
 		fi
 	done
+done
+
+# Reject every relative uninstall path before removing any staged or cwd files.
+for relative_path in BINDIR=rel/bin CONFDIR=rel UNITDIR=rel/units; do
+	path_var=${relative_path%%=*}
+	uninstall_root=$(mktemp -d "$confdir/uninstall.XXXXXX")
+	uninstall_dest=$uninstall_root/stage
+	uninstall_bin=/bin uninstall_conf=/conf uninstall_units=/units
+	case "$path_var" in
+		BINDIR) uninstall_bin=rel/bin ;;
+		CONFDIR) uninstall_conf=rel ;;
+		UNITDIR) uninstall_units=rel/units ;;
+	esac
+	mkdir -p "$uninstall_dest$uninstall_conf/tmpcleaner.conf.d" "$uninstall_dest$uninstall_units" \
+		"$uninstall_dest$uninstall_bin" "$uninstall_root/cwd/rel"
+	touch "$uninstall_dest$uninstall_conf/tmpcleaner.conf" "$uninstall_dest$uninstall_conf/tmpcleaner.conf.default" \
+		"$uninstall_dest$uninstall_conf/tmpcleaner.conf.new" "$uninstall_dest$uninstall_conf/tmpcleaner.conf.d/local.conf" \
+		"$uninstall_dest$uninstall_units/tmpcleaner.service" "$uninstall_dest$uninstall_units/tmpcleaner.timer" \
+		"$uninstall_dest$uninstall_bin/tmpcleaner" "$uninstall_root/cwd/rel/tmpcleaner.conf"
+	cp -R "$uninstall_root" "$uninstall_root.expected"
+	status=0
+	conf_log=$(cd "$uninstall_root/cwd" && make -s -f "$confsource/Makefile" uninstall \
+		DESTDIR="$uninstall_dest" BINDIR="$uninstall_bin" CONFDIR="$uninstall_conf" UNITDIR="$uninstall_units" 2>&1) || status=$?
+	if [ "$status" -eq 0 ] ||
+		! printf '%s\n' "$conf_log" | grep -Fq "$path_var must be absolute" ||
+		! diff -r "$uninstall_root.expected" "$uninstall_root" >/dev/null; then
+		echo "FAIL: uninstall must reject relative $path_var before removing files"
+		fail=1
+	fi
+	rm -rf "$uninstall_root" "$uninstall_root.expected"
 done
 
 make -s -C "$confsource" install-conf DESTDIR="$confdest" CONFDIR='/target [safe]' >/dev/null

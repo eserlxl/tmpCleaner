@@ -58,7 +58,9 @@ endif
 endif
 
 install-conf:
-	@case $(call shell_quote,$(CONFDIR)) in /*) ;; *) echo "make install-conf: CONFDIR must be absolute" >&2; exit 1 ;; esac
+	@case $(call shell_quote,$(BINDIR)) in /*) ;; *) echo "make: BINDIR must be absolute" >&2; exit 1 ;; esac
+	@case $(call shell_quote,$(CONFDIR)) in /*) ;; *) echo "make: CONFDIR must be absolute" >&2; exit 1 ;; esac
+	@case $(call shell_quote,$(UNITDIR)) in /*) ;; *) echo "make: UNITDIR must be absolute" >&2; exit 1 ;; esac
 	@install -dm755 $(call shell_quote,$(DESTDIR)$(CONFDIR)/tmpcleaner.conf.d)
 	@c=$(call shell_quote,$(DESTDIR)$(CONFDIR)/tmpcleaner.conf); \
 	if [ ! -e "$$c" ] || cmp -s "$$c" "$$c.default" || cmp -s tmpcleaner.conf "$$c"; then \
@@ -72,6 +74,9 @@ install-conf:
 	fi
 
 uninstall:
+	@case $(call shell_quote,$(BINDIR)) in /*) ;; *) echo "make: BINDIR must be absolute" >&2; exit 1 ;; esac
+	@case $(call shell_quote,$(CONFDIR)) in /*) ;; *) echo "make: CONFDIR must be absolute" >&2; exit 1 ;; esac
+	@case $(call shell_quote,$(UNITDIR)) in /*) ;; *) echo "make: UNITDIR must be absolute" >&2; exit 1 ;; esac
 ifeq ($(DESTDIR),)
 	-systemctl disable --now tmpcleaner.timer
 endif
