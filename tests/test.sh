@@ -130,6 +130,7 @@ exec "$(command -v date)" "\$@"
 SHIM
 cat > "$shimdir/awk" <<SHIM
 #!/bin/sh
+[ -z "\${AWK_SHIM_MARKER:-}" ] || printf '.\n' >> "\$AWK_SHIM_MARKER"
 case "\$1" in
 	*'getline line < "/proc/self/mountinfo"'*)
 		if [ -n "\${MOUNTINFO_SHIM_FILE:-}" ]; then
@@ -1305,6 +1306,59 @@ if [ "$status" -ne 0 ] || ! cmp -s "$cfg/check0.expected" "$cfg/check0.out" || [
 	echo "FAIL: --check0 should exit 0 when all paths would be removed"
 	fail=1
 fi
+# A large batch must read the preview once, with directory counts and duplicates intact.
+batch=$dir/check0-batch
+mkdir -p "$batch/gone/deep" "$batch/partial" "$batch/gone-sibling"
+i=0
+while [ "$i" -lt 300 ]; do
+	touch "$batch/gone/file-$i"
+	i=$((i + 1))
+done
+touch "$batch/gone/deep/old" "$batch/partial/old" "$batch/partial/fresh" "$batch/gone-sibling/fresh"
+old "$batch/gone/"* "$batch/gone/deep/old" "$batch/gone" "$batch/partial/old" "$batch/partial"
+status=0
+printf '%s\0' "$batch/gone" |
+	AWK_SHIM_MARKER=$cfg/check0-small.awk TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --check0 \
+	> "$cfg/check0.out" 2> "$cfg/check0.err" || status=$?
+printf 'removed\0%s\0' "$batch/gone" > "$cfg/check0.expected"
+if [ "$status" -ne 0 ] || ! cmp -s "$cfg/check0.expected" "$cfg/check0.out" || [ -s "$cfg/check0.err" ]; then
+	echo "FAIL: --check0 should judge a directory with hundreds of old files as removable"
+	fail=1
+fi
+: > "$cfg/check0.paths"
+: > "$cfg/check0.expected"
+i=0
+while [ "$i" -lt 5000 ]; do
+	case "$((i % 500))" in
+		0) target=$batch/gone ;;
+		1) target=$batch/gone/deep ;;
+		2) target=$dir/selflink/check0-batch/gone/deep/old ;;
+		*) target=$batch/gone/file-$((i % 300)) ;;
+	esac
+	printf '%s\0' "$target" >> "$cfg/check0.paths"
+	printf 'removed\0%s\0' "$target" >> "$cfg/check0.expected"
+	i=$((i + 1))
+done
+status=0
+AWK_SHIM_MARKER=$cfg/check0-large.awk TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --check0 \
+	< "$cfg/check0.paths" > "$cfg/check0.out" 2> "$cfg/check0.err" || status=$?
+if [ "$status" -ne 0 ] || ! cmp -s "$cfg/check0.expected" "$cfg/check0.out" || [ -s "$cfg/check0.err" ] ||
+	[ ! -e "$batch/gone/file-299" ] || [ ! -s "$cfg/check0-small.awk" ] ||
+	[ "$(wc -l < "$cfg/check0-small.awk")" -ne "$(wc -l < "$cfg/check0-large.awk")" ]; then
+	echo "FAIL: --check0 should preserve 5000 ordered records with a constant number of awk invocations"
+	fail=1
+fi
+status=0
+printf '%s\0' "$batch/partial" "$batch/gone" "$batch/gone-sibling" "$batch/partial/old" "$batch/partial" |
+	TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --check0 > "$cfg/check0.out" 2> "$cfg/check0.err" || status=$?
+printf 'kept\0%s\0removed\0%s\0kept\0%s\0removed\0%s\0kept\0%s\0' \
+	"$batch/partial" "$batch/gone" "$batch/gone-sibling" "$batch/partial/old" "$batch/partial" > "$cfg/check0.expected"
+if [ "$status" -ne 1 ] || ! cmp -s "$cfg/check0.expected" "$cfg/check0.out" || [ -s "$cfg/check0.err" ]; then
+	echo "FAIL: --check0 should keep partially removable directories and distinguish sibling prefixes"
+	fail=1
+fi
+rm -rf "$batch"
+rm -f "$cfg/check0.paths" "$cfg/check0-small.awk" "$cfg/check0-large.awk"
 for bad_check0 in "$dir/missing" relative "$newline"; do
 	status=0
 	printf '%s\0' "$dir/old.txt" "$bad_check0" |

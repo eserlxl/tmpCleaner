@@ -904,7 +904,7 @@ if [ "${1:-}" = --print-rules ]; then
 	exit 0
 fi
 
-judge_check() {
+check_entries() {
 	# A directory goes only if everything beneath it goes too: the preview
 	# announces old directories even when a kept entry will block the rmdir.
 	# Preview lines are text a crafted name can forge, so errors may only lean
@@ -929,18 +929,37 @@ judge_check() {
 		}
 		entries=${#entries}
 	fi
+}
+
+judge_check() {
+	if [ -z "$check0" ]; then
+		check_entries
+		printf '%s\0%s\0%s\0' "$check" "$requested" "$entries" > "$scratch/check-entries" || exit 2
+	fi
 	verdict=0
-	CHECK=$check ENTRIES=$entries LC_ALL=C awk '
-		BEGIN {
-			path = ENVIRON["CHECK"]
-			file = "Would remove \"" path "\""
-			directory = "Would remove directory \"" path "\""
+	CHECK0=$check0 LC_ALL=C awk '
+		FILENAME == ARGV[1] {
+			if ($0 !~ /"$/) next
+			if (index($0, "Would remove \"") == 1) {
+				path = substr($0, 15, length($0) - 15)
+				files[path] = 1
+			} else if (index($0, "Would remove directory \"") == 1) {
+				path = substr($0, 25, length($0) - 25)
+				directories[path] = 1
+			} else next
+			# Count every preview line for each ancestor, including duplicate lines.
+			while (sub(/\/[^/]*$/, "", path)) inside[path]++
+			next
 		}
-		$0 == file { found_file = 1 }
-		$0 == directory { found_directory = 1 }
-		/"$/ && (index($0, "Would remove \"" path "/") == 1 || index($0, "Would remove directory \"" path "/") == 1) { inside++ }
-		END { exit !(found_file || (found_directory && inside >= ENVIRON["ENTRIES"] + 0)) }
-		' "$scratch/preview" || verdict=$?
+		{
+			path = $0
+			if ((getline requested) != 1 || (getline entries) != 1) { failed = 1; exit 2 }
+			removed = (path in files) || ((path in directories) && inside[path] >= entries + 0)
+			if (ENVIRON["CHECK0"] != "") printf "%s%c%s%c", removed ? "removed" : "kept", 0, requested, 0
+			if (!removed) any_kept = 1
+		}
+		END { if (!failed) exit any_kept }
+		' "$scratch/preview" 'RS=\0' "$scratch/check-entries" > "$scratch/verdicts" || verdict=$?
 }
 
 if [ -n "$check$check0" ]; then
@@ -962,22 +981,16 @@ if [ -n "$check$check0" ]; then
 		exit "$errstatus"
 	}
 	if [ -n "$check0" ]; then
-		: > "$scratch/verdicts"
-		any_kept=0
+		: > "$scratch/check-entries" || exit 2
 		while IFS= read -r requested || [ -n "$requested" ]; do
 			canonicalize_check
-			judge_check
-			case "$verdict" in
-				0) printf 'removed\0%s\0' "$requested" >> "$scratch/verdicts" ;;
-				1)
-					printf 'kept\0%s\0' "$requested" >> "$scratch/verdicts"
-					any_kept=1
-					;;
-				*) exit 2 ;;
-			esac
+			check_entries
+			printf '%s\0%s\0%s\0' "$check" "$requested" "$entries" >> "$scratch/check-entries" || exit 2
 		done < "$scratch/check0-paths"
+		judge_check
+		case "$verdict" in 0|1) ;; *) exit 2 ;; esac
 		cat "$scratch/verdicts"
-		exit "$any_kept"
+		exit "$verdict"
 	fi
 	judge_check
 	case "$verdict" in
