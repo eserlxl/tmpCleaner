@@ -1167,6 +1167,29 @@ for excl_arg in "$dir/nonexistent/../old.txt" "$dir/excllink/old.txt"; do
 	fi
 done
 rm -f "$dir/excllink"
+for outside_excl in /var/x /tmp/../var /tmpx /; do
+	for mode in --print-rules --dry-run clean --check; do
+		expected_status=1
+		case "$mode" in
+			clean) set -- ;;
+			--check) set -- --check "$dir/old.txt"; expected_status=2 ;;
+			*) set -- "$mode" ;;
+		esac
+		status=0
+		outside_err=$(TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" "$@" "--exclude-prefix=$outside_excl" 2>&1 >/dev/null) || status=$?
+		if [ "$status" -ne "$expected_status" ] || [ ! -e "$dir/old.txt" ] ||
+			[ "$outside_err" != "tmpcleaner: --exclude-prefix must be under /tmp: $outside_excl" ]; then
+			echo "FAIL: $mode --exclude-prefix=$outside_excl should be rejected with exit $expected_status before cleaning (got $status: $outside_err)"
+			fail=1
+		fi
+	done
+done
+status=0
+print_tmp_rules=$(TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --print-rules --exclude-prefix=/tmp/ 2>&1) || status=$?
+if [ "$status" -ne 0 ] || ! printf '%s\n' "$print_tmp_rules" | grep -Fxq 'x "/tmp"'; then
+	echo "FAIL: --print-rules --exclude-prefix=/tmp/ should be accepted as /tmp"
+	fail=1
+fi
 status=0
 held_preview=$(TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --dry-run 2>&1) || status=$?
 if [ "$status" -ne 0 ] || printf '%s\n' "$held_preview" | grep -Fq "$argdir/held.txt"; then

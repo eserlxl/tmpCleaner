@@ -313,6 +313,10 @@ if [ "$#" -gt 0 ]; then
 				excl=${excl%x}
 				excl=${excl%"$nl"}
 				[ -z "$base" ] || excl=${excl%/}/$base
+				case "$excl" in
+					/tmp|/tmp/*) ;;
+					*) echo "${err_tag}tmpcleaner: --exclude-prefix must be under /tmp: $path" >&2; exit "$errstatus" ;;
+				esac
 				printf '%s\0' "$excl" >> "$scratch/excludes"
 				;;
 			*) set -- "$@" "$arg" ;;
