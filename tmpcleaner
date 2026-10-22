@@ -1421,7 +1421,11 @@ for arg do
 			files++
 			if (/"$/) {
 				path = substr($0, 15, length($0) - 15)
-				bytes += sizes[path]
+				# Overlapping rules announce one path once per rule.
+				if (!(path in counted)) {
+					counted[path] = 1
+					bytes += sizes[path]
+				}
 				track(path)
 			}
 			next
