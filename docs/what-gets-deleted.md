@@ -55,7 +55,7 @@ change it; see [configuration.md](configuration.md).
 | Files in use | Executables of running processes, files a running process holds open, memory-mapped files such as loaded libraries | Each one gets its own exclusion, read from `/proc` just before the run |
 | Directories in use | Everything inside a directory a running process works in (its current directory) or uses as its root directory (chrooted or containerized processes), including files and directories reached through bind mounts | Same scan; a process working in `/tmp` itself does not keep all of `/tmp` |
 | Unix sockets that are still in use | Sockets listed in `/proc/net/unix` of any network namespace | A server may sit idle on its socket longer than the age limit |
-| Marked job directories | `/tmp/<a>` or `/tmp/<a>/<b>` holding a regular `.tmpcleaner-keep` file | Scanned before each run so an unprivileged job can keep its directory until it removes the marker (symlinks are ignored) |
+| Marked job directories | `/tmp/<a>` or `/tmp/<a>/<b>` holding a regular `.tmpcleaner-keep` file | Scanned before each run; kept until the marker is removed or its modification age reaches the opt-in `TMPCLEANER_MARKER_AGE` (symlinks are ignored) |
 | X11/ICE socket dirs and X lock files | `/tmp/.X11-unix`, `/tmp/.ICE-unix`, `/tmp/.XIM-unix`, `/tmp/.font-unix`, `/tmp/.Test-unix`, `/tmp/.X0-lock`, ... | `x` rules in `tmpcleaner.conf` |
 | Private service `/tmp` dirs | systemd `PrivateTmp` dirs (`/tmp/systemd-private-*`), `/tmp/snap-private-tmp` | `x` rules in `tmpcleaner.conf` |
 | Kerberos ticket caches | `/tmp/krb5cc_*` | MIT Kerberos keeps them here by default; they can outlive the age limit |
@@ -124,7 +124,11 @@ tmpCleaner imports `x` and `X` rules under `/tmp` from there at every run.
 
 Without root, a job can create a regular `.tmpcleaner-keep` file in its
 `/tmp/<a>` or `/tmp/<a>/<b>` directory and delete it when done; a symlink with
-that name keeps nothing. Only tmpCleaner reads the marker: the distribution's own
+that name keeps nothing. When `TMPCLEANER_MARKER_AGE` is set, touch the marker
+before that duration elapses to renew protection; abandoned markers expire
+automatically. Unset keeps markers effective regardless of age
+([configuration.md](configuration.md#expire-abandoned-markers)).
+Only tmpCleaner reads the marker: the distribution's own
 cleaner does not, so work that must outlive the distribution's `/tmp` age still
 needs a `tmpfiles.d` `x` rule.
 

@@ -69,6 +69,8 @@ Environment variables:
                             Drop-ins: <path>.d/*.conf, read after it in byte order
   TMPCLEANER_AGE            Override duration on every d and D rule
                             (e.g. 6h, 30m)
+  TMPCLEANER_MARKER_AGE     Expire markers by modification age (default: never)
+                            Whole minutes: m, min, h, d or w (e.g. 1h)
   TMPCLEANER_FULL_PERCENT   Threshold percentage of /tmp usage (1-100); the
                             larger of block and inode usage counts ('-' = 0).
                             If df fails or prints unexpected output, the run
@@ -447,6 +449,22 @@ if [ "${TMPCLEANER_AGE+x}" ]; then
 		exit "$errstatus"
 	}
 fi
+if [ "${TMPCLEANER_MARKER_AGE+x}" ]; then
+	printf '%s\0' "$TMPCLEANER_MARKER_AGE" | LC_ALL=C grep -zEq '^[0-9]+(m|min|h|d|w)$' || {
+		echo "${err_tag}tmpcleaner: invalid TMPCLEANER_MARKER_AGE: $TMPCLEANER_MARKER_AGE" >&2
+		exit "$errstatus"
+	}
+	marker_age_minutes=$(printf '%s\n' "$TMPCLEANER_MARKER_AGE" | LC_ALL=C awk '
+		{
+			minutes = $0 + 0
+			sub(/^[0-9]+/, "")
+			if ($0 == "h") minutes *= 60
+			else if ($0 == "d") minutes *= 1440
+			else if ($0 == "w") minutes *= 10080
+			printf "%.0f", minutes
+		}
+	') || exit "$errstatus"
+fi
 if [ "${TMPCLEANER_FULL_PERCENT+x}" ]; then
 	printf '%s\0' "$TMPCLEANER_FULL_PERCENT" | LC_ALL=C grep -zEq '^([1-9][0-9]?|100)$' || {
 		echo "${err_tag}tmpcleaner: invalid TMPCLEANER_FULL_PERCENT: $TMPCLEANER_FULL_PERCENT" >&2
@@ -795,7 +813,11 @@ rules() {
 	# bytes, so a name holding one would leave its rule half quoted.
 	[ -z "$check$export_holders" ] || holders_file=$scratch/holders
 	in_use > "$scratch/inuse" || { scan_failed=1; return 1; }
-	find /tmp -xdev -mindepth 2 -maxdepth 3 -name .tmpcleaner-keep -type f -printf '%h\0' \
+	set --
+	if [ "${TMPCLEANER_MARKER_AGE+x}" ]; then
+		set -- -mmin "-$marker_age_minutes"
+	fi
+	find /tmp -xdev -mindepth 2 -maxdepth 3 -name .tmpcleaner-keep -type f "$@" -printf '%h\0' \
 		> "$scratch/markers" 2>/dev/null || [ "$?" -eq 1 ] || return 1
 	LC_ALL=C sort -zu "$scratch/inuse" "$scratch/markers" "$scratch/excludes" > "$scratch/sorted" || return 1
 	escape_x_rules "$scratch/sorted" > "$scratch/excl" || return 1

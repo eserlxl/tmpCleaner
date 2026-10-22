@@ -57,6 +57,7 @@ Service environment settings below go in a unit drop-in via `sudo systemctl edit
 
 - `TMPCLEANER_CONF`: Path to configuration file (default: `/etc/tmpcleaner/tmpcleaner.conf`; regular files in `$TMPCLEANER_CONF.d/*.conf` are read after it).
 - `TMPCLEANER_AGE`: Override duration on every `d` and `D` rule (any modifier) (e.g. `6h`, `30m`).
+- `TMPCLEANER_MARKER_AGE`: Expire `.tmpcleaner-keep` protection by marker modification age (e.g. `1h`; default: never).
 - `TMPCLEANER_FULL_PERCENT`: Threshold percentage of `/tmp` usage (1-100); the larger of block and inode usage counts (`-` is 0), and a `df` error aborts the run.
 - `TMPCLEANER_FULL_AGE`: Age duration to use when `/tmp` usage meets or exceeds `TMPCLEANER_FULL_PERCENT`.
 - `TMPCLEANER_LIST`: Set to `1` for escaped removal logs, `top` for the top-10 per-entry breakdown, or `nul` for raw NUL-separated paths on stdout (real runs only; default: off).
@@ -89,6 +90,24 @@ Preview a one-off override without editing the config:
 
 ```sh
 sudo env TMPCLEANER_AGE=12h tmpcleaner --dry-run
+```
+
+## Expire abandoned markers
+
+Set `TMPCLEANER_MARKER_AGE` to a non-negative integer followed by `m`, `min`,
+`h`, `d`, or `w` (whole minutes or larger units), for example `1h`. Only markers
+modified within that duration protect their directories. A long-running job
+can renew protection by touching its `.tmpcleaner-keep` file before it expires.
+Expired markers no longer exclude the directory; the usual cleanup age and
+other protections still apply. This affects real runs and all previews and
+checks. Unset preserves markers regardless of age; an empty or invalid value
+stops the run before cleaning.
+
+For the service, run `sudo systemctl edit tmpcleaner.service` and add:
+
+```ini
+[Service]
+Environment=TMPCLEANER_MARKER_AGE=1h
 ```
 
 ## Use a shorter age when /tmp is nearly full

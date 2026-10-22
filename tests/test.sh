@@ -4,7 +4,7 @@
 # cannot be backdated, so the test drops b/B/c/C from the age-by field and
 # keeps the rest as configured.
 set -eu
-unset TMPCLEANER_AGE TMPCLEANER_FULL_PERCENT TMPCLEANER_FULL_AGE TMPCLEANER_LIST TMPCLEANER_METRICS JOURNAL_STREAM
+unset TMPCLEANER_AGE TMPCLEANER_MARKER_AGE TMPCLEANER_FULL_PERCENT TMPCLEANER_FULL_AGE TMPCLEANER_LIST TMPCLEANER_METRICS JOURNAL_STREAM
 here=$(cd "$(dirname "$0")/.." && pwd)
 dir=$(mktemp -d /tmp/tmpcleaner-test.XXXXXX)
 # Fixture configs live in a private directory, never at a guessable /tmp path.
@@ -2874,6 +2874,52 @@ if [ "$status" -ne 0 ] || [ "$check_out" != "would be removed: $dir/symlink-job/
 	echo 'FAIL: --check must report a symlinked .tmpcleaner-keep directory as removable'
 	fail=1
 fi
+# Opt-in marker expiry uses mtime; touching a marker renews protection.
+old "$dir/job/.tmpcleaner-keep"
+touch "$marker_top/.tmpcleaner-keep"
+status=0
+check_out=$(TMPCLEANER_MARKER_AGE=1h TMPCLEANER_CONF=$cfg/marker.conf sh "$here/tmpcleaner" \
+	--check "$dir/job/old" 2>"$cfg/check.err") || status=$?
+if [ "$status" -ne 0 ] || [ "$check_out" != "would be removed: $dir/job/old" ] || [ -s "$cfg/check.err" ]; then
+	echo 'FAIL: --check must let an expired .tmpcleaner-keep marker lapse'
+	fail=1
+fi
+status=0
+check_out=$(TMPCLEANER_MARKER_AGE=1h TMPCLEANER_CONF=$cfg/marker.conf sh "$here/tmpcleaner" \
+	--check "$marker_top/old" 2>"$cfg/check.err") || status=$?
+if [ "$status" -ne 1 ] || [ "$check_out" != "kept: $marker_top/old" ] ||
+	[ "$(cat "$cfg/check.err")" != "tmpcleaner: kept by a .tmpcleaner-keep marker in $marker_top" ]; then
+	echo 'FAIL: --check must keep the marker reason for a renewed .tmpcleaner-keep marker'
+	fail=1
+fi
+status=0
+marker_preview=$(TMPCLEANER_MARKER_AGE=1h TMPCLEANER_CONF=$cfg/marker.conf sh "$here/tmpcleaner" --dry-run 2>&1) || status=$?
+if [ "$status" -ne 0 ] ||
+	! printf '%s\n' "$marker_preview" | grep -Fq "$dir/job/old" ||
+	printf '%s\n' "$marker_preview" | grep -Fq "$marker_top/old"; then
+	echo 'FAIL: --dry-run must expire stale markers and keep fresh markers'
+	fail=1
+fi
+status=0
+printf '%s\0%s\0' "$dir/job/old" "$marker_top/old" |
+	TMPCLEANER_MARKER_AGE=1h TMPCLEANER_CONF=$cfg/marker.conf sh "$here/tmpcleaner" --check0 \
+	> "$cfg/marker.check0" 2>"$cfg/check.err" || status=$?
+if [ "$status" -ne 1 ] || ! printf 'removed\0%s\0kept\0%s\0' "$dir/job/old" "$marker_top/old" |
+	cmp -s - "$cfg/marker.check0"; then
+	echo 'FAIL: --check0 must expire stale markers and keep fresh markers'
+	fail=1
+fi
+for marker_age in bogus '' 30s 1 1.5h; do
+	status=0
+	TMPCLEANER_MARKER_AGE=$marker_age TMPCLEANER_CONF=$cfg/marker.conf sh "$here/tmpcleaner" \
+		--check "$dir/job/old" > /dev/null 2>"$cfg/check.err" || status=$?
+	if [ "$status" -ne 2 ] ||
+		[ "$(cat "$cfg/check.err")" != "tmpcleaner: invalid TMPCLEANER_MARKER_AGE: $marker_age" ]; then
+		echo 'FAIL: --check must reject an empty or invalid TMPCLEANER_MARKER_AGE'
+		fail=1
+	fi
+done
+rm -f "$cfg/marker.check0"
 # --check names the first x/X rule that keeps a path or one of its ancestors,
 # only when the preview without that rule removes the path: a fresh file, a
 # boot-only x! and a [:class:] glob never get a named rule.

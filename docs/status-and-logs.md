@@ -64,6 +64,10 @@ the in-use scan.
 `.tmpcleaner-keep` markers kept in the last run, or `0` when the run failed
 before the scan. A value that keeps growing means markers were left behind,
 listed with `find /tmp -mindepth 2 -maxdepth 3 -name .tmpcleaner-keep`.
+With `TMPCLEANER_MARKER_AGE` set, only markers modified within that duration
+count; expired markers no longer protect their directories. Jobs can renew
+protection by touching the marker; see
+[marker expiry](configuration.md#expire-abandoned-markers).
 
 `tmpcleaner_last_success_timestamp_seconds` is the Unix completion timestamp of
 the last real run that exited `0`. Failed runs carry forward the previous value
