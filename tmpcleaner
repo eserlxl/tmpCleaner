@@ -9,6 +9,15 @@
 # every NUL-terminated path in FILE.
 set -eu
 
+with_sources=
+for arg do
+	[ "$arg" != --with-sources ] || with_sources=1
+done
+if [ -n "$with_sources" ] && [ "${1:-}" != --print-rules ]; then
+	echo 'tmpcleaner: --with-sources requires --print-rules' >&2
+	exit 2
+fi
+
 case "${1:-}" in
 	-h|--help)
 		cat <<'EOF'
@@ -89,6 +98,7 @@ if [ "${1:-}" = --print-rules ]; then
 	shift
 	for arg do
 		case "$arg" in
+			--with-sources) ;;
 			--exclude-prefix=/*|--exclude-from0=/*) ;;
 			*) echo "${err_tag}tmpcleaner: unsupported argument: $arg" >&2; exit 2 ;;
 		esac
@@ -723,6 +733,10 @@ rules() {
 		case "$saved_lc_all" in :*) unset LC_ALL ;; *) LC_ALL=${saved_lc_all#*:} ;; esac
 	fi
 	for cfgfile do
+		if [ -n "$with_sources" ]; then
+			cfg_source=$(printf '%s' "$cfgfile" | LC_ALL=C tr '\001-\037\177' '[?*]') || return 1
+			printf '# source: %s\n' "$cfg_source" || return 1
+		fi
 		if [ "${TMPCLEANER_AGE+x}" ]; then
 			# Replace the age (field 6) of d and D rules that have one, keeping any
 			# age-by letters; rules without an age, and quoted paths holding
@@ -753,14 +767,23 @@ rules() {
 	# X auth files, PrivateTmp). Keep the lines verbatim so specifiers and X
 	# keep their meaning; skip a bare /tmp so no rule can exclude the whole tree.
 	systemd-tmpfiles --cat-config > "$scratch/cat" || return 1
-	LC_ALL=C awk '
+	WITH_SOURCES=$with_sources LC_ALL=C awk '
+		/^# \// {
+			source = substr($0, 3)
+			gsub(/[[:cntrl:]]/, "?", source)
+			source_printed = 0
+			next
+		}
 		$1 ~ /^[xX][!-]*$/ {
 			if ($2 ~ /^"/ && match($0, /"[^"]*"/)) path = substr($0, RSTART + 1, RLENGTH - 2)
 			else if ($2 ~ /^\047/ && match($0, /\047[^\047]*\047/)) path = substr($0, RSTART + 1, RLENGTH - 2)
 			else path = $2
 			gsub(/\/+/, "/", path)
 			sub(/\/$/, "", path)
-			if (index(path, "/tmp/") == 1 && length(path) > 5) print
+			if (index(path, "/tmp/") == 1 && length(path) > 5) {
+				if (ENVIRON["WITH_SOURCES"] != "" && source != "" && !source_printed++) print "# source: " source
+				print
+			}
 		}
 	' "$scratch/cat" || return 1
 	# File names are untrusted (any user can hold a file open), so each must
@@ -776,6 +799,9 @@ rules() {
 		> "$scratch/markers" 2>/dev/null || [ "$?" -eq 1 ] || return 1
 	LC_ALL=C sort -zu "$scratch/inuse" "$scratch/markers" "$scratch/excludes" > "$scratch/sorted" || return 1
 	escape_x_rules "$scratch/sorted" > "$scratch/excl" || return 1
+	if [ -n "$with_sources" ]; then
+		printf '# source: generated (in-use, markers, --exclude-prefix)\n' || return 1
+	fi
 	tr '\0' '\n' < "$scratch/excl" || return 1
 }
 

@@ -1106,6 +1106,53 @@ suggest_plain=
 suggest_awkward=
 [ "$fail" = 0 ] || exit 1
 
+# Source comments label each contributing file and the generated exclusions.
+sources_conf=$cfg/$(printf 'sources\n\t\177.conf')
+sources_dropin=$(printf '50-keep\r.conf')
+mkdir "$sources_conf.d"
+printf 'd %s - - - amM:12h' "$dir" > "$sources_conf"
+printf 'x %s/source-dropin' "$dir" > "$sources_conf.d/$sources_dropin"
+printf '# /usr/lib/tmpfiles.d/ignored.conf\nx /tmp\nx /var/tmp/other\n# /usr/lib/tmpfiles.d/package\t.conf\nx %s/source-package\nX %s/source-second\n' \
+	"$dir" "$dir" > "$cfg/sources.cat"
+sources_expected=$(printf '%s\n' \
+	"# source: $cfg/sources???.conf" "d $dir - - - amM:12h" \
+	"# source: $cfg/sources???.conf.d/50-keep?.conf" "x $dir/source-dropin" \
+	'# source: /usr/lib/tmpfiles.d/package?.conf' "x $dir/source-package" "X $dir/source-second" \
+	'# source: generated (in-use, markers, --exclude-prefix)')
+status=0
+sources_out=$(CAT_SHIM_OUT=$cfg/sources.cat TMPCLEANER_CONF=$sources_conf sh "$here/tmpcleaner" \
+	--print-rules --with-sources "--exclude-prefix=$dir/source-explicit") || status=$?
+if [ "$status" -ne 0 ] || [ "$(printf '%s\n' "$sources_out" | sed -n '1,8p')" != "$sources_expected" ] ||
+	[ "$(printf '%s\n' "$sources_out" | grep -c '^# source: ')" -ne 4 ] ||
+	! printf '%s\n' "$sources_out" | grep -Fxq "x \"$dir/source-explicit\""; then
+	echo 'FAIL: --print-rules --with-sources should label configured, package and generated blocks in order and escape control bytes'
+	fail=1
+fi
+status=0
+sources_plain=$(CAT_SHIM_OUT=$cfg/sources.cat TMPCLEANER_CONF=$sources_conf sh "$here/tmpcleaner" \
+	--print-rules "--exclude-prefix=$dir/source-explicit") || status=$?
+sources_plain_expected=$(printf '%s\n' "$sources_expected" | sed '/^# source: /d')
+if [ "$status" -ne 0 ] || [ "$(printf '%s\n' "$sources_plain" | sed -n '1,4p')" != "$sources_plain_expected" ] ||
+	printf '%s\n' "$sources_plain" | grep -q '^# source: ' ||
+	! printf '%s\n' "$sources_plain" | grep -Fxq "x \"$dir/source-explicit\""; then
+	echo 'FAIL: plain --print-rules should preserve configured and package rule bytes without source comments'
+	fail=1
+fi
+rm -rf "$sources_conf" "$sources_conf.d" "$cfg/sources.cat"
+for sources_mode in clean --dry-run --prefix=/tmp --check --check0 --print-in-use0 --print-holders0 --suggest-exclusions -h --help; do
+	case "$sources_mode" in
+		clean) set -- ;;
+		--check) set -- --check "$dir/old.txt" ;;
+		*) set -- "$sources_mode" ;;
+	esac
+	status=0
+	sources_err=$(MKTEMP_SHIM_FAIL=both TMPCLEANER_CONF=$cfg/missing.conf sh "$here/tmpcleaner" "$@" --with-sources 2>&1) || status=$?
+	if [ "$status" -ne 2 ] || [ "$sources_err" != 'tmpcleaner: --with-sources requires --print-rules' ]; then
+		echo "FAIL: $sources_mode should reject --with-sources with exit 2 before config or scratch setup"
+		fail=1
+	fi
+done
+
 argdir=$(mktemp -d "$dir/args.XXXXXX")
 touch "$argdir/old.txt" "$argdir/held.txt"
 old "$argdir/old.txt" "$argdir/held.txt"
