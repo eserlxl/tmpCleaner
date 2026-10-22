@@ -677,6 +677,17 @@ if ! { [ "$(printf '%s\n' "$ws_rules" | grep -c '^d')" = 1 ] &&
 	fail=1
 fi
 rm -f "$cfg/ws.conf"
+# A double-quoted path with an apostrophe and a space is split; the closer
+# must match the opener or the override writes the age over the group.
+quote_line=$(printf 'D "%s/a'\'' b" - - root 1h' "$dir")
+printf '%s\n' "$quote_line" > "$cfg/quote.conf"
+quote_rules=$(TMPCLEANER_AGE=8h TMPCLEANER_CONF=$cfg/quote.conf sh "$here/tmpcleaner" --print-rules 2>"$cfg/quote.err")
+if ! { printf '%s\n' "$quote_rules" | grep -Fxq "$quote_line" &&
+	grep -Fq 'age override skipped for:' "$cfg/quote.err"; }; then
+	echo "FAIL: age override should leave a mismatched quote path unchanged and warn"
+	fail=1
+fi
+rm -f "$cfg/quote.conf" "$cfg/quote.err"
 if TMPCLEANER_AGE='1h; x' TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --print-rules > /dev/null 2> "$cfg/bad.err" ||
 	[ "$(cat "$cfg/bad.err")" != 'tmpcleaner: invalid TMPCLEANER_AGE: 1h; x' ]; then
 	echo "FAIL: invalid age override should fail with its diagnostic"

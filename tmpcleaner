@@ -687,13 +687,15 @@ rules() {
 			# Replace the age (field 6) of d and D rules that have one, keeping any
 			# age-by letters; rules without an age, and quoted paths holding
 			# spaces (which cannot be split into fields safely), are left as is.
+			# The closer must be the same quote that opened the field. A lone
+			# quote is not closed (the "." requires a character before it).
 			AGE=$TMPCLEANER_AGE ERR_TAG=$err_tag WARN_TAG=$warn_tag LC_ALL=C awk '
 			{
 				sub(/\015$/, "")
 				if ($0 ~ /[\013\014\015]/) { print ENVIRON["ERR_TAG"] "tmpcleaner: raw CR, FF or VT in rule" > "/dev/stderr"; exit 1 }
 			}
 			$1 !~ /^[dD][-!=~^+$]*$/ { print; next }
-			$2 ~ /^["\047]/ && $2 !~ /["\047]$/ { print ENVIRON["WARN_TAG"] "tmpcleaner: age override skipped for: " $0 > "/dev/stderr"; print; next }
+			($2 ~ /^"/ && $2 !~ /.["]$/) || ($2 ~ /^\047/ && $2 !~ /.\047$/) { print ENVIRON["WARN_TAG"] "tmpcleaner: age override skipped for: " $0 > "/dev/stderr"; print; next }
 			NF < 6 || $6 == "-" { print; next }
 			{
 				prefix = ""
