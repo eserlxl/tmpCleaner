@@ -2956,6 +2956,23 @@ confpath="$confdest/target [safe]"
 mkdir "$confsource"
 cp "$here/Makefile" "$here/tmpcleaner.conf" "$confsource"
 
+# Relative config paths must fail before either install target writes anything.
+mkdir "$confdir/cwd"
+for conf_target in install-conf install; do
+	for relative_dest in "$confdest" ''; do
+		status=0
+		conf_log=$(cd "$confdir/cwd" && make -s -C "$confsource" "$conf_target" \
+			DESTDIR="$relative_dest" CONFDIR=rel/conf 2>&1) || status=$?
+		if [ "$status" -eq 0 ] ||
+			! printf '%s\n' "$conf_log" | grep -Fq 'CONFDIR must be absolute' ||
+			[ -e "$confdest" ] || [ -e "${confdest}rel" ] ||
+			[ -e "$confdest/rel" ] || [ -e "$confdir/cwd/rel" ] || [ -e "$confsource/rel" ]; then
+			echo "FAIL: $conf_target must reject relative CONFDIR before writing files (DESTDIR=$relative_dest)"
+			fail=1
+		fi
+	done
+done
+
 make -s -C "$confsource" install-conf DESTDIR="$confdest" CONFDIR='/target [safe]' >/dev/null
 cmp -s "$confpath/tmpcleaner.conf" "$here/tmpcleaner.conf" || {
 	echo "FAIL: initial install should create tmpcleaner.conf matching shipped file"

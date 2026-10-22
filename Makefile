@@ -58,6 +58,7 @@ endif
 endif
 
 install-conf:
+	@case $(call shell_quote,$(CONFDIR)) in /*) ;; *) echo "make install-conf: CONFDIR must be absolute" >&2; exit 1 ;; esac
 	@install -dm755 $(call shell_quote,$(DESTDIR)$(CONFDIR)/tmpcleaner.conf.d)
 	@c=$(call shell_quote,$(DESTDIR)$(CONFDIR)/tmpcleaner.conf); \
 	if [ ! -e "$$c" ] || cmp -s "$$c" "$$c.default" || cmp -s tmpcleaner.conf "$$c"; then \
