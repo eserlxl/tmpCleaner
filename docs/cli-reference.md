@@ -23,8 +23,8 @@ prints one reason line to stderr (`tmpcleaner: in use by a running process: PID 
 `tmpcleaner: inside an in-use directory: ...; used by PID ... (...)`,
 `tmpcleaner: kept by a .tmpcleaner-keep marker in ...`,
 `tmpcleaner: kept by an explicit --exclude-prefix`,
-`tmpcleaner: kept by configuration rule: x ...` (the first configured or package
-`x`/`X` rule matching the path, or for `x` one of its parent directories), or
+`tmpcleaner: kept by configuration rule: x ...` (the configured or package
+`x`/`X` rule without which the path would be removed), or
 `tmpcleaner: not old enough, or kept by a configuration rule`). Control bytes in
 these paths and in `--check` and `--check0` error messages are printed as `?`. Every error exits 2: invalid
 paths or missing arguments, unreadable configuration, invalid `TMPCLEANER_*`

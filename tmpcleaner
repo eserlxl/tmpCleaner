@@ -1021,7 +1021,7 @@ if [ -n "$check$check0" ]; then
 			exit 0
 			;;
 		1)
-			CHECK=$check HOLDERS=$scratch/holders KEEP_RULES=$scratch/keep-rules SORTED=$scratch/sorted LC_ALL=C awk '
+			reason=$(CHECK=$check HOLDERS=$scratch/holders KEEP_RULES=$scratch/keep-rules SORTED=$scratch/sorted LC_ALL=C awk '
 				function holders(target, holders_file, hpath, hpids, n, pid_list, i, pid, seen, shown_pids, comm_file, comm, who) {
 					holders_file = ENVIRON["HOLDERS"]
 					while ((getline hpath < holders_file) > 0 && (getline hpids < holders_file) > 0) {
@@ -1046,13 +1046,12 @@ if [ -n "$check$check0" ]; then
 				}
 				# tmpfiles matches globs with fnmatch(FNM_PATHNAME | FNM_PERIOD): * ? and
 				# [...] stay inside one component, and only a literal "." matches a
-				# leading one. shortcut: no [:class:] brackets, rare in /tmp rules.
+				# leading one. keep_rule passes only globs without escapes or classes.
 				function glob_matches(glob, target, ere, n, i, c, j, end, set, g, t) {
 					n = length(glob)
 					for (i = 1; i <= n; i++) {
 						c = substr(glob, i, 1)
-						if (c == "\\" && i < n) c = substr(glob, ++i, 1)
-						else if (c == "*") { ere = ere "[^/]*"; continue }
+						if (c == "*") { ere = ere "[^/]*"; continue }
 						else if (c == "?") { ere = ere "[^/]"; continue }
 						else if (c == "[") {
 							j = i + 1
@@ -1076,7 +1075,9 @@ if [ -n "$check$check0" ]; then
 				# The configured x/X rules open keep-rules; the generated ones, one per
 				# in-use, marker or --exclude-prefix path, close it and are reported above.
 				# x also keeps everything under a matched directory, X only the path.
-				function keep_rule(target, line, lines, total, generated, i, f, type, rule, p) {
+				# Returns the candidate line number in keep-rules and its text; the caller
+				# names it only if the preview without that line removes the path.
+				function keep_rule(target, line, lines, total, generated, i, f, type, rule, p, s) {
 					while ((getline line < ENVIRON["SORTED"]) > 0) generated++
 					close(ENVIRON["SORTED"])
 					RS = "\n"
@@ -1085,9 +1086,16 @@ if [ -n "$check$check0" ]; then
 					for (i = 1; i <= total - generated; i++) {
 						split(lines[i], f)
 						type = f[1]
+						# x! applies only at boot; escapes, specifiers and [:class:] or "/"
+						# sets are decoded by tmpfiles in ways this matcher does not copy.
+						if (type !~ /^[xX][-=~^+$]*$/) continue
 						if (f[2] ~ /^"/ && match(lines[i], /"[^"]*"/)) rule = substr(lines[i], RSTART + 1, RLENGTH - 2)
 						else if (f[2] ~ /^\047/ && match(lines[i], /\047[^\047]*\047/)) rule = substr(lines[i], RSTART + 1, RLENGTH - 2)
 						else rule = f[2]
+						s = rule; gsub(/%%/, "", s)
+						if (index(rule, "\\") || index(s, "%")) continue
+						s = rule; gsub("\\[!?[^][/:=.]+\\]", "", s)
+						if (index(s, "[")) continue
 						gsub(/\/+/, "/", rule)
 						sub(/\/$/, "", rule)
 						gsub(/%%/, "%", rule)
@@ -1095,7 +1103,7 @@ if [ -n "$check$check0" ]; then
 							if (glob_matches(rule, p)) {
 								rule = type " " rule
 								gsub(/[\001-\037\177]/, "?", rule)
-								return rule
+								return i " " rule
 							}
 							if (type !~ /^x/) break
 						}
@@ -1134,10 +1142,29 @@ if [ -n "$check$check0" ]; then
 						print "tmpcleaner: inside an in-use directory: " ancestor (who != "" ? "; used by " who : "")
 					} else if (marked != "") print "tmpcleaner: kept by a .tmpcleaner-keep marker in " marked
 					else if (excluded) print "tmpcleaner: kept by an explicit --exclude-prefix"
-					else if ((rule = keep_rule(path)) != "") print "tmpcleaner: kept by configuration rule: " rule
+					else if ((rule = keep_rule(path)) != "") print rule
 					else print "tmpcleaner: not old enough, or kept by a configuration rule"
 				}
-				' "$scratch/inuse" "$scratch/excludes" "$scratch/markers" >&2
+				' "$scratch/inuse" "$scratch/excludes" "$scratch/markers")
+			case "$reason" in
+				[0-9]*)
+					# A matched rule keeps nothing if age alone keeps the path or tmpfiles
+					# ignores the rule: name it only if the preview removes the path without it.
+					LC_ALL=C awk -v n="${reason%% *}" '$1 ~ /^[xX]/ && ++i == n { next } 1' \
+						"$scratch/rules" > "$scratch/rules-without" || exit 2
+					without=$(SYSTEMD_LOG_LEVEL=info SYSTEMD_LOG_TARGET=console SYSTEMD_LOG_COLOR=0 \
+						SYSTEMD_LOG_LOCATION=0 SYSTEMD_LOG_TIME=0 SYSTEMD_LOG_TID=0 \
+						systemd-tmpfiles --clean --dry-run - < "$scratch/rules-without" 2>&1) ||
+						[ "$?" -eq 73 ] || without=
+					if printf '%s\n' "$without" |
+						grep -Fxq -e "Would remove \"$check\"" -e "Would remove directory \"$check\""; then
+						reason="tmpcleaner: kept by configuration rule: ${reason#* }"
+					else
+						reason='tmpcleaner: not old enough, or kept by a configuration rule'
+					fi
+					;;
+			esac
+			printf '%s\n' "$reason" >&2
 			printf 'kept: %s\n' "$shown"
 			exit 1
 			;;

@@ -2736,15 +2736,20 @@ if [ "$status" -ne 0 ] || [ "$check_out" != "would be removed: $dir/symlink-job/
 	echo 'FAIL: --check must report a symlinked .tmpcleaner-keep directory as removable'
 	fail=1
 fi
-# --check names the first x/X rule that keeps a path or one of its ancestors.
+# --check names the first x/X rule that keeps a path or one of its ancestors,
+# only when the preview without that rule removes the path: a fresh file, a
+# boot-only x! and a [:class:] glob never get a named rule.
 mkdir -p "$dir/rulekeep/keep" "$dir/rulekeep/job-1"
 printf 'kept\n' > "$dir/rulekeep/keep/f"
 printf 'kept\n' > "$dir/rulekeep/job-1/f"
 printf 'new\n' > "$dir/rulekeep/new"
-old "$dir/rulekeep/keep/f" "$dir/rulekeep/job-1/f"
-printf 'd %s/rulekeep - - - amM:12h\nx %s/rulekeep/keep\nx %s/rulekeep/job-*\n' \
-	"$dir" "$dir" "$dir" > "$cfg/rulekeep.conf"
-for name in keep/f job-1/f new; do
+printf 'new\n' > "$dir/rulekeep/keep/new"
+printf 'kept\n' > "$dir/rulekeep/5"
+printf 'boot\n' > "$dir/rulekeep/boot"
+old "$dir/rulekeep/keep/f" "$dir/rulekeep/job-1/f" "$dir/rulekeep/5" "$dir/rulekeep/boot"
+printf 'd %s/rulekeep - - - amM:12h\nx %s/rulekeep/keep\nx %s/rulekeep/job-*\nx %s/rulekeep/[[:digit:]]\nx! %s/rulekeep/boot\n' \
+	"$dir" "$dir" "$dir" "$dir" "$dir" > "$cfg/rulekeep.conf"
+for name in keep/f job-1/f new keep/new 5; do
 	case "$name" in
 		keep/f) expected_err="tmpcleaner: kept by configuration rule: x $dir/rulekeep/keep" ;;
 		job-1/f) expected_err="tmpcleaner: kept by configuration rule: x $dir/rulekeep/job-*" ;;
@@ -2758,6 +2763,12 @@ for name in keep/f job-1/f new; do
 		fail=1
 	fi
 done
+status=0
+check_out=$(TMPCLEANER_CONF=$cfg/rulekeep.conf sh "$here/tmpcleaner" --check "$dir/rulekeep/boot" 2>"$cfg/check.err") || status=$?
+if [ "$status" -gt 1 ] || grep -q 'kept by configuration rule' "$cfg/check.err"; then
+	echo 'FAIL: --check must not name a boot-only x! rule'
+	fail=1
+fi
 rm -rf "$dir/rulekeep"
 status=0
 shim env FIND_SHIM_FAIL=markers-unreadable TMPCLEANER_CONF=$cfg/marker.conf \
