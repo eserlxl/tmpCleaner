@@ -39,7 +39,8 @@ Options:
   --suggest-exclusions
                    Print candidate x exclusion rules for top-level /tmp entries
                    the next run would clean and exit
-                   Standalone option; accepts no other arguments
+                   Accepts trailing --exclude-prefix=PATH and
+                   --exclude-from0=FILE filters
   --check PATH     Report whether an existing absolute /tmp path would be removed
                    Accepts trailing --exclude-prefix=PATH and
                    --exclude-from0=FILE filters
@@ -106,11 +107,20 @@ if [ "${1:-}" = --print-rules ]; then
 		esac
 	done
 	set -- --print-rules "$@"
+elif [ "${1:-}" = --suggest-exclusions ]; then
+	shift
+	for arg do
+		case "$arg" in
+			--exclude-prefix=/*|--exclude-from0=/*) ;;
+			*) echo "${err_tag}tmpcleaner: unsupported argument: $arg" >&2; exit 2 ;;
+		esac
+	done
+	set -- --suggest-exclusions "$@"
 elif [ "${1:-}" != --check ] && [ "${1:-}" != --check0 ]; then
 	for arg do
 		case "$arg" in
 			--dry-run|--prefix=?*|--exclude-prefix=/*|--exclude-from0=/*) ;;
-			--print-in-use0|--print-holders0|--suggest-exclusions) [ "$#" -eq 1 ] || { echo "${err_tag}tmpcleaner: $arg accepts no other arguments" >&2; exit 2; } ;;
+			--print-in-use0|--print-holders0) [ "$#" -eq 1 ] || { echo "${err_tag}tmpcleaner: $arg accepts no other arguments" >&2; exit 2; } ;;
 			*) echo "${err_tag}tmpcleaner: unsupported argument: $arg" >&2; exit 2 ;;
 		esac
 	done

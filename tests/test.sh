@@ -762,9 +762,11 @@ kill "$raw_pid"; wait "$raw_pid" 2>/dev/null || :
 rm -rf "$raw_root" "$cfg/raw-tmp"
 for opt in --print-in-use0 --print-holders0 --suggest-exclusions; do
 	for extra in --dry-run --prefix=/tmp --exclude-prefix=/tmp --print-rules --print-in-use0 --print-holders0 --suggest-exclusions --help '' positional; do
+		# --suggest-exclusions takes trailing exclusion filters; they are tested with its output below.
+		[ "$opt$extra" = --suggest-exclusions--exclude-prefix=/tmp ] && continue
 		status=0
 		TMPCLEANER_CONF=$cfg/missing.conf sh "$here/tmpcleaner" "$opt" "$extra" > "$cfg/raw.out" 2> "$cfg/raw.err" || status=$?
-		if [ "$status" -ne 2 ] || [ -s "$cfg/raw.out" ] || ! grep -Fq 'accepts no other arguments' "$cfg/raw.err"; then
+		if [ "$status" -ne 2 ] || [ -s "$cfg/raw.out" ] || ! grep -Eq 'accepts no other arguments|unsupported argument' "$cfg/raw.err"; then
 			echo "FAIL: $opt must reject extra arguments before reading configuration"
 			fail=1
 		fi
@@ -1040,6 +1042,28 @@ if [ "$status" -ne 0 ] || [ -s "$cfg/suggest.err" ] || [ -e "$cfg/suggest.prom" 
 	[ "$suggest_filtered" != "$suggest_expected" ] ||
 	[ ! -e "$suggest_plain/a" ] || [ ! -e "$suggest_plain/b" ] || [ ! -e "$suggest_awkward/c" ]; then
 	echo "FAIL: --suggest-exclusions should print candidate x rules in count order without deleting or writing metrics"
+	fail=1
+fi
+# A trailing filter counts as already kept: only the unprotected fixture entry is suggested.
+printf '%s\0' "$suggest_plain" > "$cfg/suggest.from0"
+for suggest_filter in "--exclude-prefix=$suggest_plain" "--exclude-from0=$cfg/suggest.from0"; do
+	status=0
+	suggest_filter_out=$(TMPCLEANER_METRICS=$cfg/suggest.prom TMPCLEANER_CONF=$cfg/suggest.conf sh "$here/tmpcleaner" --suggest-exclusions "$suggest_filter" 2>"$cfg/suggest.err") || status=$?
+	suggest_filtered=$(printf '%s\n' "$suggest_filter_out" | P=$suggest_plain A=$suggest_awkward AE=$suggest_awkward_escaped awk '
+		BEGIN { p = ENVIRON["P"]; a = ENVIRON["A"]; ae = ENVIRON["AE"] }
+		index($0, p) || $0 == "# 2 entries would be removed under " a || $0 == "x \"" ae "\"" { print }')
+	if [ "$status" -ne 0 ] || [ -s "$cfg/suggest.err" ] || [ -e "$cfg/suggest.prom" ] ||
+		[ "$suggest_filtered" != "$(printf '# 2 entries would be removed under %s\nx "%s"' "$suggest_awkward" "$suggest_awkward_escaped")" ] ||
+		[ ! -e "$suggest_plain/a" ] || [ ! -e "$suggest_plain/b" ] || [ ! -e "$suggest_awkward/c" ]; then
+		echo "FAIL: --suggest-exclusions $suggest_filter should suggest only the entries that filter leaves removable"
+		fail=1
+	fi
+done
+rm -f "$cfg/suggest.from0"
+status=0
+TMPCLEANER_CONF=$cfg/suggest.conf sh "$here/tmpcleaner" --suggest-exclusions --dry-run > "$cfg/raw.out" 2>/dev/null || status=$?
+if [ "$status" -ne 2 ] || [ -s "$cfg/raw.out" ]; then
+	echo "FAIL: --suggest-exclusions --dry-run must exit 2 with empty stdout"
 	fail=1
 fi
 mkdir -p "$cfg/suggest.conf.d"
