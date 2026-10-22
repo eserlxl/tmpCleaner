@@ -1431,8 +1431,8 @@ if [ "$status" -ne 0 ] || ! cmp -s "$cfg/check0.expected" "$cfg/check0.out" || [
 fi
 # --exclude-from0 keeps every NUL-terminated path in its file like --exclude-prefix.
 from0=$(mktemp -d "$dir/from0.XXXXXX")
-touch "$from0/a b" "$from0/p%q" "$from0/plain" "$from0/gone"
-old "$from0/a b" "$from0/p%q" "$from0/plain" "$from0/gone"
+touch "$from0/a b" "$from0/p%q" "$from0/plain" "$from0/gone" "$from0/keep"
+old "$from0/a b" "$from0/p%q" "$from0/plain" "$from0/gone" "$from0/keep"
 printf 'd %s - - - amM:12h\n' "$from0" > "$cfg/from0.conf"
 printf '%s\0' "$from0/a b" "$from0/p%q" "$from0/plain" > "$cfg/from0.list"
 status=0
@@ -1467,9 +1467,17 @@ if [ "$status" -ne 1 ] || [ "$from0_out" != "kept: $from0/plain" ] ||
 	fail=1
 fi
 mkdir "$cfg/from0.dir"
-for from0_case in outside unterminated newline missing directory; do
+for from0_case in relative relative-control outside unterminated newline missing directory; do
 	from0_file=$cfg/from0.bad
 	case "$from0_case" in
+		relative)
+			printf 'keep\0' > "$from0_file"
+			expected_err='tmpcleaner: --exclude-from0 record must be an absolute path: keep'
+			;;
+		relative-control)
+			printf 'ke\tep\0' > "$from0_file"
+			expected_err='tmpcleaner: --exclude-from0 record must be an absolute path: ke?ep'
+			;;
 		outside)
 			printf '%s\0' "$from0/plain" /var/x > "$from0_file"
 			expected_err='tmpcleaner: --exclude-from0 must be under /tmp: /var/x'
@@ -1501,9 +1509,10 @@ b" > "$from0_file"
 			*) set -- "$mode" ;;
 		esac
 		status=0
-		from0_err=$(printf '%s\0' "$from0/gone" | TMPCLEANER_CONF=$cfg/from0.conf sh "$here/tmpcleaner" "$@" \
+		from0_err=$(cd "$from0" && printf '%s\0' "$from0/gone" | TMPCLEANER_CONF=$cfg/from0.conf sh "$here/tmpcleaner" "$@" \
 			"--exclude-from0=$from0_file" 2>&1 >/dev/null) || status=$?
-		if [ "$status" -ne "$expected_status" ] || [ "$from0_err" != "$expected_err" ] || [ ! -e "$from0/gone" ]; then
+		if [ "$status" -ne "$expected_status" ] || [ "$from0_err" != "$expected_err" ] ||
+			[ ! -e "$from0/gone" ] || [ ! -e "$from0/keep" ]; then
 			echo "FAIL: $mode --exclude-from0 ($from0_case) should be rejected with exit $expected_status before cleaning (got $status: $from0_err)"
 			fail=1
 		fi

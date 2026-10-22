@@ -370,6 +370,14 @@ if [ "$#" -gt 0 ]; then
 				' "$scratch/exclude-from0" || exit "$errstatus"
 				tr '\0' '\n' < "$scratch/exclude-from0" > "$scratch/exclude-from0-paths" || exit "$errstatus"
 				while IFS= read -r record; do
+					case "$record" in
+						/*) ;;
+						*)
+							shown=$(printf '%s' "$record" | LC_ALL=C tr '\001-\037\177' '?')
+							printf '%stmpcleaner: --exclude-from0 record must be an absolute path: %s\n' "$err_tag" "$shown" >&2
+							exit "$errstatus"
+							;;
+					esac
 					add_exclusion --exclude-from0 "$record"
 				done < "$scratch/exclude-from0-paths"
 				;;
