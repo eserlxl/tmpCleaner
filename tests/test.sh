@@ -2772,14 +2772,14 @@ if [ "$status" -gt 1 ] || grep -q 'kept by configuration rule' "$cfg/check.err";
 	echo 'FAIL: --check must not name a boot-only x! rule'
 	fail=1
 fi
-# A reversed range must not abort the reason matcher for a path kept by age.
-printf 'd %s/rulekeep - - - amM:24h\nx %s/rulekeep/[z-a]*\n' \
-	"$dir" "$dir" > "$cfg/rulekeep.conf"
+# Unsupported bracket sets must not abort the reason matcher for a path kept by age.
+printf 'd %s/rulekeep - - - amM:24h\nx %s/rulekeep/[z-a]*\nx %s/rulekeep/[!]-A]\nx %s/rulekeep/[]a]\n' \
+	"$dir" "$dir" "$dir" "$dir" > "$cfg/rulekeep.conf"
 status=0
 check_out=$(TMPCLEANER_CONF=$cfg/rulekeep.conf sh "$here/tmpcleaner" --check "$dir/rulekeep/5" 2>"$cfg/check.err") || status=$?
 if [ "$status" -ne 1 ] || [ "$check_out" != "kept: $dir/rulekeep/5" ] ||
 	[ "$(cat "$cfg/check.err")" != 'tmpcleaner: not old enough, or kept by a configuration rule' ]; then
-	echo 'FAIL: --check must skip bracket ranges and give the generic reason without awk errors'
+	echo 'FAIL: --check must skip unsupported bracket sets and give the generic reason without awk errors'
 	fail=1
 fi
 rm -rf "$dir/rulekeep"

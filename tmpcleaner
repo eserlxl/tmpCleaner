@@ -1094,8 +1094,8 @@ if [ -n "$check$check0" ]; then
 						else rule = f[2]
 						s = rule; gsub(/%%/, "", s)
 						if (index(rule, "\\") || index(s, "%")) continue
-						s = rule; gsub("\\[!?[^][/:=.-]+\\]", "", s)
-						if (index(s, "[")) continue
+						s = rule; gsub(/\[[!^]?[A-Za-z0-9_]+\]/, "", s)
+						if (index(s, "[") || index(s, "]")) continue
 						gsub(/\/+/, "/", rule)
 						sub(/\/$/, "", rule)
 						gsub(/%%/, "%", rule)
