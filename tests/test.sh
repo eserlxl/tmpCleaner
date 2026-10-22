@@ -2739,17 +2739,20 @@ fi
 # --check names the first x/X rule that keeps a path or one of its ancestors,
 # only when the preview without that rule removes the path: a fresh file, a
 # boot-only x! and a [:class:] glob never get a named rule.
-mkdir -p "$dir/rulekeep/keep" "$dir/rulekeep/job-1"
+mkdir -p "$dir/rulekeep/keep" "$dir/rulekeep/job-1" "$dir/rulekeep/mixed"
 printf 'kept\n' > "$dir/rulekeep/keep/f"
 printf 'kept\n' > "$dir/rulekeep/job-1/f"
 printf 'new\n' > "$dir/rulekeep/new"
 printf 'new\n' > "$dir/rulekeep/keep/new"
+printf 'new\n' > "$dir/rulekeep/mixed/fresh"
 printf 'kept\n' > "$dir/rulekeep/5"
 printf 'boot\n' > "$dir/rulekeep/boot"
 old "$dir/rulekeep/keep/f" "$dir/rulekeep/job-1/f" "$dir/rulekeep/5" "$dir/rulekeep/boot"
+old "$dir/rulekeep/mixed"
 printf 'd %s/rulekeep - - - amM:12h\nx %s/rulekeep/keep\nx %s/rulekeep/job-*\nx %s/rulekeep/[[:digit:]]\nx! %s/rulekeep/boot\n' \
 	"$dir" "$dir" "$dir" "$dir" "$dir" > "$cfg/rulekeep.conf"
-for name in keep/f job-1/f new keep/new 5; do
+printf 'x %s/rulekeep/mixed\n' "$dir" >> "$cfg/rulekeep.conf"
+for name in keep/f job-1/f new keep/new 5 mixed; do
 	case "$name" in
 		keep/f) expected_err="tmpcleaner: kept by configuration rule: x $dir/rulekeep/keep" ;;
 		job-1/f) expected_err="tmpcleaner: kept by configuration rule: x $dir/rulekeep/job-*" ;;
@@ -2767,6 +2770,16 @@ status=0
 check_out=$(TMPCLEANER_CONF=$cfg/rulekeep.conf sh "$here/tmpcleaner" --check "$dir/rulekeep/boot" 2>"$cfg/check.err") || status=$?
 if [ "$status" -gt 1 ] || grep -q 'kept by configuration rule' "$cfg/check.err"; then
 	echo 'FAIL: --check must not name a boot-only x! rule'
+	fail=1
+fi
+# A reversed range must not abort the reason matcher for a path kept by age.
+printf 'd %s/rulekeep - - - amM:24h\nx %s/rulekeep/[z-a]*\n' \
+	"$dir" "$dir" > "$cfg/rulekeep.conf"
+status=0
+check_out=$(TMPCLEANER_CONF=$cfg/rulekeep.conf sh "$here/tmpcleaner" --check "$dir/rulekeep/5" 2>"$cfg/check.err") || status=$?
+if [ "$status" -ne 1 ] || [ "$check_out" != "kept: $dir/rulekeep/5" ] ||
+	[ "$(cat "$cfg/check.err")" != 'tmpcleaner: not old enough, or kept by a configuration rule' ]; then
+	echo 'FAIL: --check must skip bracket ranges and give the generic reason without awk errors'
 	fail=1
 fi
 rm -rf "$dir/rulekeep"

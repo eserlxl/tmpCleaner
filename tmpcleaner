@@ -1086,15 +1086,15 @@ if [ -n "$check$check0" ]; then
 					for (i = 1; i <= total - generated; i++) {
 						split(lines[i], f)
 						type = f[1]
-						# x! applies only at boot; escapes, specifiers and [:class:] or "/"
-						# sets are decoded by tmpfiles in ways this matcher does not copy.
+						# x! applies only at boot; escapes, specifiers, ranges and [:class:]
+						# or "/" sets are decoded by tmpfiles in ways this matcher does not copy.
 						if (type !~ /^[xX][-=~^+$]*$/) continue
 						if (f[2] ~ /^"/ && match(lines[i], /"[^"]*"/)) rule = substr(lines[i], RSTART + 1, RLENGTH - 2)
 						else if (f[2] ~ /^\047/ && match(lines[i], /\047[^\047]*\047/)) rule = substr(lines[i], RSTART + 1, RLENGTH - 2)
 						else rule = f[2]
 						s = rule; gsub(/%%/, "", s)
 						if (index(rule, "\\") || index(s, "%")) continue
-						s = rule; gsub("\\[!?[^][/:=.]+\\]", "", s)
+						s = rule; gsub("\\[!?[^][/:=.-]+\\]", "", s)
 						if (index(s, "[")) continue
 						gsub(/\/+/, "/", rule)
 						sub(/\/$/, "", rule)
@@ -1156,8 +1156,9 @@ if [ -n "$check$check0" ]; then
 						SYSTEMD_LOG_LOCATION=0 SYSTEMD_LOG_TIME=0 SYSTEMD_LOG_TID=0 \
 						systemd-tmpfiles --clean --dry-run - < "$scratch/rules-without" 2>&1) ||
 						[ "$?" -eq 73 ] || without=
-					if printf '%s\n' "$without" |
-						grep -Fxq -e "Would remove \"$check\"" -e "Would remove directory \"$check\""; then
+					printf '%s\n' "$without" > "$scratch/preview" || exit 2
+					judge_check
+					if [ "$verdict" -eq 0 ]; then
 						reason="tmpcleaner: kept by configuration rule: ${reason#* }"
 					else
 						reason='tmpcleaner: not old enough, or kept by a configuration rule'
