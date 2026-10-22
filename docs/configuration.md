@@ -112,7 +112,7 @@ Each run reads `/tmp` usage with `df --output=pcent,ipcent /tmp` and uses the
 larger of the block percentage and the inode percentage, so a `/tmp` that runs
 out of inodes while block usage stays low still triggers pressure mode. A
 filesystem without inode accounting (such as btrfs) prints `-` for inodes, which
-counts as 0. At or above the threshold, it overrides every `d` rule's duration,
+counts as 0. At or above the threshold, it overrides the duration of every `d` and `D` rule,
 including `TMPCLEANER_AGE`, and reports
 `tmpcleaner: /tmp is N% full (blocks B%, inodes I%), using age X` on stderr.
 Below the threshold, the configured age or `TMPCLEANER_AGE` applies; preview
