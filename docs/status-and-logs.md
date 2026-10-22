@@ -48,8 +48,8 @@ run atomically writes `tmpcleaner_removed_files`,
 `tmpcleaner_pressure_mode_active`, and `tmpcleaner_last_run_duration_seconds`
 gauges for the Prometheus `node_exporter` textfile collector. Preview modes
 (`--dry-run`, `--print-rules`, `--print-in-use0`, `--print-holders0`, `--check`,
-`--check0`) never touch the file, and a write failure logs one line to stderr
-without changing the run's exit status.
+`--check0`, `--suggest-exclusions`) never touch the file, and a write failure
+logs one line to stderr without changing the run's exit status.
 
 `tmpcleaner_removed_bytes` is the summed apparent byte size (`find` `%s`) of
 non-directory entries observed to disappear during the run, or `0` when the
@@ -109,7 +109,8 @@ publish exit status `129`, `130`, and `143`, while `SIGKILL` leaves the
 previous file in place.
 
 The service runs with `ProtectSystem=strict`, which leaves only `/tmp`
-writable, so the drop-in must also allow the collector directory
+and the runtime directory `/run/tmpcleaner` writable, so the drop-in must also
+allow the collector directory
 (`sudo systemctl edit tmpcleaner.service`):
 
 ```ini
