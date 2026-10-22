@@ -1401,6 +1401,20 @@ if [ "$(id -u)" -ne 0 ]; then
 fi
 chmod 700 "$dir/locked"
 rm -rf "$dir/locked"
+touch "$dir/plain.txt"
+status=0
+check_err=$(TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --check "$dir/plain.txt/x" 2>&1) || status=$?
+if [ "$status" -ne 2 ] || ! printf '%s\n' "$check_err" | grep -Fq -- "--check path does not exist: $dir/plain.txt/x"; then
+	echo "FAIL: --check through a regular file should report the path as missing"
+	fail=1
+fi
+status=0
+check_err=$(TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --check "$dir/plain.txt/a/b" 2>&1) || status=$?
+if [ "$status" -ne 2 ] || ! printf '%s\n' "$check_err" | grep -Fq -- "--check path does not exist: $dir/plain.txt/a/b"; then
+	echo "FAIL: --check through a nested path under a regular file should report the path as missing"
+	fail=1
+fi
+rm -f "$dir/plain.txt"
 status=0
 printf '' | TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --check0 \
 	> "$cfg/check0.out" 2> "$cfg/check0.err" || status=$?

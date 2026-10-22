@@ -130,7 +130,7 @@ canonicalize_check() {
 		while [ ! -e "$dir" ] && [ "$dir" != /tmp ]; do
 			dir=${dir%/*}
 		done
-		if [ -e "$dir" ] && [ ! -x "$dir" ]; then
+		if [ -d "$dir" ] && [ ! -x "$dir" ]; then
 			echo "${err_tag}tmpcleaner: --check cannot read $shown" >&2
 			exit 2
 		fi
@@ -141,7 +141,7 @@ canonicalize_check() {
 	check=${check%"$nl"}
 	[ -z "$base" ] || check=${check%/}/$base
 	[ -e "$check" ] || [ -L "$check" ] || {
-		if [ ! -x "${check%/*}" ]; then
+		if [ -d "${check%/*}" ] && [ ! -x "${check%/*}" ]; then
 			echo "${err_tag}tmpcleaner: --check cannot read $shown" >&2
 			exit 2
 		fi
