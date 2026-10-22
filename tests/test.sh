@@ -643,6 +643,13 @@ printf '%s\n' "$age_rules" | grep -Eq "^d $dir - - - amM:8h$" || {
 	echo "FAIL: age override should preserve age-by letters and set 8h"
 	fail=1
 }
+printf 'd$ /tmp/a - - - abcmBM:1h\nD /tmp/b - - - 1h\n' > "$cfg/purge.conf"
+purge_rules=$(TMPCLEANER_AGE=8h TMPCLEANER_CONF=$cfg/purge.conf sh "$here/tmpcleaner" --print-rules | grep -E '^d\$ /tmp/a |^D /tmp/b ')
+purge_expected=$(printf 'd$ /tmp/a - - - abcmBM:8h\nD /tmp/b - - - 8h')
+[ "$purge_rules" = "$purge_expected" ] || {
+	echo "FAIL: age override should rewrite d\$ and D rules and keep age-by letters"
+	fail=1
+}
 printf 'd %s/no-age - - - -\nd %s/omitted-age - - -\nd %s/aged - - - amM:6h\n' "$dir" "$dir" "$dir" > "$cfg/no-age.conf"
 age_rules=$(TMPCLEANER_AGE=8h TMPCLEANER_CONF=$cfg/no-age.conf sh "$here/tmpcleaner" --print-rules | grep '^d')
 expected=$(printf 'd %s/no-age - - - -\nd %s/omitted-age - - -\nd %s/aged - - - amM:8h' "$dir" "$dir" "$dir")

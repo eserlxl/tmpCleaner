@@ -56,7 +56,7 @@ Service environment settings below go in a unit drop-in via `sudo systemctl edit
 ## Environment variables
 
 - `TMPCLEANER_CONF`: Path to configuration file (default: `/etc/tmpcleaner/tmpcleaner.conf`; regular files in `$TMPCLEANER_CONF.d/*.conf` are read after it).
-- `TMPCLEANER_AGE`: Override duration on every `d` rule (e.g. `6h`, `30m`).
+- `TMPCLEANER_AGE`: Override duration on every `d` and `D` rule (any modifier) (e.g. `6h`, `30m`).
 - `TMPCLEANER_FULL_PERCENT`: Threshold percentage of `/tmp` usage (1-100); the larger of block and inode usage counts (`-` is 0), and a `df` error aborts the run.
 - `TMPCLEANER_FULL_AGE`: Age duration to use when `/tmp` usage meets or exceeds `TMPCLEANER_FULL_PERCENT`.
 - `TMPCLEANER_LIST`: Set to `1` for escaped removal logs, `top` for the top-10 per-entry breakdown, or `nul` for raw NUL-separated paths on stdout (real runs only; default: off).
@@ -70,7 +70,7 @@ symlink) stops the run before cleaning.
 
 ## Override the age
 
-Set `TMPCLEANER_AGE` to override the duration on every `d` rule (e.g. `6h`, `30m`) while keeping
+Set `TMPCLEANER_AGE` to override the duration on every `d` and `D` rule (any modifier) (e.g. `6h`, `30m`) while keeping
 its age-by letters and the config unchanged. Use a non-negative integer with
 an optional unit: `us`, `ms`, `s`, `m`, `min`, `h`, `d`, or `w` (seconds when
 omitted). An empty or invalid value stops the run before cleaning; when unset,
