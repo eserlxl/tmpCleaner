@@ -1207,6 +1207,44 @@ if [ -n "$check$check0" ]; then
 	case "$verdict" in
 		0)
 			printf 'would be removed: %s\n' "$shown"
+			CHECK=$check SORTED=$scratch/sorted LC_ALL=C awk '
+				function under(path, prefix) { return prefix == "/" || path == prefix || index(path, prefix "/") == 1 }
+				function literal_path(line, f, path, specifiers) {
+					split(line, f)
+					if (f[2] ~ /^"/ && match(line, /"[^"]*"/)) path = substr(line, RSTART + 1, RLENGTH - 2)
+					else if (f[2] ~ /^\047/ && match(line, /\047[^\047]*\047/)) path = substr(line, RSTART + 1, RLENGTH - 2)
+					else path = f[2]
+					specifiers = path; gsub(/%%/, "", specifiers)
+					if (substr(path, 1, 1) != "/" || path ~ /[[*?]/ || index(path, "\\") || index(specifiers, "%")) return ""
+					gsub(/%%/, "%", path)
+					gsub(/\/+/, "/", path)
+					if (path != "/") sub(/\/$/, "", path)
+					return path
+				}
+				BEGIN {
+					RS = "\0"
+					while ((getline line < ENVIRON["SORTED"]) > 0) generated++
+					close(ENVIRON["SORTED"]); RS = "\n"
+				}
+				FILENAME == ARGV[1] {
+					# Generated protections close keep-rules; only configured x rules advise.
+					total++
+					if ($1 ~ /^x[-=~^+$]*$/) keeps[total] = literal_path($0)
+					next
+				}
+				$1 ~ /^[dDe][-=~^+$]*$/ {
+					root = literal_path($0)
+					if (root == "" || !under(ENVIRON["CHECK"], root)) next
+					for (i = 1; i <= total - generated; i++) {
+						if (keeps[i] == "" || !under(root, keeps[i])) continue
+						excluded = keeps[i]
+						gsub(/[\001-\037\177]/, "?", excluded)
+						gsub(/[\001-\037\177]/, "?", root)
+						print "tmpcleaner: note: " excluded " is excluded, but the cleanup rule for " root " still cleans it"
+						exit
+					}
+				}
+				' "$scratch/keep-rules" "$scratch/rules" >&2 || :
 			exit 0
 			;;
 		1)

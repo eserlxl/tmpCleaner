@@ -100,6 +100,9 @@ A separately configured cleanup root at or below the excluded directory can
 still clean its contents. For example, `x /tmp/tree/keep` cannot save
 `/tmp/tree/keep/old` if a separate `d /tmp/tree/keep ...` rule cleans it. Remove
 the conflicting cleanup rule; see [configuration.md](configuration.md).
+For literal paths, `--check` adds a note on stderr naming the exclusion and
+overriding cleanup root when the path would be removed. Glob rules are skipped;
+the verdict on stdout and its exit status stay the same, as does `--check0`.
 
 A `*.conf` file in `/etc/tmpcleaner/tmpcleaner.conf.d/` works the same and
 survives package upgrades untouched ([configuration.md](configuration.md)).

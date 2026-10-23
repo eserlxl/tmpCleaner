@@ -1562,6 +1562,71 @@ for name in old.txt 'open a%b.txt' new.txt; do
 		fail=1
 	fi
 done
+# A separate cleanup root can override an ancestor x exclusion.
+override_root=$dir/check-override
+override_quoted=$override_root/quoted${tab}keep
+mkdir -p "$override_root/keep/nested" "$override_root/keep-sibling" "$override_quoted"
+touch "$override_root/keep/old" "$override_root/keep/nested/old" "$override_root/keep-sibling/old" "$override_quoted/old"
+old "$override_root/keep/old" "$override_root/keep/nested/old" "$override_root/keep-sibling/old" "$override_quoted/old"
+# The literal 1s rule also considers ctime and birth time, which cannot be backdated.
+sleep 2
+# An e root at the excluded path honours the x rule, so only d and D override it.
+for cleanup_type in d D; do
+	printf 'x %s/keep\n%s %s/keep - - - 1s\n%s %s/keep-sibling - - - 1s\n' \
+		"$override_root" "$cleanup_type" "$override_root" "$cleanup_type" "$override_root" > "$cfg/check-override.conf"
+	for override_path in keep/old keep/nested/old keep-sibling/old; do
+		status=0
+		check_out=$(TMPCLEANER_CONF=$cfg/check-override.conf sh "$here/tmpcleaner" --check "$override_root/$override_path" \
+			2> "$cfg/check-override.err") || status=$?
+		expected_err=''
+		case "$override_path" in
+			keep/*) expected_err="tmpcleaner: note: $override_root/keep is excluded, but the cleanup rule for $override_root/keep still cleans it" ;;
+		esac
+		if [ "$status" -ne 0 ] || [ "$check_out" != "would be removed: $override_root/$override_path" ] ||
+			[ "$(cat "$cfg/check-override.err")" != "$expected_err" ] || [ ! -e "$override_root/$override_path" ]; then
+			echo 'FAIL: --check should advise only when a literal x exclusion is overridden by a cleanup root'
+			fail=1
+		fi
+	done
+done
+printf 'x %s/keep\nd %s/keep/nested - - - 1s\n' "$override_root" "$override_root" > "$cfg/check-override.conf"
+status=0
+check_out=$(TMPCLEANER_CONF=$cfg/check-override.conf sh "$here/tmpcleaner" --check "$override_root/keep/nested/old" \
+	2> "$cfg/check-override.err") || status=$?
+if [ "$status" -ne 0 ] || [ "$check_out" != "would be removed: $override_root/keep/nested/old" ] ||
+	[ "$(cat "$cfg/check-override.err")" != "tmpcleaner: note: $override_root/keep is excluded, but the cleanup rule for $override_root/keep/nested still cleans it" ]; then
+	echo 'FAIL: --check should name a cleanup root below the literal x exclusion'
+	fail=1
+fi
+status=0
+printf '%s\0' "$override_root/keep/nested/old" |
+	TMPCLEANER_CONF=$cfg/check-override.conf sh "$here/tmpcleaner" --check0 \
+	> "$cfg/check-override.out" 2> "$cfg/check-override.err" || status=$?
+printf 'removed\0%s\0' "$override_root/keep/nested/old" > "$cfg/check-override.expected"
+if [ "$status" -ne 0 ] || ! cmp -s "$cfg/check-override.expected" "$cfg/check-override.out" || [ -s "$cfg/check-override.err" ]; then
+	echo 'FAIL: --check0 should retain its output and omit the overridden-exclusion advisory'
+	fail=1
+fi
+printf 'x %s/keep*\nd %s/keep - - - 1s\n' "$override_root" "$override_root" > "$cfg/check-override.conf"
+status=0
+check_out=$(TMPCLEANER_CONF=$cfg/check-override.conf sh "$here/tmpcleaner" --check "$override_root/keep/old" \
+	2> "$cfg/check-override.err") || status=$?
+if [ "$status" -ne 0 ] || [ "$check_out" != "would be removed: $override_root/keep/old" ] || [ -s "$cfg/check-override.err" ]; then
+	echo 'FAIL: --check should omit the overridden-exclusion advisory for glob rules'
+	fail=1
+fi
+printf 'x "%s"\nd "%s" - - - 1s\n' "$override_quoted" "$override_quoted" > "$cfg/check-override.conf"
+status=0
+check_out=$(TMPCLEANER_CONF=$cfg/check-override.conf sh "$here/tmpcleaner" --check "$override_quoted/old" \
+	2> "$cfg/check-override.err") || status=$?
+override_shown="$override_root/quoted?keep"
+if [ "$status" -ne 0 ] || [ "$check_out" != "would be removed: $override_shown/old" ] ||
+	[ "$(cat "$cfg/check-override.err")" != "tmpcleaner: note: $override_shown is excluded, but the cleanup rule for $override_shown still cleans it" ]; then
+	echo 'FAIL: --check should parse quoted literal rule paths and mask control bytes in its advisory'
+	fail=1
+fi
+rm -rf "$override_root"
+
 # Retained root aliases cannot produce a reliable path check from backend text.
 check_root=$(mktemp -d "$dir/check-roots.XXXXXX")
 mkdir "$check_root/keep" "$check_root/fake"
