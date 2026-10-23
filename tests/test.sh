@@ -2859,7 +2859,11 @@ for scanfail in STAT_SHIM_FAIL=tmp STAT_SHIM_FAIL=cached STAT_SHIM_FAIL=verify S
 	status=0
 	shim env "$scanfail" TMPCLEANER_FULL_PERCENT=$scan_threshold TMPCLEANER_FULL_AGE=30m \
 		TMPCLEANER_METRICS=$cfg/failure.prom CLEAN_SHIM_MARKER=$cfg/failed-clean TMPCLEANER_CONF="$cfg/scan.conf" sh "$here/tmpcleaner" >/dev/null 2>&1 || status=$?
-	if [ "$status" -ne 1 ] || [ ! -e "$fresh/old" ] || [ -e "$cfg/failed-clean" ] || ! failure_metrics_ok "$scan_pressure"; then
+	# The marker walk fails after the in-use walk ran, so completeness is known (and depends on the host /tmp).
+	walk_metric='^tmpcleaner_partial_protection_walk NaN$'
+	[ "$scanfail" != FIND_SHIM_FAIL=markers ] || walk_metric='^tmpcleaner_partial_protection_walk [01]$'
+	if [ "$status" -ne 1 ] || [ ! -e "$fresh/old" ] || [ -e "$cfg/failed-clean" ] || ! failure_metrics_ok "$scan_pressure" ||
+		! grep -Eq "$walk_metric" "$cfg/failure.prom"; then
 		echo "FAIL: real run should exit 1 and keep old files when the scan fails ($scanfail)"
 		fail=1
 	fi
@@ -2892,14 +2896,22 @@ for scanwalk in walk-partial markers-partial ''; do
 		touch "$fresh/old" "$scan_kept/old"
 		old "$fresh/old" "$scan_kept/old" "$fresh/held"
 		set -- env FIND_SHIM_FAIL="$scanwalk" FIND_SHIM_ROOT="$dir" FIND_SHIM_PARTIAL_MARKER="$scan_kept" \
-			TMPCLEANER_CONF="$cfg/complete-scan.conf" CLEAN_SHIM_MARKER="$cfg/complete-scan.called"
+			TMPCLEANER_CONF="$cfg/complete-scan.conf" CLEAN_SHIM_MARKER="$cfg/complete-scan.called" \
+			TMPCLEANER_METRICS="$cfg/complete-scan.prom"
 		[ "$complete_scan" = unset ] || set -- "$@" TMPCLEANER_REQUIRE_COMPLETE_SCAN="$complete_scan"
 		expected_status=0
+		expected_partial=0
+		[ -z "$scanwalk" ] || expected_partial=1
 		if [ "$complete_scan" = 1 ] && [ -n "$scanwalk" ]; then expected_status=2; fi
+		printf 'preview sentinel\n' > "$cfg/complete-scan.prom"
 		status=0
 		check_out=$(shim "$@" sh "$here/tmpcleaner" --check "$fresh/old" 2> "$cfg/complete-scan.err") || status=$?
 		if [ "$status" -ne "$expected_status" ] || [ ! -e "$fresh/old" ]; then
 			echo "FAIL: protection walk check status ($scanwalk, complete=$complete_scan)"
+			fail=1
+		fi
+		if [ "$(cat "$cfg/complete-scan.prom")" != 'preview sentinel' ]; then
+			echo 'FAIL: protection walk checks must preserve metrics'
 			fail=1
 		fi
 		if [ "$expected_status" = 2 ]; then
@@ -2918,6 +2930,10 @@ for scanwalk in walk-partial markers-partial ''; do
 		rm -f "$cfg/complete-scan.called"
 		status=0
 		shim "$@" sh "$here/tmpcleaner" > /dev/null 2> "$cfg/complete-scan.err" || status=$?
+		if ! grep -Fxq "tmpcleaner_partial_protection_walk $expected_partial" "$cfg/complete-scan.prom"; then
+			echo "FAIL: partial protection walk metric ($scanwalk, complete=$complete_scan)"
+			fail=1
+		fi
 		if [ "$status" -ne "$expected_status" ] || [ ! -e "$scan_kept/old" ]; then
 			echo "FAIL: protection walk cleanup status or partial marker protection ($scanwalk, complete=$complete_scan)"
 			fail=1
@@ -2958,7 +2974,7 @@ for complete_scan in 0 yes 01; do
 	done
 done
 exec 9<&-
-rm -rf "$fresh" "$scan_kept" "$cfg/complete-scan.conf" "$cfg/complete-scan.called" "$cfg/complete-scan.err"
+rm -rf "$fresh" "$scan_kept" "$cfg/complete-scan.conf" "$cfg/complete-scan.called" "$cfg/complete-scan.err" "$cfg/complete-scan.prom"
 # Bound the scan-to-cleanup gap, including the in-use scan itself.
 scan_root=$(mktemp -d "$dir/scan-age.XXXXXX")
 printf 'd %s - - - amM:12h\n' "$scan_root" > "$cfg/scan-age.conf"

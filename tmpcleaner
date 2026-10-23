@@ -318,6 +318,9 @@ case "${TMPCLEANER_MAX_SCAN_AGE:-}" in
 esac
 write_metrics() {
 	mtmp=
+	if [ -n "$scratch" ] && [ -f "$scratch/partial-protection-walk" ]; then
+		metric_partial_protection_walk=1
+	fi
 	metric_duration=$(START=$metric_started LC_ALL=C awk '
 		NR == 1 { finish = $1 }
 		END {
@@ -357,6 +360,9 @@ tmpcleaner_protected_paths $metric_protected
 # HELP tmpcleaner_marked_directories Number of /tmp directories .tmpcleaner-keep markers kept in the last run.
 # TYPE tmpcleaner_marked_directories gauge
 tmpcleaner_marked_directories $metric_marked
+# HELP tmpcleaner_partial_protection_walk Whether a protection walk was partial, including strict refusals; NaN when completeness is unavailable.
+# TYPE tmpcleaner_partial_protection_walk gauge
+tmpcleaner_partial_protection_walk $metric_partial_protection_walk
 # HELP tmpcleaner_last_run_timestamp_seconds Unix timestamp of the last run completion.
 # TYPE tmpcleaner_last_run_timestamp_seconds gauge
 tmpcleaner_last_run_timestamp_seconds $now
@@ -381,6 +387,7 @@ EOF
 	fi
 }
 metric_files=0 metric_directories=0 metric_bytes=0 metric_protected=0 metric_marked=0 metric_pressure_active=0
+metric_partial_protection_walk=NaN
 metrics_ready=1
 metric_started=
 if [ "$previewing" = 0 ] && [ -n "${TMPCLEANER_METRICS:-}" ]; then
@@ -634,7 +641,7 @@ in_use() {
 			LC_ALL=C xargs -0 sh -c 'printf "batch\0"; exec stat -L --cached=always --printf "%d %i %n %F\0" -- / "$@" 2>/dev/null' sh ||
 			[ "$?" -lt 124 ] || printf 'fail\0fail\0'
 	# POSIX leaves export of assignments before a function call unspecified.
-	} | HOLDERS=$holders_file LC_ALL=C awk -v tmpdev="$tmpdev" -v devhex="$devhex" '
+	} | HOLDERS=$holders_file PARTIAL_WALK=$scratch/partial-protection-walk LC_ALL=C awk -v tmpdev="$tmpdev" -v devhex="$devhex" '
 		BEGIN {
 			RS = "\0"
 		}
@@ -878,6 +885,8 @@ in_use() {
 				if (inode in wanted) emit(path, inode)
 			}
 			status = close(cmd)
+			# Preserve partial-walk evidence across the pipeline and strict exits.
+			if (walked && status == 1) print 1 > ENVIRON["PARTIAL_WALK"]
 			if (!walked || status < 0 || status > 1 ||
 				(status == 1 && ENVIRON["TMPCLEANER_REQUIRE_COMPLETE_SCAN"] == "1")) exit 1
 		}'
@@ -973,8 +982,10 @@ rules() {
 	find /tmp -xdev -mindepth 2 -maxdepth 3 -name .tmpcleaner-keep -type f "$@" -printf '%h\0' \
 		> "$scratch/markers" 2>/dev/null || {
 		[ "$?" -eq 1 ] || return 1
+		metric_partial_protection_walk=1
 		[ "${TMPCLEANER_REQUIRE_COMPLETE_SCAN:-}" != 1 ] || { walk_incomplete=1; return 1; }
 	}
+	[ "$metric_partial_protection_walk" = 1 ] || metric_partial_protection_walk=0
 	LC_ALL=C sort -zu "$scratch/inuse" "$scratch/markers" "$scratch/excludes" > "$scratch/sorted" || return 1
 	escape_x_rules "$scratch/sorted" > "$scratch/excl" || return 1
 	if [ -n "$with_sources" ]; then

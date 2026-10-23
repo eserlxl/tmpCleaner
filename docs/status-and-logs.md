@@ -107,6 +107,7 @@ example `/var/lib/node_exporter/textfile_collector/tmpcleaner.prom`), each real
 run atomically writes `tmpcleaner_removed_files`,
 `tmpcleaner_removed_directories`, `tmpcleaner_removed_bytes`,
 `tmpcleaner_protected_paths`, `tmpcleaner_marked_directories`,
+`tmpcleaner_partial_protection_walk`,
 `tmpcleaner_last_run_timestamp_seconds`,
 `tmpcleaner_last_success_timestamp_seconds`, `tmpcleaner_last_exit_status`,
 `tmpcleaner_pressure_mode_active`, and `tmpcleaner_last_run_duration_seconds`
@@ -132,6 +133,23 @@ With `TMPCLEANER_MARKER_AGE` set, only markers modified within that duration
 count; expired markers no longer protect their directories. Jobs can renew
 protection by touching the marker; see
 [marker expiry](configuration.md#expire-abandoned-markers).
+
+`tmpcleaner_partial_protection_walk` is `1` when the `/tmp` inode walk or
+`.tmpcleaner-keep` marker walk returned a partial result (status `1` after
+visiting the inode-walk root, or status `1` from the marker walk). This includes
+both tolerated partial walks and refusals with `TMPCLEANER_REQUIRE_COMPLETE_SCAN=1`.
+It is `0` when both protection walks complete, and `NaN` when completeness is
+unavailable, including failures before the walks run. A partial result remains
+`1` even if a later step fails. Alert on partial walks to identify runs where
+enabling strict mode may be useful:
+
+```yaml
+groups:
+  - name: tmpcleaner-protection
+    rules:
+      - alert: TmpcleanerPartialProtectionWalk
+        expr: tmpcleaner_partial_protection_walk == 1
+```
 
 `tmpcleaner_last_success_timestamp_seconds` is the Unix completion timestamp of
 the last real run that exited `0`. Failed runs carry forward the previous value
