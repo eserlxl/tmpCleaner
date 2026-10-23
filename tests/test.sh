@@ -52,6 +52,9 @@ case "\${STAT_SHIM_FAIL:-}:\$*" in
 	# A batch cut after its sentinel, as an OOM kill would leave it.
 	killed:*"%n %F"*) "$(command -v stat)" -L --cached=always --printf '%d %i %n %F\0' -- /; kill -KILL \$\$ ;;
 esac
+case "\$*" in
+	*"%n %F"*) [ -z "\${STAT_SHIM_INUSE_DELAY:-}" ] || sleep "\$STAT_SHIM_INUSE_DELAY" ;;
+esac
 exec "$(command -v stat)" "\$@"
 SHIM
 cat > "$shimdir/find" <<SHIM
@@ -2956,7 +2959,7 @@ for complete_scan in 0 yes 01; do
 done
 exec 9<&-
 rm -rf "$fresh" "$scan_kept" "$cfg/complete-scan.conf" "$cfg/complete-scan.called" "$cfg/complete-scan.err"
-# Bound the scan-to-cleanup gap using only the fixture's snapshot walks.
+# Bound the scan-to-cleanup gap, including the in-use scan itself.
 scan_root=$(mktemp -d "$dir/scan-age.XXXXXX")
 printf 'd %s - - - amM:12h\n' "$scan_root" > "$cfg/scan-age.conf"
 touch "$scan_root/old"
@@ -2977,6 +2980,17 @@ for scan_list in '' nul; do
 		fail=1
 	fi
 done
+rm -f "$cfg/scan-age.called"
+status=0
+STAT_SHIM_INUSE_DELAY=2 TMPCLEANER_MAX_SCAN_AGE=1 \
+	CLEAN_SHIM_MARKER=$cfg/scan-age.called TMPCLEANER_CONF=$cfg/scan-age.conf \
+	sh "$here/tmpcleaner" > "$cfg/scan-age.out" 2> "$cfg/scan-age.err" || status=$?
+if [ "$status" -ne 1 ] || [ ! -e "$scan_root/old" ] || [ -e "$cfg/scan-age.called" ] ||
+	[ -s "$cfg/scan-age.out" ] ||
+	! grep -Eq '^tmpcleaner: in-use snapshot is [0-9]+[.][0-9][0-9]s old \(limit 1s\); nothing was removed$' "$cfg/scan-age.err"; then
+	echo 'FAIL: slow in-use scan alone must expire the snapshot without calling the backend'
+	fail=1
+fi
 rm -f "$cfg/scan-age.called"
 status=0
 SCAN_AGE_SHIM_FAIL=1 TMPCLEANER_MAX_SCAN_AGE=999999 CLEAN_SHIM_MARKER=$cfg/scan-age.called \
