@@ -1644,7 +1644,8 @@ for cleanup_type in d D; do
 		fi
 	done
 done
-printf 'x %s/keep\nd %s/keep/nested - - - 1s\n' "$override_root" "$override_root" > "$cfg/check-override.conf"
+# An age-less rule at the excluded path cleans nothing and must not be named.
+printf 'x %s/keep\nd %s/keep - - - -\nd %s/keep/nested - - - 1s\n' "$override_root" "$override_root" "$override_root" > "$cfg/check-override.conf"
 status=0
 check_out=$(TMPCLEANER_CONF=$cfg/check-override.conf sh "$here/tmpcleaner" --check "$override_root/keep/nested/old" \
 	2> "$cfg/check-override.err") || status=$?

@@ -1255,6 +1255,10 @@ if [ -n "$check$check0" ]; then
 					next
 				}
 				$1 ~ /^[dDe][-=~^+$]*$/ {
+					# A rule without an age cleans nothing; a quoted path counts as one field.
+					fields = $0
+					sub(/"[^"]*"|\047[^\047]*\047/, "p", fields)
+					if (split(fields, f) < 6 || f[6] == "-") next
 					root = literal_path($0)
 					if (root == "" || !under(ENVIRON["CHECK"], root)) next
 					for (i = 1; i <= total - generated; i++) {
