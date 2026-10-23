@@ -1217,6 +1217,16 @@ if [ "$status" -ne 0 ] || [ ! -e "$dir/old.txt" ] || [ -e "$cfg/preview.prom" ] 
 	fail=1
 fi
 status=0
+TMPCLEANER_PREVIEW=1 TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" \
+	"--prefix=$dir" "--exclude-prefix=$dir/old.txt" \
+	>"$cfg/preview.out" 2>"$cfg/preview.err" || status=$?
+if [ "$status" -ne 0 ] || [ ! -e "$dir/old.txt" ] || [ ! -e "$dir/weirdX" ] ||
+	grep -Fq "Would remove \"$dir/old.txt\"" "$cfg/preview.err" ||
+	! grep -Fq "Would remove \"$dir/weirdX\"" "$cfg/preview.err"; then
+	echo 'FAIL: environment preview must preserve prefix and exclusion arguments without removing files'
+	fail=1
+fi
+status=0
 TMPCLEANER_PREVIEW=1 TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --dry-run \
 	>"$cfg/preview.out" 2>"$cfg/preview.err" || status=$?
 if [ "$status" -ne 0 ] || [ ! -e "$dir/old.txt" ] ||
