@@ -2979,6 +2979,34 @@ if [ "$status" -ne 1 ] || ! printf 'removed\0%s\0kept\0%s\0' "$dir/job/old" "$ma
 	echo 'FAIL: --check0 must expire stale markers and keep fresh markers'
 	fail=1
 fi
+touch -m "$marker_top/.tmpcleaner-keep"
+touch -a -d '13 hours ago' "$marker_top/.tmpcleaner-keep"
+status=0
+check_out=$(TMPCLEANER_MARKER_AGE=1h TMPCLEANER_CONF=$cfg/marker.conf sh "$here/tmpcleaner" \
+	--check "$marker_top/old" 2>"$cfg/check.err") || status=$?
+if [ "$status" -ne 1 ] || [ "$check_out" != "kept: $marker_top/old" ] ||
+	[ "$(cat "$cfg/check.err")" != "tmpcleaner: kept by a .tmpcleaner-keep marker in $marker_top" ]; then
+	echo 'FAIL: --check must use marker mtime even when atime is 13 hours old'
+	fail=1
+fi
+touch -m -d '30 minutes ago' "$marker_top/.tmpcleaner-keep"
+status=0
+check_out=$(TMPCLEANER_MARKER_AGE=1h TMPCLEANER_CONF=$cfg/marker.conf sh "$here/tmpcleaner" \
+	--check "$marker_top/old" 2>"$cfg/check.err") || status=$?
+if [ "$status" -ne 1 ] || [ "$check_out" != "kept: $marker_top/old" ] ||
+	[ "$(cat "$cfg/check.err")" != "tmpcleaner: kept by a .tmpcleaner-keep marker in $marker_top" ]; then
+	echo 'FAIL: --check must keep a 30-minute-old marker under a 1h expiry'
+	fail=1
+fi
+touch -m -d '90 minutes ago' "$marker_top/.tmpcleaner-keep"
+status=0
+check_out=$(TMPCLEANER_MARKER_AGE=1h TMPCLEANER_CONF=$cfg/marker.conf sh "$here/tmpcleaner" \
+	--check "$marker_top/old" 2>"$cfg/check.err") || status=$?
+if [ "$status" -ne 0 ] || [ "$check_out" != "would be removed: $marker_top/old" ] || [ -s "$cfg/check.err" ]; then
+	echo 'FAIL: --check must expire a 90-minute-old marker under a 1h expiry'
+	fail=1
+fi
+touch "$marker_top/.tmpcleaner-keep"
 for marker_age in bogus '' 30s 1 1.5h 9999999w 0h 000m; do
 	status=0
 	TMPCLEANER_MARKER_AGE=$marker_age TMPCLEANER_CONF=$cfg/marker.conf sh "$here/tmpcleaner" \
