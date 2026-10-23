@@ -154,7 +154,7 @@ case "\$1" in
 		fi ;;
 esac
 case "\$*" in
-	*'scan_age = finish - start'*)
+	*'scan_age = int(finish * 100'*)
 		[ -z "\${SCAN_AGE_SHIM_FAIL:-}" ] || exit 1 ;;
 	*'elapsed = finish - start'*)
 		[ -z "\${DURATION_SHIM_MARKER:-}" ] || : > "\$DURATION_SHIM_MARKER"
@@ -2900,7 +2900,10 @@ for scanwalk in walk-partial markers-partial ''; do
 			fail=1
 		fi
 		if [ "$expected_status" = 2 ]; then
-			if [ -n "$check_out" ] || ! grep -Fq 'cannot apply path protections; nothing was removed' "$cfg/complete-scan.err"; then
+			# The /tmp inode walk is part of the in-use scan; the marker walk is a path protection.
+			strict_err='cannot apply path protections; nothing was removed'
+			[ "$scanwalk" != walk-partial ] || strict_err='cannot scan processes in use; nothing was removed'
+			if [ -n "$check_out" ] || ! grep -Fq "$strict_err" "$cfg/complete-scan.err"; then
 				echo 'FAIL: strict partial-walk checks must report a protection failure without a verdict'
 				fail=1
 			fi
@@ -2918,7 +2921,7 @@ for scanwalk in walk-partial markers-partial ''; do
 		fi
 		if [ "$expected_status" = 1 ]; then
 			if [ ! -e "$fresh/old" ] || [ ! -e "$fresh/held" ] || [ -e "$cfg/complete-scan.called" ] ||
-				! grep -Fq 'cannot apply path protections; nothing was removed' "$cfg/complete-scan.err"; then
+				! grep -Fq "$strict_err" "$cfg/complete-scan.err"; then
 				echo 'FAIL: strict partial-walk cleanup must remove nothing and never invoke cleanup'
 				fail=1
 			fi

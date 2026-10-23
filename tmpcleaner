@@ -962,7 +962,7 @@ rules() {
 	find /tmp -xdev -mindepth 2 -maxdepth 3 -name .tmpcleaner-keep -type f "$@" -printf '%h\0' \
 		> "$scratch/markers" 2>/dev/null || {
 		[ "$?" -eq 1 ] || return 1
-		[ "${TMPCLEANER_REQUIRE_COMPLETE_SCAN:-}" != 1 ] || { scan_failed=1; return 1; }
+		[ "${TMPCLEANER_REQUIRE_COMPLETE_SCAN:-}" != 1 ] || { walk_incomplete=1; return 1; }
 	}
 	LC_ALL=C sort -zu "$scratch/inuse" "$scratch/markers" "$scratch/excludes" > "$scratch/sorted" || return 1
 	escape_x_rules "$scratch/sorted" > "$scratch/excl" || return 1
@@ -973,9 +973,9 @@ rules() {
 }
 
 generate_rules() {
-	scan_failed=
+	scan_failed='' walk_incomplete=''
 	rules > "$scratch/rules" || {
-		if [ "$scan_failed" = 1 ] && [ "${TMPCLEANER_REQUIRE_COMPLETE_SCAN:-}" = 1 ]; then
+		if [ "$walk_incomplete" = 1 ]; then
 			echo "${err_tag}tmpcleaner: cannot apply path protections; nothing was removed" >&2
 		elif [ "$scan_failed" = 1 ]; then
 			echo "${err_tag}tmpcleaner: cannot scan processes in use; nothing was removed" >&2
@@ -1665,9 +1665,10 @@ if [ -n "${TMPCLEANER_MAX_SCAN_AGE:-}" ]; then
 				print "?"
 				exit 1
 			}
-			scan_age = finish - start
-			printf "%.2f\n", scan_age
-			if (scan_age > ENVIRON["LIMIT"] + 0) exit 1
+			# Whole hundredths, as /proc/uptime prints them: no float rounding at the limit.
+			scan_age = int(finish * 100 + 0.5) - int(start * 100 + 0.5)
+			printf "%.2f\n", scan_age / 100
+			if (scan_age > ENVIRON["LIMIT"] * 100) exit 1
 		}' /proc/uptime 2>/dev/null) || {
 		echo "${err_tag}tmpcleaner: in-use snapshot is ${scan_age:-?}s old (limit ${TMPCLEANER_MAX_SCAN_AGE}s); nothing was removed" >&2
 		exit "$errstatus"
