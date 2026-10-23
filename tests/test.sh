@@ -2653,6 +2653,17 @@ for log_env in SYSTEMD_LOG_LEVEL=warning SYSTEMD_LOG_LEVEL=err SYSTEMD_LOG_TARGE
 		fail=1
 	fi
 done
+# A young directory stays for its own age, regardless of its young child.
+mkdir "$dir/check-young"
+touch "$dir/check-young/fresh"
+status=0
+check_out=$(TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --check "$dir/check-young" 2>"$cfg/check.err") || status=$?
+if [ "$status" -ne 1 ] || [ "$check_out" != "kept: $dir/check-young" ] ||
+	[ "$(cat "$cfg/check.err")" != 'tmpcleaner: not old enough, or kept by a configuration rule' ]; then
+	echo "FAIL: --check should keep the generic reason for a young directory"
+	fail=1
+fi
+rm -rf "$dir/check-young" "$cfg/check.err"
 # The old file sorts before the fresh one but must not be named as the blocker.
 touch "$dir/mixed/aged"
 old "$dir/mixed/aged" "$dir/mixed"
@@ -3499,7 +3510,6 @@ for name in keep/f job-1/f new keep/new 5 mixed; do
 	case "$name" in
 		keep/f) expected_err="tmpcleaner: kept by configuration rule: x $dir/rulekeep/keep" ;;
 		job-1/f) expected_err="tmpcleaner: kept by configuration rule: x $dir/rulekeep/job-*" ;;
-		mixed) expected_err="tmpcleaner: kept because it still holds an entry that stays: $dir/rulekeep/mixed/fresh" ;;
 		*) expected_err='tmpcleaner: not old enough, or kept by a configuration rule' ;;
 	esac
 	status=0

@@ -1142,7 +1142,9 @@ check_entries() {
 			echo "${err_tag}tmpcleaner: --check cannot judge a directory holding names with newlines or carriage returns${check0:+: $shown}" >&2
 			exit 2
 		fi
-		entries=$(find "$check" -mindepth 1 -fprint0 "$scratch/check-descendants" -printf . 2>/dev/null) || {
+		descendants=$scratch/check-descendants
+		[ -z "$check0" ] || descendants=/dev/null
+		entries=$(find "$check" -mindepth 1 -fprint0 "$descendants" -printf . 2>/dev/null) || {
 			echo "${err_tag}tmpcleaner: --check cannot read $shown" >&2
 			exit 2
 		}
@@ -1154,7 +1156,7 @@ judge_check() {
 	if [ -z "$check0" ]; then
 		: > "$scratch/check-descendants" || exit 2
 		check_entries
-		LC_ALL=C sort -z "$scratch/check-descendants" > "$scratch/check-descendants-sorted" || exit 2
+		LC_ALL=C sort -z -T "$scratch" "$scratch/check-descendants" > "$scratch/check-descendants-sorted" || exit 2
 		printf '%s\0%s\0%s\0' "$check" "$requested" "$entries" > "$scratch/check-entries" || exit 2
 	fi
 	verdict=0
@@ -1174,13 +1176,14 @@ judge_check() {
 		}
 		{
 			path = $0
+			checked_path = path
 			if ((getline requested) != 1 || (getline entries) != 1) { failed = 1; exit 2 }
 			removed = (path in files) || ((path in directories) && inside[path] >= entries + 0)
 			if (ENVIRON["CHECK0"] != "") printf "%s%c%s%c", removed ? "removed" : "kept", 0, requested, 0
 			if (!removed) any_kept = 1
 		}
 		END {
-			if (!failed && any_kept && ENVIRON["CHECK0"] == "") {
+			if (!failed && any_kept && ENVIRON["CHECK0"] == "" && (checked_path in directories)) {
 				# An announced directory stays only for an entry below it, which
 				# sorts after it, so the first unannounced entry is the cause.
 				while ((getline path < ENVIRON["DESCENDANTS"]) > 0) {
