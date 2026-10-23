@@ -8,6 +8,19 @@ journalctl -u tmpcleaner.service
 journalctl -p warning -u tmpcleaner.service
 ```
 
+With `TMPCLEANER_PREVIEW=1` in the service environment, each scheduled run
+logs this notice followed by the usual `--dry-run` paths, removal estimates
+and per-entry breakdown:
+
+```text
+tmpcleaner: TMPCLEANER_PREVIEW=1: previewing only, nothing is removed
+```
+
+These runs remove nothing, leave metrics files untouched and emit no JSON
+completion record even with `TMPCLEANER_SUMMARY=json`. Read them with
+`journalctl -u tmpcleaner`; see [timer rehearsal](configuration.md#rehearse-timer-runs)
+for the drop-in and how to start normal cleanup afterward.
+
 By default, each real run that reaches counting logs a prose summary,
 including runs that remove nothing:
 

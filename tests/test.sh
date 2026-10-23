@@ -4,7 +4,7 @@
 # cannot be backdated, so the test drops b/B/c/C from the age-by field and
 # keeps the rest as configured.
 set -eu
-unset TMPCLEANER_AGE TMPCLEANER_MARKER_AGE TMPCLEANER_PROTECT_TMPDIR TMPCLEANER_FULL_PERCENT TMPCLEANER_FULL_AGE TMPCLEANER_LIST TMPCLEANER_SUMMARY TMPCLEANER_METRICS JOURNAL_STREAM
+unset TMPCLEANER_AGE TMPCLEANER_MARKER_AGE TMPCLEANER_PROTECT_TMPDIR TMPCLEANER_PREVIEW TMPCLEANER_FULL_PERCENT TMPCLEANER_FULL_AGE TMPCLEANER_LIST TMPCLEANER_SUMMARY TMPCLEANER_METRICS JOURNAL_STREAM
 here=$(cd "$(dirname "$0")/.." && pwd)
 dir=$(mktemp -d /tmp/tmpcleaner-test.XXXXXX)
 # Fixture configs live in a private directory, never at a guessable /tmp path.
@@ -1202,6 +1202,61 @@ fi
 	fail=1
 }
 [ "$fail" = 0 ] || exit 1
+
+# The service's argument-free invocation can rehearse through its environment.
+status=0
+TMPCLEANER_PREVIEW=1 TMPCLEANER_METRICS=$cfg/preview.prom TMPCLEANER_SUMMARY=json TMPCLEANER_CONF=$conf \
+	sh "$here/tmpcleaner" >"$cfg/preview.out" 2>"$cfg/preview.err" || status=$?
+if [ "$status" -ne 0 ] || [ ! -e "$dir/old.txt" ] || [ -e "$cfg/preview.prom" ] ||
+	! grep -Fxq 'tmpcleaner: TMPCLEANER_PREVIEW=1: previewing only, nothing is removed' "$cfg/preview.err" ||
+	[ "$(grep -Fc 'tmpcleaner: TMPCLEANER_PREVIEW=1:' "$cfg/preview.err")" -ne 1 ] ||
+	! grep -Fq "Would remove \"$dir/old.txt\"" "$cfg/preview.err" ||
+	! grep -q '^tmpcleaner: would remove [0-9]' "$cfg/preview.err" ||
+	grep -q '^[{]' "$cfg/preview.err" || [ -s "$cfg/preview.out" ]; then
+	echo 'FAIL: environment preview must announce dry-run without removals, metrics or JSON'
+	fail=1
+fi
+status=0
+TMPCLEANER_PREVIEW=1 TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --dry-run \
+	>"$cfg/preview.out" 2>"$cfg/preview.err" || status=$?
+if [ "$status" -ne 0 ] || [ ! -e "$dir/old.txt" ] ||
+	grep -Fq 'TMPCLEANER_PREVIEW=1:' "$cfg/preview.err" ||
+	! grep -Fq "Would remove \"$dir/old.txt\"" "$cfg/preview.err"; then
+	echo 'FAIL: environment preview must leave an explicit --dry-run unchanged'
+	fail=1
+fi
+for preview_path in "$dir/old.txt" "$dir/new.txt"; do
+	status=0
+	check_out=$(TMPCLEANER_PREVIEW=1 TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --check "$preview_path" \
+		2>"$cfg/preview.err") || status=$?
+	expected_status=0 expected_out="would be removed: $preview_path"
+	if [ "$preview_path" = "$dir/new.txt" ]; then
+		expected_status=1 expected_out="kept: $preview_path"
+	fi
+	if [ "$status" -ne "$expected_status" ] || [ "$check_out" != "$expected_out" ] ||
+		[ ! -e "$preview_path" ] || grep -Fq 'TMPCLEANER_PREVIEW=1:' "$cfg/preview.err"; then
+		echo 'FAIL: environment preview must preserve --check verdicts and exit statuses'
+		fail=1
+	fi
+done
+for preview_option in 0 2 yes 01; do
+	for preview_mode in clean check; do
+		set --
+		expected_status=1
+		if [ "$preview_mode" = check ]; then
+			set -- --check "$dir/old.txt"
+			expected_status=2
+		fi
+		status=0
+		TMPCLEANER_PREVIEW=$preview_option TMPCLEANER_CONF=$conf CLEAN_SHIM_MARKER=$cfg/preview.clean \
+			sh "$here/tmpcleaner" "$@" >"$cfg/preview.out" 2>"$cfg/preview.err" || status=$?
+		if [ "$status" -ne "$expected_status" ] || [ ! -e "$dir/old.txt" ] || [ -e "$cfg/preview.clean" ] ||
+			! grep -Fq 'invalid TMPCLEANER_PREVIEW (expected 1 or empty)' "$cfg/preview.err"; then
+			echo "FAIL: invalid preview option $preview_option must stop $preview_mode before cleaning"
+			fail=1
+		fi
+	done
+done
 
 status=0
 preview=$(TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --dry-run 2>&1) || status=$?

@@ -59,6 +59,7 @@ Service environment settings below go in a unit drop-in via `sudo systemctl edit
 - `TMPCLEANER_AGE`: Override duration on every `d` and `D` rule (any modifier) (e.g. `6h`, `30m`).
 - `TMPCLEANER_MARKER_AGE`: Expire `.tmpcleaner-keep` protection by marker modification age (e.g. `1h`; default: never).
 - `TMPCLEANER_PROTECT_TMPDIR`: Set to `1` to protect live processes' `TMPDIR` directories strictly below `/tmp` when owned by the declaring process's real UID (default: off).
+- `TMPCLEANER_PREVIEW`: Set to `1` to make cleanup runs use `--dry-run`; unset or empty keeps normal cleanup. Other values stop before cleaning.
 - `TMPCLEANER_FULL_PERCENT`: Threshold percentage of `/tmp` usage (1-100); the larger of block and inode usage counts (`-` is 0), and a `df` error aborts the run.
 - `TMPCLEANER_FULL_AGE`: Age duration to use when `/tmp` usage meets or exceeds `TMPCLEANER_FULL_PERCENT`.
 - `TMPCLEANER_LIST`: Set to `1` for escaped removal logs, `top` for the top-10 per-entry breakdown, or `nul` for raw NUL-separated paths on stdout (real runs only; default: off).
@@ -70,6 +71,35 @@ A configuration file other than the installed one can be previewed with
 unreadable file, dangling `*.conf.d` symlink, non-directory `*.conf.d` entry,
 unreadable `*.conf.d` directory, or `*.conf` drop-in (including a dangling
 symlink) stops the run before cleaning.
+
+## Rehearse timer runs
+
+To watch scheduled runs before allowing deletion, run
+`sudo systemctl edit tmpcleaner.service` and add:
+
+```ini
+[Service]
+Environment=TMPCLEANER_PREVIEW=1
+```
+
+Reload the unit and enable the timer:
+
+```sh
+sudo systemctl daemon-reload
+sudo systemctl enable --now tmpcleaner.timer
+journalctl -u tmpcleaner
+```
+
+Read the journal for a few days to see what each run would remove. Each run
+prints a preview notice and the usual `--dry-run` paths and counts, without
+removing anything, writing metrics or emitting a JSON completion record.
+Manual runs can use `sudo env TMPCLEANER_PREVIEW=1 tmpcleaner` too.
+Explicit `--dry-run`, help, `--print-*`, `--suggest-exclusions`, `--check` and
+`--check0` keep their existing behavior without an extra notice.
+
+When ready, remove the `Environment=TMPCLEANER_PREVIEW=1` line using
+`sudo systemctl edit tmpcleaner.service`, then run
+`sudo systemctl daemon-reload`. Subsequent timer runs perform normal cleanup.
 
 ## Override the age
 

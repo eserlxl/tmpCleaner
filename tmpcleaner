@@ -9,6 +9,22 @@
 # every NUL-terminated path in FILE.
 set -eu
 
+if [ "${TMPCLEANER_PREVIEW:-}" = 1 ]; then
+	case "${1:-}" in
+		-h|--help|--print-*|--suggest-exclusions|--check|--check0) ;;
+		*)
+			preview_dry_run=''
+			for arg do
+				[ "$arg" != --dry-run ] || preview_dry_run=1
+			done
+			if [ -z "$preview_dry_run" ]; then
+				set -- "$@" --dry-run
+				echo 'tmpcleaner: TMPCLEANER_PREVIEW=1: previewing only, nothing is removed' >&2
+			fi
+			;;
+	esac
+fi
+
 previewing=0
 case "${1:-}" in
 	-h|--help|--print-rules|--print-in-use0|--print-holders0|--suggest-exclusions|--check|--check0) previewing=1 ;;
@@ -107,6 +123,8 @@ Environment variables:
                             Whole minutes: m, min, h, d or w (e.g. 1h)
   TMPCLEANER_PROTECT_TMPDIR Set to 1 to protect live processes' TMPDIR directories
                             strictly below /tmp (default: off)
+  TMPCLEANER_PREVIEW        Set to 1 to preview cleanup without deleting
+                            (unset or empty: normal cleanup)
   TMPCLEANER_FULL_PERCENT   Threshold percentage of /tmp usage (1-100); the
                             larger of block and inode usage counts ('-' = 0).
                             If df fails or prints unexpected output, the run
@@ -263,6 +281,10 @@ esac
 case "${TMPCLEANER_PROTECT_TMPDIR:-}" in
 	''|1) ;;
 	*) echo "${err_tag}tmpcleaner: invalid TMPCLEANER_PROTECT_TMPDIR (expected 1 or empty)" >&2; exit "$errstatus" ;;
+esac
+case "${TMPCLEANER_PREVIEW:-}" in
+	''|1) ;;
+	*) echo "${err_tag}tmpcleaner: invalid TMPCLEANER_PREVIEW (expected 1 or empty)" >&2; exit "$errstatus" ;;
 esac
 write_metrics() {
 	mtmp=
