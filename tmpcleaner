@@ -656,7 +656,7 @@ in_use() {
 						path_holder[path] = pid
 						path_uid[path] = uid
 						args = args " " quote(path)
-						if (++queued >= 200) {
+						if (++queued >= 200 || length(args) > 65536) {
 							verify(args, "directory")
 							args = ""
 							queued = 0

@@ -598,6 +598,54 @@ for tmpdir_value in "$tmpdir_root/job" "$tmpdir_root/job/." "$tmpdir_root/job/..
 		fi
 	fi
 done
+# Long TMPDIR declarations must flush stat batches before the shell argument limit.
+tmpdir_long=$tmpdir_root
+tmpdir_component=$(printf '%0100d' 0)
+while [ "${#tmpdir_long}" -lt 3000 ]; do
+	tmpdir_long=$tmpdir_long/$tmpdir_component
+done
+mkdir -p "$tmpdir_long"
+touch "$tmpdir_long/f"
+old "$tmpdir_long/f"
+tmpdir_long_pids=''
+tmpdir_count=0
+while [ "$tmpdir_count" -lt 50 ]; do
+	(cd / && TMPDIR=$tmpdir_long exec sleep infinity) </dev/null >/dev/null 2>&1 &
+	tmpdir_pid=$!
+	pids="$pids $tmpdir_pid"
+	tmpdir_long_pids="$tmpdir_long_pids $tmpdir_pid"
+	waited=0
+	until TMPDIR_TEST_VALUE=$tmpdir_long LC_ALL=C awk '
+		BEGIN { RS = "\0" }
+		$0 == "TMPDIR=" ENVIRON["TMPDIR_TEST_VALUE"] { found = 1 }
+		END { exit !found }
+	' "/proc/$tmpdir_pid/environ" 2>/dev/null; do
+		if [ "$waited" -ge 100 ]; then
+			echo 'FAIL: timed out waiting for long TMPDIR holder'
+			exit 1
+		fi
+		waited=$((waited + 1))
+		sleep 0.01
+	done
+	tmpdir_count=$((tmpdir_count + 1))
+done
+status=0
+check_out=$(TMPCLEANER_PROTECT_TMPDIR=1 TMPCLEANER_CONF=$cfg/tmpdir.conf sh "$here/tmpcleaner" \
+	--check "$tmpdir_long/f" 2>"$cfg/tmpdir.err") || status=$?
+if [ "$status" -ne 1 ] || [ "$check_out" != "kept: $tmpdir_long/f" ]; then
+	echo 'FAIL: --check must keep files protected by many long TMPDIR declarations'
+	fail=1
+fi
+if ! TMPCLEANER_PROTECT_TMPDIR=1 TMPCLEANER_CONF=$cfg/tmpdir.conf sh "$here/tmpcleaner" ||
+	[ ! -e "$tmpdir_long/f" ]; then
+	echo 'FAIL: many long TMPDIR declarations must not abort cleaning or lose protection'
+	fail=1
+fi
+kill $tmpdir_long_pids 2>/dev/null || :
+wait $tmpdir_long_pids 2>/dev/null || :
+pids=${pids%"$tmpdir_long_pids"}
+# The cleaning run above removed the unprotected old job file the later cases expect.
+touch "$tmpdir_root/job/f"
 # Declaring another user's TMPDIR must not add that directory to the in-use set.
 tmpdir_foreign=''
 tmpdir_uid=$(id -ru)
