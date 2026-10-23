@@ -2859,9 +2859,10 @@ for scanfail in STAT_SHIM_FAIL=tmp STAT_SHIM_FAIL=cached STAT_SHIM_FAIL=verify S
 	status=0
 	shim env "$scanfail" TMPCLEANER_FULL_PERCENT=$scan_threshold TMPCLEANER_FULL_AGE=30m \
 		TMPCLEANER_METRICS=$cfg/failure.prom CLEAN_SHIM_MARKER=$cfg/failed-clean TMPCLEANER_CONF="$cfg/scan.conf" sh "$here/tmpcleaner" >/dev/null 2>&1 || status=$?
-	# The marker walk fails after the in-use walk ran, so completeness is known (and depends on the host /tmp).
+	# A failed marker walk leaves completeness unknown, unless the in-use walk already
+	# proved it partial (on hosts whose /tmp holds unreadable directories).
 	walk_metric='^tmpcleaner_partial_protection_walk NaN$'
-	[ "$scanfail" != FIND_SHIM_FAIL=markers ] || walk_metric='^tmpcleaner_partial_protection_walk [01]$'
+	[ "$scanfail" != FIND_SHIM_FAIL=markers ] || walk_metric='^tmpcleaner_partial_protection_walk (NaN|1)$'
 	if [ "$status" -ne 1 ] || [ ! -e "$fresh/old" ] || [ -e "$cfg/failed-clean" ] || ! failure_metrics_ok "$scan_pressure" ||
 		! grep -Eq "$walk_metric" "$cfg/failure.prom"; then
 		echo "FAIL: real run should exit 1 and keep old files when the scan fails ($scanfail)"
