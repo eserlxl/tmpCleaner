@@ -2743,11 +2743,18 @@ old "$summary_root/old"
 for mode in --dry-run --check --check0 --print-rules --print-in-use0 --print-holders0 --suggest-exclusions; do
 	set -- "$mode"
 	[ "$mode" != --check ] || set -- "$mode" "$summary_root/old"
+	expected_status=0
+	# The success shim emits no removal records, so checks report kept.
+	case "$mode" in --check|--check0) expected_status=1 ;; esac
 	for summary_failure in CLEAN_SHIM_STATUS=0 TMPCLEANER_AGE=bogus; do
 		status=0
 		printf '%s\0' "$summary_root/old" | shim env "$summary_failure" TMPCLEANER_SUMMARY=json \
 			TMPCLEANER_CONF=$cfg/summary.conf sh "$here/tmpcleaner" "$@" \
 			> "$cfg/summary.out" 2> "$cfg/summary.err" || status=$?
+		if [ "$summary_failure" = CLEAN_SHIM_STATUS=0 ] && [ "$status" -ne "$expected_status" ]; then
+			echo "FAIL: JSON summary preview must exit $expected_status ($mode, status $status)"
+			fail=1
+		fi
 		if grep -q '^{"tmpcleaner":' "$cfg/summary.err" || [ ! -e "$summary_root/old" ]; then
 			echo "FAIL: previews must not emit a JSON completion record or clean ($mode $summary_failure, status $status)"
 			fail=1
