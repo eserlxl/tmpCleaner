@@ -639,6 +639,7 @@ in_use() {
 				while ((getline line < file) > 0) {
 					if (index(line, "TMPDIR=") != 1) continue
 					path = substr(line, 8)
+					if (length(path) > 4096) break
 					gsub(/\/+/, "/", path)
 					sub(/\/$/, "", path)
 					if (index(path, "/tmp/") != 1) break

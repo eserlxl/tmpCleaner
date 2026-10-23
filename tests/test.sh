@@ -598,6 +598,36 @@ for tmpdir_value in "$tmpdir_root/job" "$tmpdir_root/job/." "$tmpdir_root/job/..
 		fi
 	fi
 done
+# An unresolvable TMPDIR must not exceed the shell argument limit when quoted.
+tmpdir_overlong=$(awk 'BEGIN { printf "/tmp/"; for (i = 0; i < 40000; i++) printf "%c", 39 }')
+touch "$tmpdir_root/job/f"
+old "$tmpdir_root/job/f"
+(cd / && TMPDIR=$tmpdir_overlong exec sleep infinity) </dev/null >/dev/null 2>&1 &
+tmpdir_pid=$!
+pids="$pids $tmpdir_pid"
+waited=0
+until TMPDIR_TEST_VALUE=$tmpdir_overlong LC_ALL=C awk '
+	BEGIN { RS = "\0" }
+	$0 == "TMPDIR=" ENVIRON["TMPDIR_TEST_VALUE"] { found = 1 }
+	END { exit !found }
+' "/proc/$tmpdir_pid/environ" 2>/dev/null; do
+	if [ "$waited" -ge 100 ]; then
+		echo 'FAIL: timed out waiting for overlong TMPDIR holder'
+		exit 1
+	fi
+	waited=$((waited + 1))
+	sleep 0.01
+done
+status=0
+check_out=$(TMPCLEANER_PROTECT_TMPDIR=1 TMPCLEANER_CONF=$cfg/tmpdir.conf sh "$here/tmpcleaner" \
+	--check "$tmpdir_root/job/f" 2>"$cfg/tmpdir.err") || status=$?
+if [ "$status" -ne 0 ] || [ "$check_out" != "would be removed: $tmpdir_root/job/f" ]; then
+	echo 'FAIL: an overlong quoted TMPDIR must be ignored without aborting --check'
+	fail=1
+fi
+kill "$tmpdir_pid"
+wait "$tmpdir_pid" 2>/dev/null || :
+pids=${pids%" $tmpdir_pid"}
 # Long TMPDIR declarations must flush stat batches before the shell argument limit.
 tmpdir_long=$tmpdir_root
 tmpdir_component=$(printf '%0100d' 0)
