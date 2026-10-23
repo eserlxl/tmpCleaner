@@ -620,8 +620,21 @@ in_use() {
 			close(file)
 			RS = saved
 		}
-		function tmpdirs(pid, file, line, path, args, queued, n, i, depth, parts, components) {
+		function tmpdirs(pid, file, line, path, args, queued, n, i, depth, parts, components, uid, saved, fields) {
 			for (pid in rootlink) {
+				file = "/proc/" pid "/status"
+				saved = RS
+				RS = "\n"
+				uid = ""
+				while ((getline line < file) > 0) {
+					if (line !~ /^Uid:/) continue
+					split(line, fields, " ")
+					uid = fields[2]
+					break
+				}
+				close(file)
+				RS = saved
+				if (uid !~ /^[0-9]+$/) continue
 				file = "/proc/" pid "/environ"
 				while ((getline line < file) > 0) {
 					if (index(line, "TMPDIR=") != 1) continue
@@ -641,6 +654,7 @@ in_use() {
 					if (depth > 1 && components[1] == "tmp") {
 						path = "/proc/" pid "/root" path
 						path_holder[path] = pid
+						path_uid[path] = uid
 						args = args " " quote(path)
 						if (++queued >= 200) {
 							verify(args, "directory")
@@ -718,15 +732,16 @@ in_use() {
 		# Keep matching entries on the /tmp filesystem among the quoted paths in
 		# args (one stat for many: a process per name would cost seconds).
 		function verify(args, type, cmd, line, saved, ok, status, path) {
-			cmd = "stat -L --cached=always --printf \"%d %i %F %n\\0\" -- /" args " 2>/dev/null"
+			cmd = "stat -L --cached=always --printf \"%d %i %F %u %n\\0\" -- /" args " 2>/dev/null"
 			saved = RS
 			RS = "\0"
 			while ((cmd | getline line) > 0) {
 				if (!ok++) continue
-				if (split(line, id, " ") >= 4 && id[1] == tmpdev && id[3] == type) {
+				if (split(line, id, " ") >= 5 && id[1] == tmpdev && id[3] == type) {
 					path = line
-					sub(/^[^ ]+ +[^ ]+ +[^ ]+ /, "", path)
-					want(id[2], path_holder[path])
+					sub(/^[^ ]+ +[^ ]+ +[^ ]+ +[^ ]+ /, "", path)
+					if (type != "directory" || ((path in path_uid) && id[4] == path_uid[path]))
+						want(id[2], path_holder[path])
 				}
 			}
 			status = close(cmd)

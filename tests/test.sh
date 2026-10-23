@@ -21,7 +21,7 @@ ctrl_top=
 marker_top=
 suggest_plain=
 suggest_awkward=
-trap 'kill $pids 2>/dev/null || :; rm -rf "$dir" "$cfg" "$shimdir" "$bindpoint" "$detachpoint" "$sockalias" "$shmdir" "$scope_outside" "$ctrl_top" "$marker_top" "$suggest_plain" "$suggest_awkward"' EXIT
+trap 'kill $pids 2>/dev/null || :; wait $pids 2>/dev/null || :; rm -rf "$dir" "$cfg" "$shimdir" "$bindpoint" "$detachpoint" "$sockalias" "$shmdir" "$scope_outside" "$ctrl_top" "$marker_top" "$suggest_plain" "$suggest_awkward"' EXIT
 trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
@@ -48,7 +48,7 @@ case "\${STAT_SHIM_FAIL:-}:\$*" in
 	tmp:"-c %d /tmp"|cached:*--cached=always*) exit 1 ;;
 	# Only the socket check in verify(): the in-use batch prints %n as well.
 	verify:*"%d %i %F"*) exit 1 ;;
-	verify-killed:*"%d %i %F"*) "$(command -v stat)" -L --cached=always --printf '%d %i %F\0' -- /; kill -KILL \$\$ ;;
+	verify-killed:*"%d %i %F"*) "$(command -v stat)" -L --cached=always --printf '%d %i %F %u %n\0' -- /; kill -KILL \$\$ ;;
 	# A batch cut after its sentinel, as an OOM kill would leave it.
 	killed:*"%n %F"*) "$(command -v stat)" -L --cached=always --printf '%d %i %n %F\0' -- /; kill -KILL \$\$ ;;
 esac
@@ -598,6 +598,52 @@ for tmpdir_value in "$tmpdir_root/job" "$tmpdir_root/job/." "$tmpdir_root/job/..
 		fi
 	fi
 done
+# Declaring another user's TMPDIR must not add that directory to the in-use set.
+tmpdir_foreign=''
+tmpdir_uid=$(id -ru)
+for tmpdir_candidate in /tmp/.X11-unix /tmp/.ICE-unix /tmp/.font-unix; do
+	[ -d "$tmpdir_candidate" ] || continue
+	tmpdir_owner=$(stat -Lc %u -- "$tmpdir_candidate" 2>/dev/null) || continue
+	[ "$tmpdir_owner" != "$tmpdir_uid" ] || continue
+	tmpdir_foreign=$tmpdir_candidate
+	break
+done
+if [ -n "$tmpdir_foreign" ]; then
+	(cd / && TMPDIR=$tmpdir_foreign exec sleep infinity) </dev/null >/dev/null 2>&1 &
+	tmpdir_pid=$!
+	pids="$pids $tmpdir_pid"
+	waited=0
+	until TMPDIR_TEST_VALUE=$tmpdir_foreign LC_ALL=C awk '
+		BEGIN { RS = "\0" }
+		$0 == "TMPDIR=" ENVIRON["TMPDIR_TEST_VALUE"] { found = 1 }
+		END { exit !found }
+	' "/proc/$tmpdir_pid/environ" 2>/dev/null; do
+		if [ "$waited" -ge 100 ]; then
+			echo 'FAIL: timed out waiting for foreign TMPDIR holder'
+			exit 1
+		fi
+		waited=$((waited + 1))
+		sleep 0.01
+	done
+	if ! TMPCLEANER_CONF=$cfg/tmpdir.conf sh "$here/tmpcleaner" --print-in-use0 > "$cfg/tmpdir.inuse-default" ||
+		! TMPCLEANER_PROTECT_TMPDIR=1 TMPCLEANER_CONF=$cfg/tmpdir.conf sh "$here/tmpcleaner" --print-in-use0 > "$cfg/tmpdir.inuse-protected" ||
+		! TMPDIR_TEST_VALUE=$tmpdir_foreign LC_ALL=C awk '
+			BEGIN { RS = "\0" }
+			$0 == ENVIRON["TMPDIR_TEST_VALUE"] {
+				if (FILENAME == ARGV[1]) baseline = 1
+				else protected = 1
+			}
+			END { exit protected && !baseline }
+		' "$cfg/tmpdir.inuse-default" "$cfg/tmpdir.inuse-protected"; then
+		echo 'FAIL: TMPDIR must not add protection for a directory owned by another UID'
+		fail=1
+	fi
+	kill "$tmpdir_pid"
+	wait "$tmpdir_pid" 2>/dev/null || :
+	pids=${pids%" $tmpdir_pid"}
+else
+	echo 'SKIP: foreign TMPDIR ownership test (no standard /tmp socket directory owned by another UID)'
+fi
 for tmpdir_option in 0 2 yes 01; do
 	for tmpdir_mode in clean check; do
 		set --
@@ -617,7 +663,7 @@ for tmpdir_option in 0 2 yes 01; do
 		fi
 	done
 done
-rm -rf "$tmpdir_root" "$cfg/tmpdir.conf" "$cfg/tmpdir.err" "$cfg/tmpdir.out" "$cfg/tmpdir.clean"
+rm -rf "$tmpdir_root" "$cfg/tmpdir.conf" "$cfg/tmpdir.err" "$cfg/tmpdir.out" "$cfg/tmpdir.clean" "$cfg/tmpdir.inuse-default" "$cfg/tmpdir.inuse-protected"
 # Without /proc nothing in use could be protected, so the run must refuse.
 # shellcheck disable=SC2016 # $1 and $2 are expanded by the inner sh
 if [ "$bind_running" = 1 ]; then

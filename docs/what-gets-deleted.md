@@ -45,7 +45,7 @@ change it; see [configuration.md](configuration.md).
 | A 2-day-old directory whose last file was deleted 1 hour ago | Kept | Deleting an entry renews the directory's modification time |
 | A 3-day-old file a running process holds open | Kept | It is in use |
 | A 3-day-old file in `/tmp/build` while a running shell works there | Kept | Everything under a process's current directory is in use (a process working in `/tmp` itself does not count) |
-| An idle 3-day-old file in `/tmp/job` while a live process declares `TMPDIR=/tmp/job` | Kept with `TMPCLEANER_PROTECT_TMPDIR=1` | The opt-in treats the directory like an in-use working directory; unset keeps the usual age behavior |
+| An idle 3-day-old file in `/tmp/job` while a live process declares `TMPDIR=/tmp/job` | Kept with `TMPCLEANER_PROTECT_TMPDIR=1` if the directory owner matches the process's real UID | The opt-in treats the directory like an in-use working directory; unset keeps the usual age behavior |
 | A 3-day-old socket a running server listens on | Kept | It is listed in `/proc/net/unix` |
 | `/tmp/.X11-unix/X0` | Kept | Excluded by `tmpcleaner.conf` |
 
@@ -55,7 +55,7 @@ change it; see [configuration.md](configuration.md).
 |----------|----------|----------------|
 | Files in use | Executables of running processes, files a running process holds open, memory-mapped files such as loaded libraries | Each one gets its own exclusion, read from `/proc` just before the run |
 | Directories in use | Everything inside a directory a running process works in (its current directory) or uses as its root directory (chrooted or containerized processes), including files and directories reached through bind mounts | Same scan; a process working in `/tmp` itself does not keep all of `/tmp` |
-| Live processes' TMPDIR directories (opt-in) | A directory strictly below `/tmp` named by a live process's absolute `TMPDIR`, and everything below it | With `TMPCLEANER_PROTECT_TMPDIR=1`, readable process environments are scanned and directories resolved inside each process's root; bare `/tmp`, relative paths, paths escaping `/tmp` and non-directories add no protection ([configuration](configuration.md#protect-live-jobs-tmpdir-directories)) |
+| Live processes' TMPDIR directories (opt-in) | A directory strictly below `/tmp` named by a live process's absolute `TMPDIR`, owned by that process's real UID, and everything below it | With `TMPCLEANER_PROTECT_TMPDIR=1`, readable process environments are scanned and directories resolved inside each process's root; directories owned by another UID, bare `/tmp`, relative paths, paths escaping `/tmp` and non-directories add no protection ([configuration](configuration.md#protect-live-jobs-tmpdir-directories)) |
 | Unix sockets that are still in use | Sockets listed in `/proc/net/unix` of any network namespace | A server may sit idle on its socket longer than the age limit |
 | Marked job directories | `/tmp/<a>` or `/tmp/<a>/<b>` holding a regular `.tmpcleaner-keep` file | Scanned before each run; kept until the marker is removed or its modification age reaches the opt-in `TMPCLEANER_MARKER_AGE` (symlinks are ignored) |
 | X11/ICE socket dirs and X lock files | `/tmp/.X11-unix`, `/tmp/.ICE-unix`, `/tmp/.XIM-unix`, `/tmp/.font-unix`, `/tmp/.Test-unix`, `/tmp/.X0-lock`, ... | `x` rules in `tmpcleaner.conf` |
