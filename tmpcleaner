@@ -34,16 +34,16 @@ case "${1:-}" in
 		done
 		;;
 esac
-scratch='' metrics_ready='' summary_files=0 summary_directories=0 counts_available=false
+scratch='' metrics_ready='' summary_files=0 summary_directories=0 summary_bytes=0 counts_available=false
 finish() {
 	exit_status=$?
 	trap - EXIT
 	if [ "$previewing" = 0 ] && [ "${TMPCLEANER_SUMMARY:-}" = json ]; then
 		if [ "$exit_status" -ne 0 ]; then
-			summary_files=0 summary_directories=0 counts_available=false
+			summary_files=0 summary_directories=0 summary_bytes=0 counts_available=false
 		fi
-		printf '{"tmpcleaner":"run","exit_status":%d,"removed_files":%d,"removed_directories":%d,"counts_available":%s}\n' \
-			"$exit_status" "$summary_files" "$summary_directories" "$counts_available" >&2 || :
+		printf '{"tmpcleaner":"run","exit_status":%d,"removed_files":%d,"removed_directories":%d,"removed_bytes":%d,"counts_available":%s}\n' \
+			"$exit_status" "$summary_files" "$summary_directories" "$summary_bytes" "$counts_available" >&2 || :
 	fi
 	if [ -n "$metrics_ready" ] && [ "$previewing" = 0 ] && [ -n "${TMPCLEANER_METRICS:-}" ]; then
 		write_metrics || :
@@ -1647,8 +1647,8 @@ if [ -n "${TMPCLEANER_METRICS:-}" ] && marked=$(LC_ALL=C sort -zu "$scratch/mark
 	metric_marked=$marked
 fi
 snapshot_roots
-sizes_file=
-if [ -n "${TMPCLEANER_METRICS:-}" ]; then
+sizes_file=''
+if [ -n "${TMPCLEANER_METRICS:-}" ] || [ "${TMPCLEANER_SUMMARY:-}" = json ]; then
 	sizes_file=$scratch/sizes
 	snapshot "$scratch/before" "$sizes_file"
 else
@@ -1728,7 +1728,7 @@ LC_ALL=C comm -z -23 "$scratch/before" "$scratch/after" |
 if read -r files directories bytes < "$scratch/counts" 2>/dev/null; then
 	metric_files=$files metric_directories=$directories metric_bytes=$bytes
 	if [ "$status" -eq 0 ]; then
-		summary_files=$files summary_directories=$directories counts_available=true
+		summary_files=$files summary_directories=$directories summary_bytes=$bytes counts_available=true
 	fi
 fi
 exit "$status"

@@ -3048,7 +3048,7 @@ done
 rm -rf "$scan_root"
 # JSON completion records are exact single-line objects, with no prose summary.
 summary_ok() {
-	expected=$(printf '{"tmpcleaner":"run","exit_status":%d,"removed_files":%d,"removed_directories":%d,"counts_available":%s}' "$@")
+	expected=$(printf '{"tmpcleaner":"run","exit_status":%d,"removed_files":%d,"removed_directories":%d,"removed_bytes":%d,"counts_available":%s}' "$@")
 	LC_ALL=C awk -v expected="$expected" '
 		/^[{]/ { records++; if ($0 != expected) bad = 1 }
 		/^tmpcleaner: [0-9]+ files and [0-9]+ directories disappeared during the run$/ { bad = 1 }
@@ -3058,19 +3058,20 @@ summary_ok() {
 summary_root=$(mktemp -d "$dir/summary.XXXXXX")
 printf 'd %s - - - amM:12h\n' "$summary_root" > "$cfg/summary.conf"
 mkdir "$summary_root/gone"
-touch "$summary_root/gone/old"
+printf 'summary byte fixture\n' > "$summary_root/gone/old"
+summary_bytes=$(wc -c < "$summary_root/gone/old")
 old "$summary_root/gone/old" "$summary_root/gone"
 status=0
 TMPCLEANER_SUMMARY=json TMPCLEANER_CONF=$cfg/summary.conf sh "$here/tmpcleaner" \
 	> "$cfg/summary.out" 2> "$cfg/summary.err" || status=$?
-if [ "$status" -ne 0 ] || [ -s "$cfg/summary.out" ] || [ -e "$summary_root/gone" ] || ! summary_ok 0 1 1 true; then
+if [ "$status" -ne 0 ] || [ -s "$cfg/summary.out" ] || [ -e "$summary_root/gone" ] || ! summary_ok 0 1 1 "$summary_bytes" true; then
 	echo 'FAIL: JSON summary must report successful disappearance counts exactly once on stderr'
 	fail=1
 fi
 status=0
 TMPCLEANER_SUMMARY=json TMPCLEANER_CONF=$cfg/summary.conf sh "$here/tmpcleaner" \
 	> "$cfg/summary.out" 2> "$cfg/summary.err" || status=$?
-if [ "$status" -ne 0 ] || [ -s "$cfg/summary.out" ] || ! summary_ok 0 0 0 true; then
+if [ "$status" -ne 0 ] || [ -s "$cfg/summary.out" ] || ! summary_ok 0 0 0 0 true; then
 	echo 'FAIL: JSON summary must distinguish a successful empty run from unavailable counts'
 	fail=1
 fi
@@ -3084,7 +3085,7 @@ for summary_failure in CLEAN_SHIM_STATUS=42 CLEAN_SHIM_POST_STATUS=42 TMPCLEANER
 		> "$cfg/summary.out" 2> "$cfg/summary.err" || status=$?
 	expected_status=42
 	[ "$summary_failure" != TMPCLEANER_AGE=bogus ] || expected_status=1
-	if [ "$status" -ne "$expected_status" ] || [ -s "$cfg/summary.out" ] || ! summary_ok "$expected_status" 0 0 false; then
+	if [ "$status" -ne "$expected_status" ] || [ -s "$cfg/summary.out" ] || ! summary_ok "$expected_status" 0 0 0 false; then
 		echo "FAIL: JSON failure summary must retain exit status with unavailable counts ($summary_failure)"
 		fail=1
 	fi
