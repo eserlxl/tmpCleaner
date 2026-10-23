@@ -31,6 +31,8 @@ Options:
   --print-rules    Print generated tmpfiles rules and exit
                    Accepts trailing --exclude-prefix=PATH and
                    --exclude-from0=FILE filters
+                   Add --with-sources to label each rule's source file
+                   (--print-rules only)
   --print-in-use0  Print unique in-use paths as NUL-separated records and exit
                    Standalone option; accepts no other arguments
   --print-holders0 Print in-use paths and holder PIDs as NUL-separated pairs
