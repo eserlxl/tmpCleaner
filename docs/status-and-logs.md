@@ -88,8 +88,9 @@ emits no removal records and warns once on stderr:
 The exit handler writes the record as one line, without a journal severity
 prefix. Warnings, errors and backend logs may still appear on stderr; collectors
 can select the JSON record by its `tmpcleaner` field. `SIGHUP`, `SIGINT` and
-`SIGTERM` produce exit statuses `129`, `130` and `143`; `SIGKILL` cannot emit a
-completion record. Preview modes (`--dry-run`, `--check`, `--check0`,
+`SIGTERM` produce exit statuses `129`, `130` and `143`; once the exit handler has
+started, further signals are ignored so the record's status stands. `SIGKILL`
+cannot emit a completion record. Preview modes (`--dry-run`, `--check`, `--check0`,
 `--print-rules`, `--print-in-use0`, `--print-holders0`, `--suggest-exclusions`)
 emit no JSON completion record, including when they fail.
 
