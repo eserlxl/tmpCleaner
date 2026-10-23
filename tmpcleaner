@@ -1263,15 +1263,19 @@ if [ -n "$check$check0" ]; then
 					sub(/"[^"]*"|\047[^\047]*\047/, "p", fields)
 					if (split(fields, f) < 6 || f[6] == "-") next
 					root = literal_path($0)
-					if (root == "" || !under(ENVIRON["CHECK"], root)) next
+					if (root == "" || !under(ENVIRON["CHECK"], root) || length(root) <= length(best_root)) next
 					for (i = 1; i <= total - generated; i++) {
 						if (keeps[i] == "" || !under(root, keeps[i])) continue
 						excluded = keeps[i]
-						gsub(/[\001-\037\177]/, "?", excluded)
-						gsub(/[\001-\037\177]/, "?", root)
-						print "tmpcleaner: note: " excluded " is excluded, but the cleanup rule for " root " still cleans it"
-						exit
+						best_root = root
+						break
 					}
+				}
+				END {
+					if (best_root == "") exit
+					gsub(/[\001-\037\177]/, "?", excluded)
+					gsub(/[\001-\037\177]/, "?", best_root)
+					print "tmpcleaner: note: " excluded " is excluded, but the cleanup rule for " best_root " still cleans it"
 				}
 				' "$scratch/keep-rules" "$scratch/rules" >&2 || :
 			exit 0

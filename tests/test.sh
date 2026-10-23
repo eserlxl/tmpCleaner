@@ -1644,16 +1644,18 @@ for cleanup_type in d D; do
 		fi
 	done
 done
-# An age-less rule at the excluded path cleans nothing and must not be named.
-printf 'x %s/keep\nd %s/keep - - - -\nd %s/keep/nested - - - 1s\n' "$override_root" "$override_root" "$override_root" > "$cfg/check-override.conf"
-status=0
-check_out=$(TMPCLEANER_CONF=$cfg/check-override.conf sh "$here/tmpcleaner" --check "$override_root/keep/nested/old" \
-	2> "$cfg/check-override.err") || status=$?
-if [ "$status" -ne 0 ] || [ "$check_out" != "would be removed: $override_root/keep/nested/old" ] ||
-	[ "$(cat "$cfg/check-override.err")" != "tmpcleaner: note: $override_root/keep is excluded, but the cleanup rule for $override_root/keep/nested still cleans it" ]; then
-	echo 'FAIL: --check should name a cleanup root below the literal x exclusion'
-	fail=1
-fi
+# Name the nested root even when an age-less or older-age outer rule comes first.
+for outer_age in - 30d; do
+	printf 'x %s/keep\nd %s/keep - - - %s\nd %s/keep/nested - - - 1s\n' "$override_root" "$override_root" "$outer_age" "$override_root" > "$cfg/check-override.conf"
+	status=0
+	check_out=$(TMPCLEANER_CONF=$cfg/check-override.conf sh "$here/tmpcleaner" --check "$override_root/keep/nested/old" \
+		2> "$cfg/check-override.err") || status=$?
+	if [ "$status" -ne 0 ] || [ "$check_out" != "would be removed: $override_root/keep/nested/old" ] ||
+		[ "$(cat "$cfg/check-override.err")" != "tmpcleaner: note: $override_root/keep is excluded, but the cleanup rule for $override_root/keep/nested still cleans it" ]; then
+		echo "FAIL: --check should name the deepest cleanup root below the literal x exclusion ($outer_age)"
+		fail=1
+	fi
+done
 status=0
 printf '%s\0' "$override_root/keep/nested/old" |
 	TMPCLEANER_CONF=$cfg/check-override.conf sh "$here/tmpcleaner" --check0 \
