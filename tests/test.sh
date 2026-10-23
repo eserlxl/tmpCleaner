@@ -1331,7 +1331,7 @@ if [ "$status" -ne 0 ] || [ -s "$cfg/dry-size.out" ] ||
 	fail=1
 fi
 rm -rf "$size_root" "$cfg/dry-size.conf" "$cfg/dry-size.out" "$cfg/dry-size.err"
-# A path announced by two rules for the same root counts its bytes once.
+# A path announced by two rules for the same root counts once.
 size_root=$(mktemp -d "$dir/dry-dup.XXXXXX")
 head -c 1000 /dev/zero > "$size_root/a"
 old "$size_root/a"
@@ -1340,9 +1340,11 @@ status=0
 TMPCLEANER_CONF=$cfg/dry-dup.conf sh "$here/tmpcleaner" --dry-run \
 	> "$cfg/dry-dup.out" 2> "$cfg/dry-dup.err" || status=$?
 if [ "$status" -ne 0 ] ||
-	! grep -Eq '^tmpcleaner: would remove [0-9]+ files and [0-9]+ directories \(about 1000 bytes\)$' "$cfg/dry-dup.err" ||
+	[ "$(grep -Fxc "Would remove \"$size_root/a\"" "$cfg/dry-dup.err")" -ne 2 ] ||
+	! grep -Fxq 'tmpcleaner: would remove 1 files and 0 directories (about 1000 bytes)' "$cfg/dry-dup.err" ||
+	! grep -Fxq "tmpcleaner:   1 under $dir" "$cfg/dry-dup.err" ||
 	[ ! -f "$size_root/a" ]; then
-	echo 'FAIL: --dry-run must count a path announced by several rules once in the byte estimate'
+	echo 'FAIL: --dry-run must count a path announced by two rules once in the file count and the breakdown'
 	fail=1
 fi
 rm -rf "$size_root" "$cfg/dry-dup.conf" "$cfg/dry-dup.out" "$cfg/dry-dup.err"

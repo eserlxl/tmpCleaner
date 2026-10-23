@@ -170,7 +170,7 @@ each of up to ten top-level `/tmp` entries, largest first
 ```text
 Would remove "/tmp/old-build.log"
 Would remove directory "/tmp/old-build"
-tmpcleaner: would remove 1 files and 1 directories
+tmpcleaner: would remove 1 files and 1 directories (about 4096 bytes)
 tmpcleaner:   1 under /tmp/old-build
 tmpcleaner:   1 under /tmp/old-build.log
 ```

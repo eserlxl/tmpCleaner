@@ -1636,21 +1636,30 @@ for arg do
 		}
 		# Only a line that closes its quote names a whole path for the breakdown.
 		/^Would remove directory "/ {
-			directories++
-			if (/"$/) track(substr($0, 25, length($0) - 25))
+			if (/"$/) {
+				path = substr($0, 25, length($0) - 25)
+				# Overlapping rules announce one path once per rule.
+				if (!(path in counted_dirs)) {
+					counted_dirs[path] = 1
+					directories++
+					track(path)
+				}
+			} else
+				directories++
 			next
 		}
 		/^Would remove "/ {
-			files++
 			if (/"$/) {
 				path = substr($0, 15, length($0) - 15)
 				# Overlapping rules announce one path once per rule.
 				if (!(path in counted)) {
 					counted[path] = 1
+					files++
 					bytes += sizes[path]
+					track(path)
 				}
-				track(path)
-			}
+			} else
+				files++
 			next
 		}
 		END {
