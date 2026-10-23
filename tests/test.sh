@@ -4,7 +4,7 @@
 # cannot be backdated, so the test drops b/B/c/C from the age-by field and
 # keeps the rest as configured.
 set -eu
-unset TMPCLEANER_AGE TMPCLEANER_MARKER_AGE TMPCLEANER_FULL_PERCENT TMPCLEANER_FULL_AGE TMPCLEANER_LIST TMPCLEANER_METRICS JOURNAL_STREAM
+unset TMPCLEANER_AGE TMPCLEANER_MARKER_AGE TMPCLEANER_PROTECT_TMPDIR TMPCLEANER_FULL_PERCENT TMPCLEANER_FULL_AGE TMPCLEANER_LIST TMPCLEANER_METRICS JOURNAL_STREAM
 here=$(cd "$(dirname "$0")/.." && pwd)
 dir=$(mktemp -d /tmp/tmpcleaner-test.XXXXXX)
 # Fixture configs live in a private directory, never at a guessable /tmp path.
@@ -527,6 +527,97 @@ if [ "$rootfs_running" = 1 ] && [ "$bind_running" = 1 ]; then
 fi
 
 fail=0
+# TMPDIR protects idle job files only when opted in, and only while its holder lives.
+tmpdir_root=$dir/tmpdir
+mkdir -p "$tmpdir_root/job"
+printf 'd %s - - - amM:12h\n' "$tmpdir_root" > "$cfg/tmpdir.conf"
+for tmpdir_value in "$tmpdir_root/job" "$tmpdir_root/job/." "$tmpdir_root/job/../job" /tmp /tmp/ /tmp/. /tmp/../tmp job "$tmpdir_root/job/f" "$tmpdir_root/missing"; do
+	tmpdir_valid=
+	case "$tmpdir_value" in "$tmpdir_root/job"|"$tmpdir_root/job/."|"$tmpdir_root/job/../job") tmpdir_valid=1 ;; esac
+	touch "$tmpdir_root/job/f"
+	old "$tmpdir_root/job/f"
+	(cd / && TMPDIR=$tmpdir_value exec sleep infinity) </dev/null >/dev/null 2>&1 &
+	tmpdir_pid=$!
+	pids="$pids $tmpdir_pid"
+	waited=0
+	until TMPDIR_TEST_VALUE=$tmpdir_value LC_ALL=C awk '
+		BEGIN { RS = "\0" }
+		$0 == "TMPDIR=" ENVIRON["TMPDIR_TEST_VALUE"] { found = 1 }
+		END { exit !found }
+	' "/proc/$tmpdir_pid/environ" 2>/dev/null; do
+		if [ "$waited" -ge 100 ]; then
+			echo 'FAIL: timed out waiting for TMPDIR holder'
+			exit 1
+		fi
+		waited=$((waited + 1))
+		sleep 0.01
+	done
+	if [ -n "$tmpdir_valid" ]; then
+		for tmpdir_option in unset empty; do
+			status=0
+			check_out=$(
+				[ "$tmpdir_option" != empty ] || export TMPCLEANER_PROTECT_TMPDIR=
+				TMPCLEANER_CONF=$cfg/tmpdir.conf sh "$here/tmpcleaner" --check "$tmpdir_root/job/f" 2>"$cfg/tmpdir.err"
+			) || status=$?
+			if [ "$status" -ne 0 ] || [ "$check_out" != "would be removed: $tmpdir_root/job/f" ]; then
+				echo "FAIL: TMPDIR protection must remain off with option $tmpdir_option"
+				fail=1
+			fi
+		done
+	fi
+	status=0
+	check_out=$(TMPCLEANER_PROTECT_TMPDIR=1 TMPCLEANER_CONF=$cfg/tmpdir.conf sh "$here/tmpcleaner" \
+		--check "$tmpdir_root/job/f" 2>"$cfg/tmpdir.err") || status=$?
+	if [ -n "$tmpdir_valid" ]; then
+		if [ "$status" -ne 1 ] || [ "$check_out" != "kept: $tmpdir_root/job/f" ] ||
+			[ "$(cat "$cfg/tmpdir.err")" != "tmpcleaner: inside an in-use directory: $tmpdir_root/job; used by PID $tmpdir_pid (sleep)" ]; then
+			echo 'FAIL: --check must explain the live TMPDIR as an in-use directory'
+			fail=1
+		fi
+		if ! TMPCLEANER_PROTECT_TMPDIR=1 TMPCLEANER_CONF=$cfg/tmpdir.conf sh "$here/tmpcleaner" ||
+			[ ! -e "$tmpdir_root/job/f" ]; then
+			echo 'FAIL: a live TMPDIR must keep idle old files during cleaning'
+			fail=1
+		fi
+	elif [ "$status" -ne 0 ] || [ "$check_out" != "would be removed: $tmpdir_root/job/f" ]; then
+		echo "FAIL: TMPDIR must add no protection for $tmpdir_value"
+		fail=1
+	fi
+	kill "$tmpdir_pid"
+	wait "$tmpdir_pid" 2>/dev/null || :
+	pids=${pids%" $tmpdir_pid"}
+	if [ -n "$tmpdir_valid" ]; then
+		status=0
+		check_out=$(TMPCLEANER_PROTECT_TMPDIR=1 TMPCLEANER_CONF=$cfg/tmpdir.conf sh "$here/tmpcleaner" \
+			--check "$tmpdir_root/job/f" 2>"$cfg/tmpdir.err") || status=$?
+		if [ "$status" -ne 0 ] || [ "$check_out" != "would be removed: $tmpdir_root/job/f" ] ||
+			! TMPCLEANER_PROTECT_TMPDIR=1 TMPCLEANER_CONF=$cfg/tmpdir.conf sh "$here/tmpcleaner" ||
+			[ -e "$tmpdir_root/job/f" ]; then
+			echo 'FAIL: TMPDIR protection must end when its process exits'
+			fail=1
+		fi
+	fi
+done
+for tmpdir_option in 0 2 yes 01; do
+	for tmpdir_mode in clean check; do
+		set --
+		expected_status=1
+		if [ "$tmpdir_mode" = check ]; then
+			set -- --check "$tmpdir_root/job/f"
+			expected_status=2
+		fi
+		rm -f "$cfg/tmpdir.clean"
+		status=0
+		TMPCLEANER_PROTECT_TMPDIR=$tmpdir_option TMPCLEANER_CONF=$cfg/tmpdir.conf CLEAN_SHIM_MARKER=$cfg/tmpdir.clean \
+			sh "$here/tmpcleaner" "$@" >"$cfg/tmpdir.out" 2>"$cfg/tmpdir.err" || status=$?
+		if [ "$status" -ne "$expected_status" ] || [ -e "$cfg/tmpdir.clean" ] || [ ! -e "$tmpdir_root/job/f" ] ||
+			! grep -Fq 'invalid TMPCLEANER_PROTECT_TMPDIR (expected 1 or empty)' "$cfg/tmpdir.err"; then
+			echo "FAIL: invalid TMPDIR protection option $tmpdir_option must stop $tmpdir_mode before cleaning"
+			fail=1
+		fi
+	done
+done
+rm -rf "$tmpdir_root" "$cfg/tmpdir.conf" "$cfg/tmpdir.err" "$cfg/tmpdir.out" "$cfg/tmpdir.clean"
 # Without /proc nothing in use could be protected, so the run must refuse.
 # shellcheck disable=SC2016 # $1 and $2 are expanded by the inner sh
 if [ "$bind_running" = 1 ]; then

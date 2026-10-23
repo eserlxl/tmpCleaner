@@ -58,6 +58,7 @@ Service environment settings below go in a unit drop-in via `sudo systemctl edit
 - `TMPCLEANER_CONF`: Path to configuration file (default: `/etc/tmpcleaner/tmpcleaner.conf`; regular files in `$TMPCLEANER_CONF.d/*.conf` are read after it).
 - `TMPCLEANER_AGE`: Override duration on every `d` and `D` rule (any modifier) (e.g. `6h`, `30m`).
 - `TMPCLEANER_MARKER_AGE`: Expire `.tmpcleaner-keep` protection by marker modification age (e.g. `1h`; default: never).
+- `TMPCLEANER_PROTECT_TMPDIR`: Set to `1` to protect live processes' `TMPDIR` directories strictly below `/tmp` (default: off).
 - `TMPCLEANER_FULL_PERCENT`: Threshold percentage of `/tmp` usage (1-100); the larger of block and inode usage counts (`-` is 0), and a `df` error aborts the run.
 - `TMPCLEANER_FULL_AGE`: Age duration to use when `/tmp` usage meets or exceeds `TMPCLEANER_FULL_PERCENT`.
 - `TMPCLEANER_LIST`: Set to `1` for escaped removal logs, `top` for the top-10 per-entry breakdown, or `nul` for raw NUL-separated paths on stdout (real runs only; default: off).
@@ -109,6 +110,28 @@ For the service, run `sudo systemctl edit tmpcleaner.service` and add:
 ```ini
 [Service]
 Environment=TMPCLEANER_MARKER_AGE=1h
+```
+
+## Protect live jobs' TMPDIR directories
+
+Set `TMPCLEANER_PROTECT_TMPDIR=1` to keep a directory and everything below it
+when a live process declares it as `TMPDIR`, even if none of its files are
+open. Each run reads NUL-separated process environments from `/proc` and
+resolves the directory inside that process's root, matching it by device and
+inode like a working directory. Unreadable environments are silently skipped.
+Only absolute paths strictly below `/tmp` qualify; bare `/tmp` (including
+spellings such as `/tmp/.`), relative paths, paths escaping `/tmp`, missing
+paths and non-directories add no protection. When the process exits, the next
+scan adds no protection from its `TMPDIR`; the usual age and other protections
+still apply.
+
+Unset or empty keeps the default behavior. Any value other than `1` or empty
+stops the run before cleaning. For the service, add a drop-in with
+`sudo systemctl edit tmpcleaner.service`:
+
+```ini
+[Service]
+Environment=TMPCLEANER_PROTECT_TMPDIR=1
 ```
 
 ## Use a shorter age when /tmp is nearly full

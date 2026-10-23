@@ -74,6 +74,8 @@ Environment variables:
                             (e.g. 6h, 30m)
   TMPCLEANER_MARKER_AGE     Expire markers by modification age (default: never)
                             Whole minutes: m, min, h, d or w (e.g. 1h)
+  TMPCLEANER_PROTECT_TMPDIR Set to 1 to protect live processes' TMPDIR directories
+                            strictly below /tmp (default: off)
   TMPCLEANER_FULL_PERCENT   Threshold percentage of /tmp usage (1-100); the
                             larger of block and inode usage counts ('-' = 0).
                             If df fails or prints unexpected output, the run
@@ -220,6 +222,10 @@ case "${TMPCLEANER_METRICS:-}" in
 		esac
 		;;
 	*) echo "${err_tag}tmpcleaner: invalid TMPCLEANER_METRICS (expected absolute *.prom path)" >&2; exit "$errstatus" ;;
+esac
+case "${TMPCLEANER_PROTECT_TMPDIR:-}" in
+	''|1) ;;
+	*) echo "${err_tag}tmpcleaner: invalid TMPCLEANER_PROTECT_TMPDIR (expected 1 or empty)" >&2; exit "$errstatus" ;;
 esac
 previewing=0
 case "${1:-}" in
@@ -599,6 +605,40 @@ in_use() {
 			close(file)
 			RS = saved
 		}
+		function tmpdirs(pid, file, line, path, args, queued, n, i, depth, parts, components) {
+			for (pid in rootlink) {
+				file = "/proc/" pid "/environ"
+				while ((getline line < file) > 0) {
+					if (index(line, "TMPDIR=") != 1) continue
+					path = substr(line, 8)
+					gsub(/\/+/, "/", path)
+					sub(/\/$/, "", path)
+					if (index(path, "/tmp/") != 1) break
+					# Check lexical scope without changing symlink/.. resolution by stat.
+					n = split(path, parts, "/")
+					depth = 0
+					for (i = 1; i <= n; i++) {
+						if (parts[i] == "" || parts[i] == ".") continue
+						if (parts[i] == "..") {
+							if (depth) depth--
+						} else components[++depth] = parts[i]
+					}
+					if (depth > 1 && components[1] == "tmp") {
+						path = "/proc/" pid "/root" path
+						path_holder[path] = pid
+						args = args " " quote(path)
+						if (++queued >= 200) {
+							verify(args, "directory")
+							args = ""
+							queued = 0
+						}
+					}
+					break
+				}
+				close(file)
+			}
+			if (queued) verify(args, "directory")
+		}
 		# systemd-tmpfiles keeps only the sockets of its own network namespace;
 		# a socket bound in another one is reached through /tmp all the same.
 		# Names are printed raw, so a line that starts no record continues the
@@ -629,7 +669,7 @@ in_use() {
 				count = split(real ? holders[inode[k]] : pid, who, " ")
 				for (h = 1; h <= count; h++) {
 					path = "/proc/" who[h] "/root" name[k]
-					if (real) sock_holder[path] = who[h]
+					if (real) path_holder[path] = who[h]
 					args = args " " quote(path)
 					queued++
 					# A socket may have been bound before its holder chrooted.
@@ -639,18 +679,18 @@ in_use() {
 					else if (ns in unconfined) path = "/proc/" unconfined[ns] "/root" name[k]
 					if (path != "" && !((inode[k], ns) in unviewed)) {
 						unviewed[inode[k], ns] = 1
-						if (real && !(path in sock_holder)) sock_holder[path] = who[h]
+						if (real && !(path in path_holder)) path_holder[path] = who[h]
 						args = args " " quote(path)
 						queued++
 					}
 					if (queued >= 200) {
-						verify(args)
+						verify(args, "socket")
 						args = ""
 						queued = 0
 					}
 				}
 			}
-			if (queued) verify(args)
+			if (queued) verify(args, "socket")
 			return 1
 		}
 		# A shell word for s: single quotes, with each quote as '\''.
@@ -660,18 +700,18 @@ in_use() {
 			for (i = 2; i <= n; i++) word = word "\047\\\047\047" parts[i]
 			return word "\047"
 		}
-		# Keep the sockets on the /tmp filesystem among the quoted paths in
+		# Keep matching entries on the /tmp filesystem among the quoted paths in
 		# args (one stat for many: a process per name would cost seconds).
-		function verify(args, cmd, line, saved, ok, status, path) {
+		function verify(args, type, cmd, line, saved, ok, status, path) {
 			cmd = "stat -L --cached=always --printf \"%d %i %F %n\\0\" -- /" args " 2>/dev/null"
 			saved = RS
 			RS = "\0"
 			while ((cmd | getline line) > 0) {
 				if (!ok++) continue
-				if (split(line, id, " ") >= 4 && id[1] == tmpdev && id[3] == "socket") {
+				if (split(line, id, " ") >= 4 && id[1] == tmpdev && id[3] == type) {
 					path = line
 					sub(/^[^ ]+ +[^ ]+ +[^ ]+ /, "", path)
-					want(id[2], sock_holder[path])
+					want(id[2], path_holder[path])
 				}
 			}
 			status = close(cmd)
@@ -735,6 +775,7 @@ in_use() {
 		# or bind alias only keeps another name of a file in use.
 		END {
 			if (failed || expect || expect_ns || !batches || !("self" in namespace)) exit 1
+			if (ENVIRON["TMPCLEANER_PROTECT_TMPDIR"] == "1") tmpdirs()
 			# A member may exit mid-scan: read the namespace through the next one. When
 			# none is left, no process holds its sockets any more.
 			for (ns in netns) {
