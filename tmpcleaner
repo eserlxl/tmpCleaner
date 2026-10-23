@@ -1714,9 +1714,16 @@ fi
 rm -f "$scratch/walk-failed"
 snapshot "$scratch/after"
 counts_note=''
-[ ! -e "$scratch/walk-failed" ] || counts_note=' (counts may include entries the post-cleanup walk could not read)'
+list_mode=${TMPCLEANER_LIST:-}
+if [ -e "$scratch/walk-failed" ]; then
+	counts_note=' (counts may include entries the post-cleanup walk could not read)'
+	case "$list_mode" in
+		1|top) echo "${warn_tag}tmpcleaner: removal list withheld: the post-cleanup walk was incomplete" >&2 ;;
+	esac
+	list_mode=''
+fi
 LC_ALL=C comm -z -23 "$scratch/before" "$scratch/after" |
-	COUNTS=$scratch/counts COUNTS_NOTE=$counts_note SIZES=$sizes_file SUMMARY=${TMPCLEANER_SUMMARY:-} LC_ALL=C awk -v list="${TMPCLEANER_LIST:-}" "$breakdown_awk"'
+	COUNTS=$scratch/counts COUNTS_NOTE=$counts_note SIZES=$sizes_file SUMMARY=${TMPCLEANER_SUMMARY:-} LC_ALL=C awk -v list="$list_mode" "$breakdown_awk"'
 	BEGIN {
 		RS = "\0"
 		bytes = 0

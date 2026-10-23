@@ -80,6 +80,11 @@ and bytes, even if the backend removed some paths before failing. A successful
 run that cannot obtain counts, including an incomplete post-cleanup walk,
 also uses `false` and zeros. Exit statuses are unchanged.
 
+An incomplete post-cleanup walk also withholds removal listings:
+`TMPCLEANER_LIST=nul` emits nothing on stdout, and `TMPCLEANER_LIST=1` or `top`
+emits no removal records and warns once on stderr:
+`tmpcleaner: removal list withheld: the post-cleanup walk was incomplete`.
+
 The exit handler writes the record as one line, without a journal severity
 prefix. Warnings, errors and backend logs may still appear on stderr; collectors
 can select the JSON record by its `tmpcleaner` field. `SIGHUP`, `SIGINT` and

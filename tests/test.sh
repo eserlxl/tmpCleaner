@@ -3102,31 +3102,44 @@ fi
 mkdir "$summary_root/kept"
 printf 'kept bytes' > "$summary_root/kept/fresh"
 for summary_setting in json ''; do
-	for backend_status in 0 42; do
-		status=0
-		shim env FIND_SHIM_FAIL=snapshot-after-partial CLEAN_SHIM_STATUS=$backend_status \
-			TMPCLEANER_SUMMARY="$summary_setting" TMPCLEANER_METRICS=$cfg/summary.prom \
-			TMPCLEANER_CONF=$cfg/summary.conf sh "$here/tmpcleaner" \
-			> "$cfg/summary.out" 2> "$cfg/summary.err" || status=$?
-		expected_failure=null
-		[ "$backend_status" -eq 0 ] || expected_failure='"backend"'
-		if [ "$status" -ne "$backend_status" ] || [ -s "$cfg/summary.out" ] ||
-			[ ! -e "$summary_root/kept/fresh" ] ||
-			! grep -Fxq 'tmpcleaner_removed_files 0' "$cfg/summary.prom" ||
-			! grep -Fxq 'tmpcleaner_removed_directories 0' "$cfg/summary.prom" ||
-			! grep -Fxq 'tmpcleaner_removed_bytes 0' "$cfg/summary.prom"; then
-			echo 'FAIL: an incomplete after-walk must retain backend status and publish zero removal metrics'
-			fail=1
-		fi
-		if [ "$summary_setting" = json ]; then
-			if ! summary_ok "$backend_status" "$expected_failure" 0 0 0 false; then
-				echo 'FAIL: an incomplete after-walk must leave JSON counts unavailable and zero'
+	for list_setting in '' nul 1 top; do
+		for backend_status in 0 42; do
+			status=0
+			shim env FIND_SHIM_FAIL=snapshot-after-partial CLEAN_SHIM_STATUS=$backend_status \
+				TMPCLEANER_SUMMARY="$summary_setting" TMPCLEANER_METRICS=$cfg/summary.prom \
+				TMPCLEANER_LIST="$list_setting" TMPCLEANER_CONF=$cfg/summary.conf sh "$here/tmpcleaner" \
+				> "$cfg/summary.out" 2> "$cfg/summary.err" || status=$?
+			expected_failure=null
+			[ "$backend_status" -eq 0 ] || expected_failure='"backend"'
+			if [ "$status" -ne "$backend_status" ] || [ -s "$cfg/summary.out" ] ||
+				[ ! -e "$summary_root/kept/fresh" ] ||
+				! grep -Fxq 'tmpcleaner_removed_files 0' "$cfg/summary.prom" ||
+				! grep -Fxq 'tmpcleaner_removed_directories 0' "$cfg/summary.prom" ||
+				! grep -Fxq 'tmpcleaner_removed_bytes 0' "$cfg/summary.prom"; then
+				echo 'FAIL: an incomplete after-walk must retain backend status and publish zero removal metrics'
 				fail=1
 			fi
-		elif ! grep -Fxq 'tmpcleaner: 1 files and 1 directories disappeared during the run (counts may include entries the post-cleanup walk could not read)' "$cfg/summary.err"; then
-			echo 'FAIL: an incomplete after-walk must qualify the prose disappearance counts'
-			fail=1
-		fi
+			if grep -Eq '^tmpcleaner: (removed|  [0-9]+ under )' "$cfg/summary.err"; then
+				echo 'FAIL: an incomplete after-walk must withhold removal records'
+				fail=1
+			fi
+			list_warnings=$(grep -Fxc 'tmpcleaner: removal list withheld: the post-cleanup walk was incomplete' "$cfg/summary.err" || :)
+			expected_warnings=0
+			case "$list_setting" in 1|top) expected_warnings=1 ;; esac
+			if [ "$list_warnings" -ne "$expected_warnings" ]; then
+				echo 'FAIL: an incomplete after-walk must warn once only for human-readable removal lists'
+				fail=1
+			fi
+			if [ "$summary_setting" = json ]; then
+				if ! summary_ok "$backend_status" "$expected_failure" 0 0 0 false; then
+					echo 'FAIL: an incomplete after-walk must leave JSON counts unavailable and zero'
+					fail=1
+				fi
+			elif ! grep -Fxq 'tmpcleaner: 1 files and 1 directories disappeared during the run (counts may include entries the post-cleanup walk could not read)' "$cfg/summary.err"; then
+				echo 'FAIL: an incomplete after-walk must qualify the prose disappearance counts'
+				fail=1
+			fi
+		done
 	done
 done
 status=0
