@@ -4,7 +4,7 @@
 # cannot be backdated, so the test drops b/B/c/C from the age-by field and
 # keeps the rest as configured.
 set -eu
-unset TMPCLEANER_AGE TMPCLEANER_MARKER_AGE TMPCLEANER_PROTECT_TMPDIR TMPCLEANER_PREVIEW TMPCLEANER_MAX_SCAN_AGE TMPCLEANER_FULL_PERCENT TMPCLEANER_FULL_AGE TMPCLEANER_LIST TMPCLEANER_SUMMARY TMPCLEANER_METRICS JOURNAL_STREAM
+unset TMPCLEANER_AGE TMPCLEANER_MARKER_AGE TMPCLEANER_PROTECT_TMPDIR TMPCLEANER_REQUIRE_COMPLETE_SCAN TMPCLEANER_PREVIEW TMPCLEANER_MAX_SCAN_AGE TMPCLEANER_FULL_PERCENT TMPCLEANER_FULL_AGE TMPCLEANER_LIST TMPCLEANER_SUMMARY TMPCLEANER_METRICS JOURNAL_STREAM
 here=$(cd "$(dirname "$0")/.." && pwd)
 dir=$(mktemp -d /tmp/tmpcleaner-test.XXXXXX)
 # Fixture configs live in a private directory, never at a guessable /tmp path.
@@ -58,9 +58,11 @@ cat > "$shimdir/find" <<SHIM
 #!/bin/sh
 case "\${FIND_SHIM_FAIL:-}:\$*" in
 	walk:"/tmp -xdev -printf"*) exit 1 ;;
+	walk-partial:"/tmp -xdev -printf"*) "$(command -v find)" /tmp -maxdepth 0 -printf '%i %p\0'; exit 1 ;;
 	walk-killed:"/tmp -xdev -printf"*) "$(command -v find)" /tmp -maxdepth 0 -printf '%i %p\0'; kill -KILL \$\$ ;;
 	markers:*"-name .tmpcleaner-keep"*) exit 2 ;;
 	markers-unreadable:*"-name .tmpcleaner-keep"*) "$(command -v find)" "\$@"; exit 1 ;;
+	markers-partial:*"-name .tmpcleaner-keep"*) printf '%s\0' "\$FIND_SHIM_PARTIAL_MARKER"; exit 1 ;;
 	killed:/proc/self/ns/mnt*) "$(command -v find)" /proc/self/ns/mnt -maxdepth 0 -type l -printf '%p\0%l\0'; kill -KILL \$\$ ;;
 	netns-fallback:/proc/self/ns/mnt*)
 		for arg do
@@ -75,6 +77,16 @@ case "\${FIND_SHIM_FAIL:-}:\$*" in
 		printf '/proc/999999999/ns/net\0%s\0/proc/%s/ns/net\0%s\0' "\$FIND_SHIM_NETNS" "\$FIND_SHIM_PID" "\$FIND_SHIM_NETNS"
 		exit 0 ;;
 esac
+# Complete-walk controls must not inherit unreadable host /tmp subtrees.
+if [ -n "\${FIND_SHIM_ROOT:-}" ]; then
+	case "\$*" in
+		"/tmp -xdev -printf"*)
+			"$(command -v find)" /tmp -maxdepth 0 -printf '%i %p\0' || exit \$?
+			shift; set -- "\$FIND_SHIM_ROOT" "\$@" ;;
+		"/tmp -xdev -mindepth 2 -maxdepth 3 -name .tmpcleaner-keep"*)
+			shift; set -- "\$FIND_SHIM_ROOT" "\$@" ;;
+	esac
+fi
 case "\$*" in
 	*-fprintf*) [ -z "\${FIND_SHIM_FPRINTF_MARKER:-}" ] || : > "\$FIND_SHIM_FPRINTF_MARKER" ;;
 esac
@@ -2865,6 +2877,82 @@ if ! TMPCLEANER_CONF="$cfg/scan2.conf" sh "$here/tmpcleaner" >/dev/null 2>&1 || 
 	fail=1
 fi
 rm -rf "$fresh2" "$cfg/scan2.conf"
+# Partial protection walks are tolerated unless complete scans are required.
+fresh=$(mktemp -d "$dir/complete-scan.XXXXXX")
+scan_kept=$dir/complete-scan-kept
+printf 'd %s - - - amM:12h\n' "$fresh" "$scan_kept" > "$cfg/complete-scan.conf"
+mkdir "$scan_kept"
+touch "$scan_kept/.tmpcleaner-keep" "$fresh/held"
+exec 9< "$fresh/held"
+for scanwalk in walk-partial markers-partial ''; do
+	for complete_scan in 1 unset ''; do
+		touch "$fresh/old" "$scan_kept/old"
+		old "$fresh/old" "$scan_kept/old" "$fresh/held"
+		set -- env FIND_SHIM_FAIL="$scanwalk" FIND_SHIM_ROOT="$dir" FIND_SHIM_PARTIAL_MARKER="$scan_kept" \
+			TMPCLEANER_CONF="$cfg/complete-scan.conf" CLEAN_SHIM_MARKER="$cfg/complete-scan.called"
+		[ "$complete_scan" = unset ] || set -- "$@" TMPCLEANER_REQUIRE_COMPLETE_SCAN="$complete_scan"
+		expected_status=0
+		if [ "$complete_scan" = 1 ] && [ -n "$scanwalk" ]; then expected_status=2; fi
+		status=0
+		check_out=$(shim "$@" sh "$here/tmpcleaner" --check "$fresh/old" 2> "$cfg/complete-scan.err") || status=$?
+		if [ "$status" -ne "$expected_status" ] || [ ! -e "$fresh/old" ]; then
+			echo "FAIL: protection walk check status ($scanwalk, complete=$complete_scan)"
+			fail=1
+		fi
+		if [ "$expected_status" = 2 ]; then
+			if [ -n "$check_out" ] || ! grep -Fq 'cannot apply path protections; nothing was removed' "$cfg/complete-scan.err"; then
+				echo 'FAIL: strict partial-walk checks must report a protection failure without a verdict'
+				fail=1
+			fi
+			expected_status=1
+		elif [ "$check_out" != "would be removed: $fresh/old" ]; then
+			echo 'FAIL: accepted protection walks must retain the usual check verdict'
+			fail=1
+		fi
+		rm -f "$cfg/complete-scan.called"
+		status=0
+		shim "$@" sh "$here/tmpcleaner" > /dev/null 2> "$cfg/complete-scan.err" || status=$?
+		if [ "$status" -ne "$expected_status" ] || [ ! -e "$scan_kept/old" ]; then
+			echo "FAIL: protection walk cleanup status or partial marker protection ($scanwalk, complete=$complete_scan)"
+			fail=1
+		fi
+		if [ "$expected_status" = 1 ]; then
+			if [ ! -e "$fresh/old" ] || [ ! -e "$fresh/held" ] || [ -e "$cfg/complete-scan.called" ] ||
+				! grep -Fq 'cannot apply path protections; nothing was removed' "$cfg/complete-scan.err"; then
+				echo 'FAIL: strict partial-walk cleanup must remove nothing and never invoke cleanup'
+				fail=1
+			fi
+		elif [ -e "$fresh/old" ] || { [ "$scanwalk" != walk-partial ] && [ ! -e "$fresh/held" ]; }; then
+			echo 'FAIL: accepted protection walks must clean old files and preserve discovered in-use files'
+			fail=1
+		fi
+		# The partial inode walk omits the held file; recreate it for the next case.
+		exec 9<&-
+		touch "$fresh/held"
+		exec 9< "$fresh/held"
+	done
+done
+for complete_scan in 0 yes 01; do
+	for scan_mode in clean check; do
+		set --
+		expected_status=1
+		if [ "$scan_mode" = check ]; then set -- --check "$fresh/old"; expected_status=2; fi
+		touch "$fresh/old"
+		old "$fresh/old"
+		rm -f "$cfg/complete-scan.called"
+		status=0
+		shim env TMPCLEANER_REQUIRE_COMPLETE_SCAN="$complete_scan" TMPCLEANER_CONF="$cfg/complete-scan.conf" \
+			CLEAN_SHIM_MARKER="$cfg/complete-scan.called" sh "$here/tmpcleaner" "$@" \
+			> /dev/null 2> "$cfg/complete-scan.err" || status=$?
+		if [ "$status" -ne "$expected_status" ] || [ ! -e "$fresh/old" ] || [ -e "$cfg/complete-scan.called" ] ||
+			! grep -Fq 'invalid TMPCLEANER_REQUIRE_COMPLETE_SCAN (expected 1 or empty)' "$cfg/complete-scan.err"; then
+			echo "FAIL: invalid complete-scan setting must stop before cleanup ($complete_scan, $scan_mode)"
+			fail=1
+		fi
+	done
+done
+exec 9<&-
+rm -rf "$fresh" "$scan_kept" "$cfg/complete-scan.conf" "$cfg/complete-scan.called" "$cfg/complete-scan.err"
 # Bound the scan-to-cleanup gap using only the fixture's snapshot walks.
 scan_root=$(mktemp -d "$dir/scan-age.XXXXXX")
 printf 'd %s - - - amM:12h\n' "$scan_root" > "$cfg/scan-age.conf"

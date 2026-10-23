@@ -67,6 +67,14 @@ change it; see [configuration.md](configuration.md).
 
 ### Limits
 
+- By default, the `/tmp` inode and marker walks accept partial results when
+  find exits 1. An unreadable or vanished subtree can hide an in-use path or
+  `.tmpcleaner-keep` marker, leaving its contents eligible for age cleanup.
+  [`TMPCLEANER_REQUIRE_COMPLETE_SCAN=1`](configuration.md#require-complete-protection-walks)
+  refuses cleanup when either walk is incomplete. Unset or empty preserves
+  the default behavior. Strict mode can prevent all cleanup because of one
+  inaccessible or transient subtree; it does not change tolerance of vanished
+  `/proc` entries or close the snapshot race below.
 - The in-use list is taken from `/proc` just before each run (a snapshot
   before cleaning), so files opened during a run are not covered and
   long-lived work belongs in the exclusion list. The cleanup-tree snapshot

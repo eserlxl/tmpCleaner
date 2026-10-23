@@ -59,6 +59,7 @@ Service environment settings below go in a unit drop-in via `sudo systemctl edit
 - `TMPCLEANER_AGE`: Override duration on every `d` and `D` rule (any modifier) (e.g. `6h`, `30m`).
 - `TMPCLEANER_MARKER_AGE`: Expire `.tmpcleaner-keep` protection by marker modification age (e.g. `1h`; default: never).
 - `TMPCLEANER_PROTECT_TMPDIR`: Set to `1` to protect live processes' `TMPDIR` directories strictly below `/tmp` when owned by the declaring process's real UID (default: off).
+- `TMPCLEANER_REQUIRE_COMPLETE_SCAN`: Set to `1` to refuse cleanup if the `/tmp` inode walk or marker walk is incomplete. Unset or empty keeps the default tolerance; other values stop before cleaning.
 - `TMPCLEANER_PREVIEW`: Set to `1` to make cleanup runs use `--dry-run`; unset or empty keeps normal cleanup. Other values stop before cleaning.
 - `TMPCLEANER_FULL_PERCENT`: Threshold percentage of `/tmp` usage (1-100); the larger of block and inode usage counts (`-` is 0), and a `df` error aborts the run.
 - `TMPCLEANER_FULL_AGE`: Age duration to use when `/tmp` usage meets or exceeds `TMPCLEANER_FULL_PERCENT`.
@@ -165,6 +166,24 @@ stops the run before cleaning. For the service, add a drop-in with
 ```ini
 [Service]
 Environment=TMPCLEANER_PROTECT_TMPDIR=1
+```
+
+## Require complete protection walks
+
+Set `TMPCLEANER_REQUIRE_COMPLETE_SCAN=1` to reject find status 1 from either
+the `/tmp` inode walk or the `.tmpcleaner-keep` marker walk. An unreadable or
+vanished subtree can otherwise hide an in-use path or marker. The run stops
+before cleaning with `cannot apply path protections; nothing was removed`
+and exits 1 (2 with `--check` or `--check0`). This also applies to previews.
+Tolerance of vanished `/proc` entries is unchanged.
+
+Unset or empty preserves the default tolerance of partial walks. Any other
+value stops before cleaning. For the service, add a drop-in with
+`sudo systemctl edit tmpcleaner.service`:
+
+```ini
+[Service]
+Environment=TMPCLEANER_REQUIRE_COMPLETE_SCAN=1
 ```
 
 ## Refuse cleanup with a stale in-use snapshot
