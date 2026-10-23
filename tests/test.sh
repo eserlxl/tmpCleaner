@@ -63,6 +63,12 @@ case "\${FIND_SHIM_FAIL:-}:\$*" in
 	walk:"/tmp -xdev -printf"*) exit 1 ;;
 	walk-partial:"/tmp -xdev -printf"*) "$(command -v find)" /tmp -maxdepth 0 -printf '%i %p\0'; exit 1 ;;
 	walk-killed:"/tmp -xdev -printf"*) "$(command -v find)" /tmp -maxdepth 0 -printf '%i %p\0'; kill -KILL \$\$ ;;
+	snapshot-before-partial:*"-fprintf"*) "$(command -v find)" "\$1" -maxdepth 0 -printf '%y %p\0'; exit 1 ;;
+	snapshot-after-partial:*"-samefile"*)
+		case "\$*" in
+			*-fprintf*) ;;
+			*) "$(command -v find)" "\$1" -maxdepth 0 -printf '%y %p\0'; exit 1 ;;
+		esac ;;
 	markers:*"-name .tmpcleaner-keep"*) exit 2 ;;
 	markers-unreadable:*"-name .tmpcleaner-keep"*) "$(command -v find)" "\$@"; exit 1 ;;
 	markers-partial:*"-name .tmpcleaner-keep"*) printf '%s\0' "\$FIND_SHIM_PARTIAL_MARKER"; exit 1 ;;
@@ -3092,6 +3098,46 @@ if [ "$status" -ne 0 ] || [ -s "$cfg/summary.out" ] || ! summary_ok 0 null 0 0 0
 	echo 'FAIL: JSON summary must distinguish a successful empty run from unavailable counts'
 	fail=1
 fi
+# The after-walk omits a retained subtree; those entries did not disappear.
+mkdir "$summary_root/kept"
+printf 'kept bytes' > "$summary_root/kept/fresh"
+for summary_setting in json ''; do
+	for backend_status in 0 42; do
+		status=0
+		shim env FIND_SHIM_FAIL=snapshot-after-partial CLEAN_SHIM_STATUS=$backend_status \
+			TMPCLEANER_SUMMARY="$summary_setting" TMPCLEANER_METRICS=$cfg/summary.prom \
+			TMPCLEANER_CONF=$cfg/summary.conf sh "$here/tmpcleaner" \
+			> "$cfg/summary.out" 2> "$cfg/summary.err" || status=$?
+		expected_failure=null
+		[ "$backend_status" -eq 0 ] || expected_failure='"backend"'
+		if [ "$status" -ne "$backend_status" ] || [ -s "$cfg/summary.out" ] ||
+			[ ! -e "$summary_root/kept/fresh" ] ||
+			! grep -Fxq 'tmpcleaner_removed_files 0' "$cfg/summary.prom" ||
+			! grep -Fxq 'tmpcleaner_removed_directories 0' "$cfg/summary.prom" ||
+			! grep -Fxq 'tmpcleaner_removed_bytes 0' "$cfg/summary.prom"; then
+			echo 'FAIL: an incomplete after-walk must retain backend status and publish zero removal metrics'
+			fail=1
+		fi
+		if [ "$summary_setting" = json ]; then
+			if ! summary_ok "$backend_status" "$expected_failure" 0 0 0 false; then
+				echo 'FAIL: an incomplete after-walk must leave JSON counts unavailable and zero'
+				fail=1
+			fi
+		elif ! grep -Fxq 'tmpcleaner: 1 files and 1 directories disappeared during the run (counts may include entries the post-cleanup walk could not read)' "$cfg/summary.err"; then
+			echo 'FAIL: an incomplete after-walk must qualify the prose disappearance counts'
+			fail=1
+		fi
+	done
+done
+status=0
+shim env FIND_SHIM_FAIL=snapshot-before-partial CLEAN_SHIM_STATUS=0 TMPCLEANER_SUMMARY=json \
+	TMPCLEANER_CONF=$cfg/summary.conf sh "$here/tmpcleaner" \
+	> "$cfg/summary.out" 2> "$cfg/summary.err" || status=$?
+if [ "$status" -ne 0 ] || ! summary_ok 0 null 0 0 0 true; then
+	echo 'FAIL: a partial before-walk must not invalidate counts from a complete after-walk'
+	fail=1
+fi
+rm -rf "$summary_root/kept" "$cfg/summary.prom"
 for summary_failure in CLEAN_SHIM_STATUS=42 CLEAN_SHIM_POST_STATUS=42 TMPCLEANER_AGE=bogus stale-snapshot strict-walk strict-markers scan-failure; do
 	touch "$summary_root/old"
 	old "$summary_root/old"

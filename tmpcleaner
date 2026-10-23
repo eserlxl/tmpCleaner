@@ -1597,10 +1597,14 @@ snapshot() {
 		root=$(realpath -ms -- "$root" 2>/dev/null) || continue
 		if [ -n "${2:-}" ]; then
 			: > "$scratch/root-sizes"
-			find "$root" -xdev -samefile "$scratch" -prune -o -printf '%y %p\0' -fprintf "$scratch/root-sizes" '%s %y %p\0' 2>/dev/null || :
+			find "$root" -xdev -samefile "$scratch" -prune -o -printf '%y %p\0' -fprintf "$scratch/root-sizes" '%s %y %p\0' 2>/dev/null || {
+				[ ! -e "$root" ] || : > "$scratch/walk-failed"
+			}
 			cat "$scratch/root-sizes" >> "$2"
 		else
-			find "$root" -xdev -samefile "$scratch" -prune -o -printf '%y %p\0' 2>/dev/null || :
+			find "$root" -xdev -samefile "$scratch" -prune -o -printf '%y %p\0' 2>/dev/null || {
+				[ ! -e "$root" ] || : > "$scratch/walk-failed"
+			}
 		fi
 	done < "$scratch/roots" | LC_ALL=C sort -zu > "$1"
 }
@@ -1706,9 +1710,13 @@ else
 fi
 [ "$status" -eq 0 ] || failure=backend
 
+# A partial before-walk can only undercount; only after-walk failures invalidate counts.
+rm -f "$scratch/walk-failed"
 snapshot "$scratch/after"
+counts_note=''
+[ ! -e "$scratch/walk-failed" ] || counts_note=' (counts may include entries the post-cleanup walk could not read)'
 LC_ALL=C comm -z -23 "$scratch/before" "$scratch/after" |
-	COUNTS=$scratch/counts SIZES=$sizes_file SUMMARY=${TMPCLEANER_SUMMARY:-} LC_ALL=C awk -v list="${TMPCLEANER_LIST:-}" "$breakdown_awk"'
+	COUNTS=$scratch/counts COUNTS_NOTE=$counts_note SIZES=$sizes_file SUMMARY=${TMPCLEANER_SUMMARY:-} LC_ALL=C awk -v list="${TMPCLEANER_LIST:-}" "$breakdown_awk"'
 	BEGIN {
 		RS = "\0"
 		bytes = 0
@@ -1745,13 +1753,13 @@ LC_ALL=C comm -z -23 "$scratch/before" "$scratch/after" |
 	}
 	END {
 		if (ENVIRON["SUMMARY"] != "json")
-			printf "tmpcleaner: %d files and %d directories disappeared during the run\n", files, directories > "/dev/stderr"
+			printf "tmpcleaner: %d files and %d directories disappeared during the run%s\n", files, directories, ENVIRON["COUNTS_NOTE"] > "/dev/stderr"
 		if (list == "top") print_top()
 		# -v would decode backslashes in the scratch path; ENVIRON keeps it raw.
 		printf "%d %d %.0f\n", files, directories, bytes > ENVIRON["COUNTS"]
 	}
 	'
-if read -r files directories bytes < "$scratch/counts" 2>/dev/null; then
+if [ ! -e "$scratch/walk-failed" ] && read -r files directories bytes < "$scratch/counts" 2>/dev/null; then
 	metric_files=$files metric_directories=$directories metric_bytes=$bytes
 	if [ "$status" -eq 0 ]; then
 		summary_files=$files summary_directories=$directories summary_bytes=$bytes counts_available=true

@@ -36,6 +36,12 @@ The backend decides which rules apply, including boot-only rules and `r`/`R`
 age cleanup (systemd 262 or newer). Names of any shape are counted; anything
 another program deletes in that second is counted too. The line counts
 disappearances, so it is not proof that tmpcleaner deleted a given path.
+If the post-cleanup walk cannot read a subtree, the prose line appends
+`(counts may include entries the post-cleanup walk could not read)`.
+Those counts are unavailable: JSON reports `counts_available: false` with
+zero counts and bytes, and removal metrics are zero. The cleanup exit status
+is unchanged. A cleanup root that vanished is still counted as removed;
+failures in the before-walk remain tolerated and can only undercount.
 Cleanup roots must follow the
 [literal path grammar](cli-reference.md); unsupported encoded or ambiguous
 roots stop the run before cleaning. When `JOURNAL_STREAM` matches stderr,
@@ -71,7 +77,8 @@ observed to disappear, as for `tmpcleaner_removed_bytes`. `counts_available` is
 a JSON boolean. Successful runs with counts available use `true`, including
 zero removals. Failures before or during cleanup use `false` and zero counts
 and bytes, even if the backend removed some paths before failing. A successful
-run that cannot obtain counts also uses `false` and zeros. Exit statuses are unchanged.
+run that cannot obtain counts, including an incomplete post-cleanup walk,
+also uses `false` and zeros. Exit statuses are unchanged.
 
 The exit handler writes the record as one line, without a journal severity
 prefix. Warnings, errors and backend logs may still appear on stderr; collectors
@@ -188,7 +195,8 @@ classification, before scratch creation. Real runs that fail after that point
 (including configuration, pressure, scratch or in-use scan failures) replace
 stale success metrics with their nonzero exit status and zero removals when
 cleanup counts were not obtained. Successful cleanup retains its measured
-counts. Invalid CLI usage or an invalid metrics path leaves metrics untouched.
+counts when the post-cleanup walk is complete, otherwise removal gauges are
+zero. Invalid CLI usage or an invalid metrics path leaves metrics untouched.
 All preview modes preserve an existing metrics file even when they fail.
 Publication uses the shell's exit handler: `SIGHUP`, `SIGINT`, and `SIGTERM`
 publish exit status `129`, `130`, and `143`, while `SIGKILL` leaves the
