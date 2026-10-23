@@ -1120,7 +1120,7 @@ check_entries() {
 			echo "${err_tag}tmpcleaner: --check cannot judge a directory holding names with newlines or carriage returns${check0:+: $shown}" >&2
 			exit 2
 		fi
-		entries=$(find "$check" -mindepth 1 -printf . 2>/dev/null) || {
+		entries=$(find "$check" -mindepth 1 -fprint0 "$scratch/check-descendants" -printf . 2>/dev/null) || {
 			echo "${err_tag}tmpcleaner: --check cannot read $shown" >&2
 			exit 2
 		}
@@ -1130,11 +1130,13 @@ check_entries() {
 
 judge_check() {
 	if [ -z "$check0" ]; then
+		: > "$scratch/check-descendants" || exit 2
 		check_entries
+		LC_ALL=C sort -z "$scratch/check-descendants" > "$scratch/check-descendants-sorted" || exit 2
 		printf '%s\0%s\0%s\0' "$check" "$requested" "$entries" > "$scratch/check-entries" || exit 2
 	fi
 	verdict=0
-	CHECK0=$check0 LC_ALL=C awk '
+	CHECK0=$check0 DESCENDANTS=$scratch/check-descendants-sorted LC_ALL=C awk '
 		FILENAME == ARGV[1] {
 			if ($0 !~ /"$/) next
 			if (index($0, "Would remove \"") == 1) {
@@ -1155,7 +1157,19 @@ judge_check() {
 			if (ENVIRON["CHECK0"] != "") printf "%s%c%s%c", removed ? "removed" : "kept", 0, requested, 0
 			if (!removed) any_kept = 1
 		}
-		END { if (!failed) exit any_kept }
+		END {
+			if (!failed && any_kept && ENVIRON["CHECK0"] == "") {
+				# An announced directory stays only for an entry below it, which
+				# sorts after it, so the first unannounced entry is the cause.
+				while ((getline path < ENVIRON["DESCENDANTS"]) > 0) {
+					if ((path in files) || (path in directories)) continue
+					gsub(/[\001-\037\177]/, "?", path)
+					print "tmpcleaner: kept because it still holds an entry that stays: " path
+					break
+				}
+			}
+			if (!failed) exit any_kept
+		}
 		' "$scratch/preview" 'RS=\0' "$scratch/check-entries" > "$scratch/verdicts" || verdict=$?
 }
 
@@ -1196,6 +1210,7 @@ if [ -n "$check$check0" ]; then
 			exit 0
 			;;
 		1)
+			descendant_reason=$(cat "$scratch/verdicts") || exit 2
 			reason=$(CHECK=$check HOLDERS=$scratch/holders KEEP_RULES=$scratch/keep-rules SORTED=$scratch/sorted LC_ALL=C awk '
 				function holders(target, holders_file, hpath, hpids, n, pid_list, i, pid, seen, shown_pids, comm_file, comm, who) {
 					holders_file = ENVIRON["HOLDERS"]
@@ -1340,6 +1355,9 @@ if [ -n "$check$check0" ]; then
 					fi
 					;;
 			esac
+			if [ "$reason" = 'tmpcleaner: not old enough, or kept by a configuration rule' ] && [ -n "$descendant_reason" ]; then
+				reason=$descendant_reason
+			fi
 			printf '%s\n' "$reason" >&2
 			printf 'kept: %s\n' "$shown"
 			exit 1

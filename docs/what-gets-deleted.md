@@ -171,5 +171,15 @@ To ask about one path, use `--check`; it prints `would be removed: PATH` or
 sudo tmpcleaner --check /tmp/my-long-job-1/output.log
 ```
 
+When a directory stays because it still holds a retained entry and no more
+specific reason applies, `--check` names the first such descendant in sorted
+order on stderr and exits 1:
+
+```text
+tmpcleaner: kept because it still holds an entry that stays: /tmp/old-build/fresh.log
+```
+
+Control bytes in the path are masked as `?`. `--check0` records are unchanged.
+
 `sudo tmpcleaner --print-rules` shows every rule and in-use exclusion a run
 would apply.

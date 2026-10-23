@@ -2532,14 +2532,39 @@ for log_env in SYSTEMD_LOG_LEVEL=warning SYSTEMD_LOG_LEVEL=err SYSTEMD_LOG_TARGE
 		fail=1
 	fi
 done
+# The old file sorts before the fresh one but must not be named as the blocker.
+touch "$dir/mixed/aged"
+old "$dir/mixed/aged" "$dir/mixed"
 status=0
 check_out=$(TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --check "$dir/mixed" 2>"$cfg/check.err") || status=$?
 check_err=$(cat "$cfg/check.err")
 rm -f "$cfg/check.err"
-if [ "$status" -ne 1 ] || [ "$check_out" != "kept: $dir/mixed" ] || [ "$check_err" != 'tmpcleaner: not old enough, or kept by a configuration rule' ]; then
-	echo "FAIL: --check should keep an old directory that still holds a fresh file"
+if [ "$status" -ne 1 ] || [ "$check_out" != "kept: $dir/mixed" ] ||
+	[ "$check_err" != "tmpcleaner: kept because it still holds an entry that stays: $dir/mixed/fresh" ]; then
+	echo "FAIL: --check should name the fresh file keeping an old directory"
 	fail=1
 fi
+touch "$dir/mixed/aaa${tab}fresh"
+old "$dir/mixed"
+status=0
+check_out=$(TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --check "$dir/mixed" 2>"$cfg/check.err") || status=$?
+if [ "$status" -ne 1 ] || [ "$check_out" != "kept: $dir/mixed" ] ||
+	[ "$(cat "$cfg/check.err")" != "tmpcleaner: kept because it still holds an entry that stays: $dir/mixed/aaa?fresh" ]; then
+	echo "FAIL: --check should name the first sorted retained entry with control bytes masked"
+	fail=1
+fi
+rm -f "$dir/mixed/aaa${tab}fresh"
+# An announced subdirectory is not the cause; the young file inside it is.
+mkdir "$dir/mixed/aab"
+touch "$dir/mixed/aab/young"
+old "$dir/mixed/aab" "$dir/mixed"
+status=0
+check_out=$(TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --check "$dir/mixed" 2>"$cfg/check.err") || status=$?
+if [ "$status" -ne 1 ] || [ "$(cat "$cfg/check.err")" != "tmpcleaner: kept because it still holds an entry that stays: $dir/mixed/aab/young" ]; then
+	echo "FAIL: --check should name the young file below an announced subdirectory"
+	fail=1
+fi
+rm -rf "$dir/mixed/aged" "$dir/mixed/aab" "$cfg/check.err"
 status=0
 TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --check "$dir" >/dev/null 2>&1 || status=$?
 if [ "$status" -ne 2 ]; then
@@ -3353,6 +3378,7 @@ for name in keep/f job-1/f new keep/new 5 mixed; do
 	case "$name" in
 		keep/f) expected_err="tmpcleaner: kept by configuration rule: x $dir/rulekeep/keep" ;;
 		job-1/f) expected_err="tmpcleaner: kept by configuration rule: x $dir/rulekeep/job-*" ;;
+		mixed) expected_err="tmpcleaner: kept because it still holds an entry that stays: $dir/rulekeep/mixed/fresh" ;;
 		*) expected_err='tmpcleaner: not old enough, or kept by a configuration rule' ;;
 	esac
 	status=0
