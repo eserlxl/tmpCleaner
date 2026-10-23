@@ -2736,6 +2736,24 @@ if [ "$status" -ne 1 ] || [ "$check_out" != "kept: $dir/mixed" ] ||
 	echo "FAIL: --check should name the fresh file keeping an old directory"
 	fail=1
 fi
+# Overlapping rules must not count the old child twice against the fresh one.
+printf 'd "%s" - - - amM:12h\ne "%s" - - - amM:12h\n' "$dir" "$dir" > "$cfg/check-dup.conf"
+status=0
+check_out=$(TMPCLEANER_CONF=$cfg/check-dup.conf sh "$here/tmpcleaner" --check "$dir/mixed" 2>"$cfg/check.err") || status=$?
+if [ "$status" -ne 1 ] || [ "$check_out" != "kept: $dir/mixed" ] ||
+	[ "$(cat "$cfg/check.err")" != "tmpcleaner: kept because it still holds an entry that stays: $dir/mixed/fresh" ]; then
+	echo "FAIL: --check should keep a partially removable directory with duplicate announcements"
+	fail=1
+fi
+status=0
+printf '%s\0' "$dir/mixed" |
+	TMPCLEANER_CONF=$cfg/check-dup.conf sh "$here/tmpcleaner" --check0 > "$cfg/check0.out" 2> "$cfg/check0.err" || status=$?
+printf 'kept\0%s\0' "$dir/mixed" > "$cfg/check0.expected"
+if [ "$status" -ne 1 ] || ! cmp -s "$cfg/check0.expected" "$cfg/check0.out" || [ -s "$cfg/check0.err" ]; then
+	echo "FAIL: --check0 should keep a partially removable directory with duplicate announcements"
+	fail=1
+fi
+rm -f "$cfg/check-dup.conf" "$cfg/check.err"
 touch "$dir/mixed/aaa${tab}fresh"
 old "$dir/mixed"
 status=0

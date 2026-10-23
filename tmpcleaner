@@ -1225,7 +1225,8 @@ judge_check() {
 				path = substr($0, 25, length($0) - 25)
 				directories[path] = 1
 			} else next
-			# Count every preview line for each ancestor, including duplicate lines.
+			# Count each distinct announced path once for each ancestor.
+			if (seen[path]++) next
 			while (sub(/\/[^/]*$/, "", path)) inside[path]++
 			next
 		}
