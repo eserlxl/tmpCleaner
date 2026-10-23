@@ -125,6 +125,9 @@ Environment variables:
                             strictly below /tmp (default: off)
   TMPCLEANER_PREVIEW        Set to 1 to preview cleanup without deleting
                             (unset or empty: normal cleanup)
+  TMPCLEANER_MAX_SCAN_AGE   Refuse real cleanup if the in-use scan is older than
+                            this many seconds (positive integer, at most six
+                            digits; unset or empty: no limit; previews unaffected)
   TMPCLEANER_FULL_PERCENT   Threshold percentage of /tmp usage (1-100); the
                             larger of block and inode usage counts ('-' = 0).
                             If df fails or prints unexpected output, the run
@@ -285,6 +288,16 @@ esac
 case "${TMPCLEANER_PREVIEW:-}" in
 	''|1) ;;
 	*) echo "${err_tag}tmpcleaner: invalid TMPCLEANER_PREVIEW (expected 1 or empty)" >&2; exit "$errstatus" ;;
+esac
+case "${TMPCLEANER_MAX_SCAN_AGE:-}" in
+	'') ;;
+	*[!0-9]*|???????*) echo "${err_tag}tmpcleaner: invalid TMPCLEANER_MAX_SCAN_AGE" >&2; exit "$errstatus" ;;
+	*)
+		[ "$TMPCLEANER_MAX_SCAN_AGE" -gt 0 ] || {
+			echo "${err_tag}tmpcleaner: invalid TMPCLEANER_MAX_SCAN_AGE" >&2
+			exit "$errstatus"
+		}
+		;;
 esac
 write_metrics() {
 	mtmp=
@@ -929,6 +942,10 @@ rules() {
 	# LC_ALL=C: names are bytes, not text. In a UTF-8 locale "." skips invalid
 	# bytes, so a name holding one would leave its rule half quoted.
 	[ -z "$check$export_holders" ] || holders_file=$scratch/holders
+	if [ "$previewing" = 0 ] && [ -n "${TMPCLEANER_MAX_SCAN_AGE:-}" ]; then
+		scan_started=''
+		read -r scan_started _ 2>/dev/null < /proc/uptime || scan_started=''
+	fi
 	in_use > "$scratch/inuse" || { scan_failed=1; return 1; }
 	set --
 	if [ "${TMPCLEANER_MARKER_AGE+x}" ]; then
@@ -1626,6 +1643,23 @@ else
 fi
 
 status=0
+if [ -n "${TMPCLEANER_MAX_SCAN_AGE:-}" ]; then
+	scan_age=$(START=$scan_started LIMIT=$TMPCLEANER_MAX_SCAN_AGE LC_ALL=C awk '
+		NR == 1 { finish = $1 }
+		END {
+			start = ENVIRON["START"]
+			if (NR != 1 || start !~ /^[0-9]+([.][0-9]+)?$/ || finish !~ /^[0-9]+([.][0-9]+)?$/ || finish + 0 < start + 0) {
+				print "?"
+				exit 1
+			}
+			scan_age = finish - start
+			printf "%.2f\n", scan_age
+			if (scan_age > ENVIRON["LIMIT"] + 0) exit 1
+		}' /proc/uptime 2>/dev/null) || {
+		echo "${err_tag}tmpcleaner: in-use snapshot is ${scan_age:-?}s old (limit ${TMPCLEANER_MAX_SCAN_AGE}s); nothing was removed" >&2
+		exit "$errstatus"
+	}
+fi
 if [ "${TMPCLEANER_LIST:-}" = nul ]; then
 	systemd-tmpfiles --clean "$@" - < "$scratch/rules" >&2 || status=$?
 else

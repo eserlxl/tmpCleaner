@@ -4,7 +4,7 @@
 # cannot be backdated, so the test drops b/B/c/C from the age-by field and
 # keeps the rest as configured.
 set -eu
-unset TMPCLEANER_AGE TMPCLEANER_MARKER_AGE TMPCLEANER_PROTECT_TMPDIR TMPCLEANER_PREVIEW TMPCLEANER_FULL_PERCENT TMPCLEANER_FULL_AGE TMPCLEANER_LIST TMPCLEANER_SUMMARY TMPCLEANER_METRICS JOURNAL_STREAM
+unset TMPCLEANER_AGE TMPCLEANER_MARKER_AGE TMPCLEANER_PROTECT_TMPDIR TMPCLEANER_PREVIEW TMPCLEANER_MAX_SCAN_AGE TMPCLEANER_FULL_PERCENT TMPCLEANER_FULL_AGE TMPCLEANER_LIST TMPCLEANER_SUMMARY TMPCLEANER_METRICS JOURNAL_STREAM
 here=$(cd "$(dirname "$0")/.." && pwd)
 dir=$(mktemp -d /tmp/tmpcleaner-test.XXXXXX)
 # Fixture configs live in a private directory, never at a guessable /tmp path.
@@ -78,6 +78,9 @@ esac
 case "\$*" in
 	*-fprintf*) [ -z "\${FIND_SHIM_FPRINTF_MARKER:-}" ] || : > "\$FIND_SHIM_FPRINTF_MARKER" ;;
 esac
+case "\$*" in
+	*"-samefile"*) [ -z "\${FIND_SHIM_SNAPSHOT_DELAY:-}" ] || sleep "\$FIND_SHIM_SNAPSHOT_DELAY" ;;
+esac
 exec "$(command -v find)" "\$@"
 SHIM
 cat > "$shimdir/mktemp" <<SHIM
@@ -139,6 +142,8 @@ case "\$1" in
 		fi ;;
 esac
 case "\$*" in
+	*'scan_age = finish - start'*)
+		[ -z "\${SCAN_AGE_SHIM_FAIL:-}" ] || exit 1 ;;
 	*'elapsed = finish - start'*)
 		[ -z "\${DURATION_SHIM_MARKER:-}" ] || : > "\$DURATION_SHIM_MARKER"
 		[ -z "\${DURATION_SHIM_FAIL:-}" ] || exit 1 ;;
@@ -2860,6 +2865,82 @@ if ! TMPCLEANER_CONF="$cfg/scan2.conf" sh "$here/tmpcleaner" >/dev/null 2>&1 || 
 	fail=1
 fi
 rm -rf "$fresh2" "$cfg/scan2.conf"
+# Bound the scan-to-cleanup gap using only the fixture's snapshot walks.
+scan_root=$(mktemp -d "$dir/scan-age.XXXXXX")
+printf 'd %s - - - amM:12h\n' "$scan_root" > "$cfg/scan-age.conf"
+touch "$scan_root/old"
+old "$scan_root/old"
+for scan_list in '' nul; do
+	rm -f "$cfg/scan-age.called"
+	scan_metrics=''
+	[ "$scan_list" != nul ] || scan_metrics=$cfg/scan-age.prom
+	status=0
+	FIND_SHIM_SNAPSHOT_DELAY=2 TMPCLEANER_MAX_SCAN_AGE=1 TMPCLEANER_LIST=$scan_list \
+		TMPCLEANER_METRICS=$scan_metrics \
+		CLEAN_SHIM_MARKER=$cfg/scan-age.called TMPCLEANER_CONF=$cfg/scan-age.conf \
+		sh "$here/tmpcleaner" > "$cfg/scan-age.out" 2> "$cfg/scan-age.err" || status=$?
+	if [ "$status" -ne 1 ] || [ ! -e "$scan_root/old" ] || [ -e "$cfg/scan-age.called" ] ||
+		[ -s "$cfg/scan-age.out" ] ||
+		! grep -Eq '^tmpcleaner: in-use snapshot is [0-9]+[.][0-9][0-9]s old \(limit 1s\); nothing was removed$' "$cfg/scan-age.err"; then
+		echo 'FAIL: stale in-use snapshot must refuse both cleanup output modes without calling the backend'
+		fail=1
+	fi
+done
+rm -f "$cfg/scan-age.called"
+status=0
+SCAN_AGE_SHIM_FAIL=1 TMPCLEANER_MAX_SCAN_AGE=999999 CLEAN_SHIM_MARKER=$cfg/scan-age.called \
+	TMPCLEANER_CONF=$cfg/scan-age.conf sh "$here/tmpcleaner" >/dev/null 2> "$cfg/scan-age.err" || status=$?
+if [ "$status" -ne 1 ] || [ ! -e "$scan_root/old" ] || [ -e "$cfg/scan-age.called" ] ||
+	! grep -Fxq 'tmpcleaner: in-use snapshot is ?s old (limit 999999s); nothing was removed' "$cfg/scan-age.err"; then
+	echo 'FAIL: unavailable snapshot age must refuse cleanup'
+	fail=1
+fi
+for scan_limit in 0 000000 -1 +1 1.5 1s 1000000 ' 1' "1${nl}" bogus; do
+	for scan_mode in real --check; do
+		set --
+		expected_status=1
+		[ "$scan_mode" != --check ] || { set -- --check "$scan_root/old"; expected_status=2; }
+		status=0
+		TMPCLEANER_MAX_SCAN_AGE=$scan_limit CLEAN_SHIM_MARKER=$cfg/scan-age.called \
+			TMPCLEANER_CONF=$cfg/scan-age.conf sh "$here/tmpcleaner" "$@" >/dev/null 2> "$cfg/scan-age.err" || status=$?
+		if [ "$status" -ne "$expected_status" ] || [ ! -e "$scan_root/old" ] || [ -e "$cfg/scan-age.called" ] ||
+			[ "$(cat "$cfg/scan-age.err")" != 'tmpcleaner: invalid TMPCLEANER_MAX_SCAN_AGE' ]; then
+			echo 'FAIL: invalid scan age must stop before cleaning with the usual error status'
+			fail=1
+		fi
+	done
+done
+for scan_mode in --dry-run preview --print-rules --print-in-use0 --print-holders0 --suggest-exclusions --check --check0; do
+	set -- "$scan_mode"
+	scan_preview=''
+	[ "$scan_mode" != preview ] || { set --; scan_preview=1; }
+	[ "$scan_mode" != --check ] || set -- --check "$scan_root/old"
+	status=0
+	printf '%s\0' "$scan_root/old" | FIND_SHIM_SNAPSHOT_DELAY=2 SCAN_AGE_SHIM_FAIL=1 \
+		TMPCLEANER_MAX_SCAN_AGE=1 TMPCLEANER_PREVIEW=$scan_preview TMPCLEANER_CONF=$cfg/scan-age.conf \
+		sh "$here/tmpcleaner" "$@" >/dev/null 2> "$cfg/scan-age.err" || status=$?
+	if [ "$status" -ne 0 ] || [ ! -e "$scan_root/old" ] || grep -q 'in-use snapshot is' "$cfg/scan-age.err"; then
+		echo "FAIL: scan age must not refuse previews ($scan_mode)"
+		fail=1
+	fi
+done
+for scan_setting in unset empty bounded; do
+	touch "$scan_root/old"
+	old "$scan_root/old"
+	set --
+	case "$scan_setting" in
+		empty) set -- TMPCLEANER_MAX_SCAN_AGE='' ;;
+		bounded) set -- TMPCLEANER_MAX_SCAN_AGE=999999 ;;
+	esac
+	status=0
+	env "$@" FIND_SHIM_SNAPSHOT_DELAY=2 TMPCLEANER_CONF=$cfg/scan-age.conf \
+		sh "$here/tmpcleaner" >/dev/null 2> "$cfg/scan-age.err" || status=$?
+	if [ "$status" -ne 0 ] || [ -e "$scan_root/old" ]; then
+		echo "FAIL: unset, empty or sufficiently large scan age must allow cleanup ($scan_setting)"
+		fail=1
+	fi
+done
+rm -rf "$scan_root"
 # JSON completion records are exact single-line objects, with no prose summary.
 summary_ok() {
 	expected=$(printf '{"tmpcleaner":"run","exit_status":%d,"removed_files":%d,"removed_directories":%d,"counts_available":%s}' "$@")
@@ -3268,6 +3349,10 @@ printf '%s\n' "$help_out" | grep -Fq -- '--check PATH' || {
 }
 printf '%s\n' "$help_out" | grep -Fq 'TMPCLEANER_AGE' || {
 	echo "FAIL: help should mention TMPCLEANER_AGE"
+	fail=1
+}
+printf '%s\n' "$help_out" | grep -Fq 'TMPCLEANER_MAX_SCAN_AGE' || {
+	echo 'FAIL: help should mention TMPCLEANER_MAX_SCAN_AGE'
 	fail=1
 }
 printf '%s\n' "$help_out" | grep -Fq 'TMPCLEANER_LIST' || {

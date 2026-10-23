@@ -69,7 +69,14 @@ change it; see [configuration.md](configuration.md).
 
 - The in-use list is taken from `/proc` just before each run (a snapshot
   before cleaning), so files opened during a run are not covered and
-  long-lived work belongs in the exclusion list.
+  long-lived work belongs in the exclusion list. The cleanup-tree snapshot
+  walk can widen this gap on large trees. Opt-in
+  [`TMPCLEANER_MAX_SCAN_AGE`](configuration.md#refuse-cleanup-with-a-stale-in-use-snapshot)
+  refuses real cleanup when the time from scan start to cleanup exceeds the
+  configured seconds (or uptime cannot be read). Unset or empty keeps today's
+  behavior; previews do not refuse. A small limit can prevent cleanup on busy
+  hosts, and the bound does not close the race for files opened after the scan
+  or limit how long cleanup itself takes.
 - Socket protection does not recognize a socket bound by a relative name in
   another network namespace, one whose own name forges a line of
   `/proc/net/unix`, and one whose name no process can reach any more (bound,

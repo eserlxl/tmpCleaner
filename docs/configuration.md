@@ -167,6 +167,35 @@ stops the run before cleaning. For the service, add a drop-in with
 Environment=TMPCLEANER_PROTECT_TMPDIR=1
 ```
 
+## Refuse cleanup with a stale in-use snapshot
+
+Set `TMPCLEANER_MAX_SCAN_AGE` to a positive integer number of seconds of at
+most six digits, for example `30`. Unset or empty leaves cleanup unchanged;
+zero, longer numbers and other values stop the run before cleaning with
+`invalid TMPCLEANER_MAX_SCAN_AGE`.
+
+For real cleanup, tmpcleaner reads the first field of `/proc/uptime` just
+before the in-use scan and again immediately before invoking cleanup. This
+includes the scan itself and the walk that snapshots the cleanup trees. If
+the elapsed time exceeds the limit, it exits 1 without cleaning and reports
+`tmpcleaner: in-use snapshot is <n>s old (limit <m>s); nothing was removed`.
+Elapsed seconds include fractional seconds; exactly the limit is allowed.
+Unreadable or invalid uptime also refuses cleanup (`?s` means age unknown).
+All preview modes, including `TMPCLEANER_PREVIEW=1`, ignore the age limit;
+the setting is still validated.
+
+For the service, run `sudo systemctl edit tmpcleaner.service` and add:
+
+```ini
+[Service]
+Environment=TMPCLEANER_MAX_SCAN_AGE=30
+```
+
+Choose a limit above the usual scan and snapshot time. A slow or large tree
+can otherwise prevent cleanup on every run. This bounds snapshot age at
+cleanup start; it does not protect files opened after the scan. See
+[protection limits](what-gets-deleted.md#limits).
+
 ## Use a shorter age when /tmp is nearly full
 
 Pressure mode is off by default. Set both `TMPCLEANER_FULL_PERCENT` (threshold
