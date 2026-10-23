@@ -167,6 +167,7 @@ case "\$*" in
 		[ -z "\${SCAN_AGE_SHIM_FAIL:-}" ] || exit 1 ;;
 	*'elapsed = finish - start'*)
 		[ -z "\${DURATION_SHIM_MARKER:-}" ] || : > "\$DURATION_SHIM_MARKER"
+		[ -z "\${DURATION_SHIM_SIGNAL_PID:-}" ] || kill -TERM "\$DURATION_SHIM_SIGNAL_PID"
 		[ -z "\${DURATION_SHIM_FAIL:-}" ] || exit 1 ;;
 esac
 exec "$(command -v awk)" "\$@"
@@ -3390,6 +3391,19 @@ wait "$term_pid" || status=$?
 if [ "$status" -ne 143 ] || ! summary_ok 143 '"signal"' 0 0 0 false ||
 	[ -n "$(find "$term_tmp" -mindepth 1 -print -quit)" ]; then
 	echo 'FAIL: a TERM-killed JSON run must exit 143, emit exactly one signal completion record on stderr, and remove its scratch directory'
+	fail=1
+fi
+# The duration shim sends TERM only after finish() has emitted its JSON record.
+rm -f "$cfg/duration.prom"
+status=0
+env TMPDIR="$term_tmp" CLEAN_SHIM_STATUS=42 TMPCLEANER_CONF="$cfg/duration.conf" \
+	TMPCLEANER_METRICS="$cfg/duration.prom" TMPCLEANER_SUMMARY=json \
+	sh -c 'DURATION_SHIM_SIGNAL_PID=$$; export DURATION_SHIM_SIGNAL_PID; exec sh "$1"' \
+	sh "$here/tmpcleaner" >/dev/null 2> "$cfg/summary.err" || status=$?
+if [ "$status" -ne 42 ] || ! summary_ok 42 '"backend"' 0 0 0 false ||
+	! grep -Fxq 'tmpcleaner_last_exit_status 42' "$cfg/duration.prom" ||
+	[ -n "$(find "$term_tmp" -mindepth 1 -print -quit)" ]; then
+	echo 'FAIL: TERM during finalization must preserve the backend status and JSON record, publish metrics, and remove scratch'
 	fail=1
 fi
 rm -rf "$dir/duration" "$term_tmp" "$cfg/duration.prom" "$cfg/term.marker" "$cfg/summary.err"

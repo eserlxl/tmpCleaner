@@ -39,6 +39,7 @@ scratch='' metrics_ready='' summary_files=0 summary_directories=0 summary_bytes=
 finish() {
 	exit_status=$?
 	trap - EXIT
+	trap '' HUP INT TERM
 	if [ "$previewing" = 0 ] && [ "${TMPCLEANER_SUMMARY:-}" = json ]; then
 		if [ "$exit_status" -ne 0 ]; then
 			summary_files=0 summary_directories=0 summary_bytes=0 counts_available=false
