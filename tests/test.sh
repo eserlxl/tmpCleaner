@@ -1482,7 +1482,7 @@ if [ "$status" -ne 1 ] || [ "$from0_out" != "kept: $from0/plain" ] ||
 	fail=1
 fi
 mkdir "$cfg/from0.dir"
-for from0_case in relative relative-control outside unterminated newline missing directory; do
+for from0_case in relative relative-control outside outside-control unterminated newline missing directory; do
 	from0_file=$cfg/from0.bad
 	case "$from0_case" in
 		relative)
@@ -1496,6 +1496,10 @@ for from0_case in relative relative-control outside unterminated newline missing
 		outside)
 			printf '%s\0' "$from0/plain" /var/x > "$from0_file"
 			expected_err='tmpcleaner: --exclude-from0 must be under /tmp: /var/x'
+			;;
+		outside-control)
+			printf '/var/\033[2J\0' > "$from0_file"
+			expected_err='tmpcleaner: --exclude-from0 must be under /tmp: /var/?[2J'
 			;;
 		unterminated)
 			printf '%s\0%s' "$from0/plain" "$from0/a b" > "$from0_file"

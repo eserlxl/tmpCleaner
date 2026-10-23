@@ -322,13 +322,14 @@ printf '%s\0' "$scratch" > "$scratch/excludes"
 add_exclusion() {
 	path=$2
 	while [ "$path" != / ] && [ "${path%/}" != "$path" ]; do path=${path%/}; done
+	excl_shown=$(printf '%s' "$path" | LC_ALL=C tr '\001-\037\177' '[?*]')
 	base=${path##*/}
 	case "$base" in
 		.|..) parent=$path base= ;;
 		*) parent=${path%/*} ;;
 	esac
 	excl=$(realpath -m -- "${parent:-/}" 2>/dev/null && printf x) || {
-		echo "${err_tag}tmpcleaner: cannot canonicalize $1: $path" >&2
+		printf '%stmpcleaner: cannot canonicalize %s: %s\n' "$err_tag" "$1" "$excl_shown" >&2
 		exit "$errstatus"
 	}
 	excl=${excl%x}
@@ -336,7 +337,7 @@ add_exclusion() {
 	[ -z "$base" ] || excl=${excl%/}/$base
 	case "$excl" in
 		/tmp|/tmp/*) ;;
-		*) echo "${err_tag}tmpcleaner: $1 must be under /tmp: $path" >&2; exit "$errstatus" ;;
+		*) printf '%stmpcleaner: %s must be under /tmp: %s\n' "$err_tag" "$1" "$excl_shown" >&2; exit "$errstatus" ;;
 	esac
 	printf '%s\0' "$excl" >> "$scratch/excludes"
 }
