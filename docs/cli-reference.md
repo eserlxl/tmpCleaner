@@ -24,8 +24,15 @@ prints one reason line to stderr (`tmpcleaner: in use by a running process: PID 
 `tmpcleaner: kept by a .tmpcleaner-keep marker in ...`,
 `tmpcleaner: kept by an explicit --exclude-prefix`,
 `tmpcleaner: kept by configuration rule: x ...` (the configured or package
-`x`/`X` rule without which the path would be removed), or
-`tmpcleaner: not old enough, or kept by a configuration rule`). Control bytes in
+`x`/`X` rule without which the path would be removed),
+`tmpcleaner: kept because it still holds an entry that stays: ...` (an old
+directory the preview announces but that a younger entry keeps; the first such
+entry in sorted order), or
+`tmpcleaner: not old enough, or kept by a configuration rule`). When a path
+would be removed only because a literal cleanup root at or below a literal `x`
+exclusion overrides it, `--check` also prints
+`tmpcleaner: note: ... is excluded, but the cleanup rule for ... still cleans it`
+on stderr, naming the most specific such root. Control bytes in
 these paths and in `--check` and `--check0` error messages are printed as `?`. Every error exits 2: invalid
 paths or missing arguments, unreadable configuration, invalid `TMPCLEANER_*`
 values, missing `/proc`, a failed in-use scan, and a `systemd-tmpfiles` failure
