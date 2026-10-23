@@ -102,7 +102,7 @@ check-package:
 preview:
 	@TMPCLEANER_CONF=./tmpcleaner.conf sh ./tmpcleaner --dry-run > preview.txt 2>&1; rc=$$?; \
 	if [ $$rc -ne 0 ] && [ $$rc -ne 73 ]; then cat preview.txt >&2; exit $$rc; fi; \
-	echo "$$(grep -c 'Would remove' preview.txt) entries would be removed; see preview.txt"
+	echo "$$(grep '^tmpcleaner: would remove' preview.txt); see preview.txt"
 
 # Warning level and above; notes and style hints stay advisory.
 lint:

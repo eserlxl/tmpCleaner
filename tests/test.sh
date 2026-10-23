@@ -1337,14 +1337,33 @@ head -c 1000 /dev/zero > "$size_root/a"
 old "$size_root/a"
 printf 'd "%s" - - - amM:12h\ne "%s" - - - amM:12h\n' "$size_root" "$size_root" > "$cfg/dry-dup.conf"
 status=0
+suggest_out=$(TMPCLEANER_CONF=$cfg/dry-dup.conf sh "$here/tmpcleaner" --suggest-exclusions 2> "$cfg/dry-dup.err") || status=$?
+if [ "$status" -ne 0 ] ||
+	[ "$suggest_out" != "$(printf '# 1 entries would be removed under %s\nx "%s"' "$dir" "$dir")" ] ||
+	[ ! -f "$size_root/a" ]; then
+	echo 'FAIL: --suggest-exclusions must count a file announced by two rules once'
+	fail=1
+fi
+mkdir "$size_root/olddir"
+old "$size_root/olddir"
+status=0
 TMPCLEANER_CONF=$cfg/dry-dup.conf sh "$here/tmpcleaner" --dry-run \
 	> "$cfg/dry-dup.out" 2> "$cfg/dry-dup.err" || status=$?
 if [ "$status" -ne 0 ] ||
 	[ "$(grep -Fxc "Would remove \"$size_root/a\"" "$cfg/dry-dup.err")" -ne 2 ] ||
-	! grep -Fxq 'tmpcleaner: would remove 1 files and 0 directories (about 1000 bytes)' "$cfg/dry-dup.err" ||
-	! grep -Fxq "tmpcleaner:   1 under $dir" "$cfg/dry-dup.err" ||
-	[ ! -f "$size_root/a" ]; then
-	echo 'FAIL: --dry-run must count a path announced by two rules once in the file count and the breakdown'
+	[ "$(grep -Fxc "Would remove directory \"$size_root/olddir\"" "$cfg/dry-dup.err")" -ne 2 ] ||
+	! grep -Fxq 'tmpcleaner: would remove 1 files and 1 directories (about 1000 bytes)' "$cfg/dry-dup.err" ||
+	! grep -Fxq "tmpcleaner:   2 under $dir" "$cfg/dry-dup.err" ||
+	[ ! -f "$size_root/a" ] || [ ! -d "$size_root/olddir" ]; then
+	echo 'FAIL: --dry-run must count files and directories announced by two rules once in the counts and the breakdown'
+	fail=1
+fi
+status=0
+suggest_out=$(TMPCLEANER_CONF=$cfg/dry-dup.conf sh "$here/tmpcleaner" --suggest-exclusions 2> "$cfg/dry-dup.err") || status=$?
+if [ "$status" -ne 0 ] ||
+	[ "$suggest_out" != "$(printf '# 2 entries would be removed under %s\nx "%s"' "$dir" "$dir")" ] ||
+	[ ! -f "$size_root/a" ] || [ ! -d "$size_root/olddir" ]; then
+	echo 'FAIL: --suggest-exclusions must count files and directories announced by two rules once'
 	fail=1
 fi
 rm -rf "$size_root" "$cfg/dry-dup.conf" "$cfg/dry-dup.out" "$cfg/dry-dup.err"

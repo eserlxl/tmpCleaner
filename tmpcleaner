@@ -1539,8 +1539,16 @@ if [ "${1:-}" = --suggest-exclusions ]; then
 		exit "$errstatus"
 	}
 	COMMENTS=$scratch/suggest-comments PATHS=$scratch/suggest-paths LC_ALL=C awk "$breakdown_awk"'
-	/^Would remove directory "/ && /"$/ { track(substr($0, 25, length($0) - 25)); next }
-	/^Would remove "/ && /"$/ { track(substr($0, 15, length($0) - 15)); next }
+	/^Would remove directory "/ && /"$/ {
+		path = substr($0, 25, length($0) - 25)
+		if (!seen[path]++) track(path)
+		next
+	}
+	/^Would remove "/ && /"$/ {
+		path = substr($0, 15, length($0) - 15)
+		if (!seen[path]++) track(path)
+		next
+	}
 	END {
 		comments = ENVIRON["COMMENTS"]
 		paths = ENVIRON["PATHS"]
