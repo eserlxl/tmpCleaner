@@ -8,6 +8,7 @@
 # absolute PATH and everything below it, and --exclude-from0=FILE adds one for
 # every NUL-terminated path in FILE.
 set -eu
+failure=config
 
 if [ "${TMPCLEANER_PREVIEW:-}" = 1 ]; then
 	case "${1:-}" in
@@ -42,8 +43,17 @@ finish() {
 		if [ "$exit_status" -ne 0 ]; then
 			summary_files=0 summary_directories=0 summary_bytes=0 counts_available=false
 		fi
-		printf '{"tmpcleaner":"run","exit_status":%d,"removed_files":%d,"removed_directories":%d,"removed_bytes":%d,"counts_available":%s}\n' \
-			"$exit_status" "$summary_files" "$summary_directories" "$summary_bytes" "$counts_available" >&2 || :
+		case "$exit_status:$failure" in
+			0:*) failure_json=null ;;
+			*:config) failure_json='"config"' ;;
+			*:protection) failure_json='"protection"' ;;
+			*:stale-snapshot) failure_json='"stale-snapshot"' ;;
+			*:backend) failure_json='"backend"' ;;
+			*:signal) failure_json='"signal"' ;;
+			*) failure_json='"error"' ;;
+		esac
+		printf '{"tmpcleaner":"run","exit_status":%d,"failure":%s,"removed_files":%d,"removed_directories":%d,"removed_bytes":%d,"counts_available":%s}\n' \
+			"$exit_status" "$failure_json" "$summary_files" "$summary_directories" "$summary_bytes" "$counts_available" >&2 || :
 	fi
 	if [ -n "$metrics_ready" ] && [ "$previewing" = 0 ] && [ -n "${TMPCLEANER_METRICS:-}" ]; then
 		write_metrics || :
@@ -52,9 +62,9 @@ finish() {
 	exit "$exit_status"
 }
 trap finish EXIT
-trap 'exit 129' HUP
-trap 'exit 130' INT
-trap 'exit 143' TERM
+trap 'failure=signal; exit 129' HUP
+trap 'failure=signal; exit 130' INT
+trap 'failure=signal; exit 143' TERM
 
 with_sources=
 for arg do
@@ -563,6 +573,7 @@ if [ "${TMPCLEANER_FULL_AGE+x}" ]; then
 		exit "$errstatus"
 	}
 fi
+failure=''
 if [ "${TMPCLEANER_FULL_PERCENT+x}" ] && [ "${TMPCLEANER_FULL_AGE+x}" ]; then
 	dfout=$(df --output=pcent,ipcent /tmp) || { echo "${err_tag}tmpcleaner: cannot read /tmp usage" >&2; exit "$errstatus"; }
 	usage_line=$(printf '%s\n' "$dfout" | sed -n '2p') || { echo "${err_tag}tmpcleaner: cannot read /tmp usage" >&2; exit "$errstatus"; }
@@ -973,6 +984,7 @@ rules() {
 }
 
 generate_rules() {
+	failure=protection
 	scan_failed='' walk_incomplete=''
 	rules > "$scratch/rules" || {
 		if [ "$walk_incomplete" = 1 ]; then
@@ -1092,6 +1104,7 @@ generate_rules() {
 		echo "${err_tag}tmpcleaner: an exclusion rule failed to parse; nothing was removed" >&2
 		exit "$errstatus"
 	fi
+	failure=''
 }
 
 filter_in_use() {
@@ -1670,6 +1683,7 @@ if [ -n "${TMPCLEANER_MAX_SCAN_AGE:-}" ]; then
 			printf "%.2f\n", scan_age / 100
 			if (scan_age > ENVIRON["LIMIT"] * 100) exit 1
 		}' /proc/uptime 2>/dev/null) || {
+		failure=stale-snapshot
 		echo "${err_tag}tmpcleaner: in-use snapshot is ${scan_age:-?}s old (limit ${TMPCLEANER_MAX_SCAN_AGE}s); nothing was removed" >&2
 		exit "$errstatus"
 	}
@@ -1679,6 +1693,7 @@ if [ "${TMPCLEANER_LIST:-}" = nul ]; then
 else
 	systemd-tmpfiles --clean "$@" - < "$scratch/rules" || status=$?
 fi
+[ "$status" -eq 0 ] || failure=backend
 
 snapshot "$scratch/after"
 LC_ALL=C comm -z -23 "$scratch/before" "$scratch/after" |

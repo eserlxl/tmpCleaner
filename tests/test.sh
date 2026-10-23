@@ -3048,7 +3048,7 @@ done
 rm -rf "$scan_root"
 # JSON completion records are exact single-line objects, with no prose summary.
 summary_ok() {
-	expected=$(printf '{"tmpcleaner":"run","exit_status":%d,"removed_files":%d,"removed_directories":%d,"removed_bytes":%d,"counts_available":%s}' "$@")
+	expected=$(printf '{"tmpcleaner":"run","exit_status":%d,"failure":%s,"removed_files":%d,"removed_directories":%d,"removed_bytes":%d,"counts_available":%s}' "$@")
 	LC_ALL=C awk -v expected="$expected" '
 		/^[{]/ { records++; if ($0 != expected) bad = 1 }
 		/^tmpcleaner: [0-9]+ files and [0-9]+ directories disappeared during the run$/ { bad = 1 }
@@ -3064,33 +3064,44 @@ old "$summary_root/gone/old" "$summary_root/gone"
 status=0
 TMPCLEANER_SUMMARY=json TMPCLEANER_CONF=$cfg/summary.conf sh "$here/tmpcleaner" \
 	> "$cfg/summary.out" 2> "$cfg/summary.err" || status=$?
-if [ "$status" -ne 0 ] || [ -s "$cfg/summary.out" ] || [ -e "$summary_root/gone" ] || ! summary_ok 0 1 1 "$summary_bytes" true; then
+if [ "$status" -ne 0 ] || [ -s "$cfg/summary.out" ] || [ -e "$summary_root/gone" ] || ! summary_ok 0 null 1 1 "$summary_bytes" true; then
 	echo 'FAIL: JSON summary must report successful disappearance counts exactly once on stderr'
 	fail=1
 fi
 status=0
 TMPCLEANER_SUMMARY=json TMPCLEANER_CONF=$cfg/summary.conf sh "$here/tmpcleaner" \
 	> "$cfg/summary.out" 2> "$cfg/summary.err" || status=$?
-if [ "$status" -ne 0 ] || [ -s "$cfg/summary.out" ] || ! summary_ok 0 0 0 0 true; then
+if [ "$status" -ne 0 ] || [ -s "$cfg/summary.out" ] || ! summary_ok 0 null 0 0 0 true; then
 	echo 'FAIL: JSON summary must distinguish a successful empty run from unavailable counts'
 	fail=1
 fi
-touch "$summary_root/old"
-old "$summary_root/old"
-for summary_failure in CLEAN_SHIM_STATUS=42 CLEAN_SHIM_POST_STATUS=42 TMPCLEANER_AGE=bogus; do
+for summary_failure in CLEAN_SHIM_STATUS=42 CLEAN_SHIM_POST_STATUS=42 TMPCLEANER_AGE=bogus stale-snapshot strict-walk strict-markers scan-failure; do
+	touch "$summary_root/old"
+	old "$summary_root/old"
 	rm -f "$cfg/summary.called"
+	set -- "$summary_failure"
+	expected_status=1 expected_failure='"protection"'
+	case "$summary_failure" in
+		CLEAN_SHIM_*) expected_status=42 expected_failure='"backend"' ;;
+		TMPCLEANER_AGE=bogus) expected_failure='"config"' ;;
+		stale-snapshot)
+			set -- FIND_SHIM_SNAPSHOT_DELAY=2 TMPCLEANER_MAX_SCAN_AGE=1
+			expected_failure='"stale-snapshot"'
+			;;
+		strict-walk) set -- FIND_SHIM_FAIL=walk-partial TMPCLEANER_REQUIRE_COMPLETE_SCAN=1 ;;
+		strict-markers) set -- FIND_SHIM_FAIL=markers-unreadable FIND_SHIM_ROOT="$summary_root" TMPCLEANER_REQUIRE_COMPLETE_SCAN=1 ;;
+		scan-failure) set -- STAT_SHIM_FAIL=tmp ;;
+	esac
 	status=0
-	shim env "$summary_failure" CLEAN_SHIM_MARKER=$cfg/summary.called TMPCLEANER_SUMMARY=json \
+	shim env "$@" CLEAN_SHIM_MARKER=$cfg/summary.called TMPCLEANER_SUMMARY=json \
 		TMPCLEANER_CONF=$cfg/summary.conf sh "$here/tmpcleaner" \
 		> "$cfg/summary.out" 2> "$cfg/summary.err" || status=$?
-	expected_status=42
-	[ "$summary_failure" != TMPCLEANER_AGE=bogus ] || expected_status=1
-	if [ "$status" -ne "$expected_status" ] || [ -s "$cfg/summary.out" ] || ! summary_ok "$expected_status" 0 0 0 false; then
-		echo "FAIL: JSON failure summary must retain exit status with unavailable counts ($summary_failure)"
+	if [ "$status" -ne "$expected_status" ] || [ -s "$cfg/summary.out" ] || ! summary_ok "$expected_status" "$expected_failure" 0 0 0 false; then
+		echo "FAIL: JSON failure summary must report its category and retain exit status with unavailable counts ($summary_failure)"
 		fail=1
 	fi
-	if [ "$summary_failure" = TMPCLEANER_AGE=bogus ] && [ -e "$cfg/summary.called" ]; then
-		echo 'FAIL: invalid age with JSON summary must stop before cleanup'
+	if [ "$expected_failure" != '"backend"' ] && { [ ! -e "$summary_root/old" ] || [ -e "$cfg/summary.called" ]; }; then
+		echo "FAIL: JSON failure summary must keep old files and stop before cleanup ($summary_failure)"
 		fail=1
 	fi
 done

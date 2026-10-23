@@ -48,11 +48,23 @@ Set `TMPCLEANER_SUMMARY=json` to replace the prose disappearance line with
 exactly one JSON completion record on stderr for each real run:
 
 ```json
-{"tmpcleaner":"run","exit_status":0,"removed_files":3,"removed_directories":2,"removed_bytes":4096,"counts_available":true}
+{"tmpcleaner":"run","exit_status":0,"failure":null,"removed_files":3,"removed_directories":2,"removed_bytes":4096,"counts_available":true}
 ```
 
 The schema is fixed: `tmpcleaner` is always `"run"`, `exit_status` is the
-integer process exit status, `removed_files` and `removed_directories` are
+integer process exit status, and `failure` is `null` on success or one of these
+fixed strings on a non-zero exit:
+
+| `failure` | Meaning |
+| --- | --- |
+| `config` | Failure before option and `TMPCLEANER_*` validation completes. |
+| `protection` | Rule generation failed, including an in-use scan failure or an incomplete strict protection walk. |
+| `stale-snapshot` | `TMPCLEANER_MAX_SCAN_AGE` refused cleanup because the snapshot was too old or its age could not be determined. |
+| `backend` | `systemd-tmpfiles --clean` returned non-zero. |
+| `signal` | The run received `SIGHUP`, `SIGINT` or `SIGTERM`. |
+| `error` | Any other non-zero exit. |
+
+`removed_files` and `removed_directories` are
 non-negative integer disappearance counts. `removed_bytes` is the non-negative
 integer sum of apparent byte sizes (`find` `%s`) of non-directory entries
 observed to disappear, as for `tmpcleaner_removed_bytes`. `counts_available` is
