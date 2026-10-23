@@ -4,7 +4,7 @@
 # cannot be backdated, so the test drops b/B/c/C from the age-by field and
 # keeps the rest as configured.
 set -eu
-unset TMPCLEANER_AGE TMPCLEANER_MARKER_AGE TMPCLEANER_PROTECT_TMPDIR TMPCLEANER_FULL_PERCENT TMPCLEANER_FULL_AGE TMPCLEANER_LIST TMPCLEANER_METRICS JOURNAL_STREAM
+unset TMPCLEANER_AGE TMPCLEANER_MARKER_AGE TMPCLEANER_PROTECT_TMPDIR TMPCLEANER_FULL_PERCENT TMPCLEANER_FULL_AGE TMPCLEANER_LIST TMPCLEANER_SUMMARY TMPCLEANER_METRICS JOURNAL_STREAM
 here=$(cd "$(dirname "$0")/.." && pwd)
 dir=$(mktemp -d /tmp/tmpcleaner-test.XXXXXX)
 # Fixture configs live in a private directory, never at a guessable /tmp path.
@@ -2567,6 +2567,99 @@ if ! TMPCLEANER_CONF="$cfg/scan2.conf" sh "$here/tmpcleaner" >/dev/null 2>&1 || 
 	fail=1
 fi
 rm -rf "$fresh2" "$cfg/scan2.conf"
+# JSON completion records are exact single-line objects, with no prose summary.
+summary_ok() {
+	expected=$(printf '{"tmpcleaner":"run","exit_status":%d,"removed_files":%d,"removed_directories":%d,"counts_available":%s}' "$@")
+	LC_ALL=C awk -v expected="$expected" '
+		/^[{]/ { records++; if ($0 != expected) bad = 1 }
+		/^tmpcleaner: [0-9]+ files and [0-9]+ directories disappeared during the run$/ { bad = 1 }
+		END { exit (records != 1 || bad) }
+	' "$cfg/summary.err"
+}
+summary_root=$(mktemp -d "$dir/summary.XXXXXX")
+printf 'd %s - - - amM:12h\n' "$summary_root" > "$cfg/summary.conf"
+mkdir "$summary_root/gone"
+touch "$summary_root/gone/old"
+old "$summary_root/gone/old" "$summary_root/gone"
+status=0
+TMPCLEANER_SUMMARY=json TMPCLEANER_CONF=$cfg/summary.conf sh "$here/tmpcleaner" \
+	> "$cfg/summary.out" 2> "$cfg/summary.err" || status=$?
+if [ "$status" -ne 0 ] || [ -s "$cfg/summary.out" ] || [ -e "$summary_root/gone" ] || ! summary_ok 0 1 1 true; then
+	echo 'FAIL: JSON summary must report successful disappearance counts exactly once on stderr'
+	fail=1
+fi
+status=0
+TMPCLEANER_SUMMARY=json TMPCLEANER_CONF=$cfg/summary.conf sh "$here/tmpcleaner" \
+	> "$cfg/summary.out" 2> "$cfg/summary.err" || status=$?
+if [ "$status" -ne 0 ] || [ -s "$cfg/summary.out" ] || ! summary_ok 0 0 0 true; then
+	echo 'FAIL: JSON summary must distinguish a successful empty run from unavailable counts'
+	fail=1
+fi
+touch "$summary_root/old"
+old "$summary_root/old"
+for summary_failure in CLEAN_SHIM_STATUS=42 CLEAN_SHIM_POST_STATUS=42 TMPCLEANER_AGE=bogus; do
+	rm -f "$cfg/summary.called"
+	status=0
+	shim env "$summary_failure" CLEAN_SHIM_MARKER=$cfg/summary.called TMPCLEANER_SUMMARY=json \
+		TMPCLEANER_CONF=$cfg/summary.conf sh "$here/tmpcleaner" \
+		> "$cfg/summary.out" 2> "$cfg/summary.err" || status=$?
+	expected_status=42
+	[ "$summary_failure" != TMPCLEANER_AGE=bogus ] || expected_status=1
+	if [ "$status" -ne "$expected_status" ] || [ -s "$cfg/summary.out" ] || ! summary_ok "$expected_status" 0 0 false; then
+		echo "FAIL: JSON failure summary must retain exit status with unavailable counts ($summary_failure)"
+		fail=1
+	fi
+	if [ "$summary_failure" = TMPCLEANER_AGE=bogus ] && [ -e "$cfg/summary.called" ]; then
+		echo 'FAIL: invalid age with JSON summary must stop before cleanup'
+		fail=1
+	fi
+done
+touch "$summary_root/old"
+old "$summary_root/old"
+for mode in --dry-run --check --check0 --print-rules --print-in-use0 --print-holders0 --suggest-exclusions; do
+	set -- "$mode"
+	[ "$mode" != --check ] || set -- "$mode" "$summary_root/old"
+	for summary_failure in CLEAN_SHIM_STATUS=0 TMPCLEANER_AGE=bogus; do
+		status=0
+		printf '%s\0' "$summary_root/old" | shim env "$summary_failure" TMPCLEANER_SUMMARY=json \
+			TMPCLEANER_CONF=$cfg/summary.conf sh "$here/tmpcleaner" "$@" \
+			> "$cfg/summary.out" 2> "$cfg/summary.err" || status=$?
+		if grep -q '^{"tmpcleaner":' "$cfg/summary.err" || [ ! -e "$summary_root/old" ]; then
+			echo "FAIL: previews must not emit a JSON completion record or clean ($mode $summary_failure, status $status)"
+			fail=1
+		fi
+	done
+done
+for mode in real --check; do
+	set --
+	[ "$mode" != --check ] || set -- --check "$summary_root/old"
+	rm -f "$cfg/summary.called"
+	status=0
+	TMPCLEANER_SUMMARY=bogus CLEAN_SHIM_MARKER=$cfg/summary.called TMPCLEANER_CONF=$cfg/summary.conf \
+		sh "$here/tmpcleaner" "$@" > "$cfg/summary.out" 2> "$cfg/summary.err" || status=$?
+	expected_status=1
+	[ "$mode" != --check ] || expected_status=2
+	if [ "$status" -ne "$expected_status" ] || [ -e "$cfg/summary.called" ] || [ ! -e "$summary_root/old" ] ||
+		! grep -q 'invalid TMPCLEANER_SUMMARY' "$cfg/summary.err"; then
+		echo 'FAIL: invalid JSON summary setting must stop before cleaning with the usual error status'
+		fail=1
+	fi
+done
+rm -f "$summary_root/old"
+for summary_setting in unset empty; do
+	status=0
+	if [ "$summary_setting" = unset ]; then
+		TMPCLEANER_CONF=$cfg/summary.conf sh "$here/tmpcleaner" > "$cfg/summary.out" 2> "$cfg/summary.err" || status=$?
+	else
+		TMPCLEANER_SUMMARY='' TMPCLEANER_CONF=$cfg/summary.conf sh "$here/tmpcleaner" > "$cfg/summary.out" 2> "$cfg/summary.err" || status=$?
+	fi
+	if [ "$status" -ne 0 ] || [ -s "$cfg/summary.out" ] ||
+		[ "$(cat "$cfg/summary.err")" != 'tmpcleaner: 0 files and 0 directories disappeared during the run' ]; then
+		echo 'FAIL: unset or empty JSON summary setting must preserve default output and exit status'
+		fail=1
+	fi
+done
+rm -rf "$summary_root"
 for bad_metrics in relative.prom ./metrics.prom "$cfg/metrics.txt" /.prom "/tmp/bad${nl}.prom"; do
 	status=0
 	TMPCLEANER_METRICS="$bad_metrics" TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --print-rules >/dev/null 2>&1 || status=$?

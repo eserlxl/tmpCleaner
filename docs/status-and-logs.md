@@ -8,7 +8,8 @@ journalctl -u tmpcleaner.service
 journalctl -p warning -u tmpcleaner.service
 ```
 
-Each real run logs one summary, including runs that remove nothing:
+By default, each real run that reaches counting logs a prose summary,
+including runs that remove nothing:
 
 ```text
 tmpcleaner: 3 files and 2 directories disappeared during the run
@@ -29,6 +30,41 @@ roots stop the run before cleaning. When `JOURNAL_STREAM` matches stderr,
 `journalctl -p warning -u tmpcleaner.service` shows only warnings and errors;
 `systemd-tmpfiles` itself logs to the journal as usual, so warnings keep their
 severity.
+
+Set `TMPCLEANER_SUMMARY=json` to replace the prose disappearance line with
+exactly one JSON completion record on stderr for each real run:
+
+```json
+{"tmpcleaner":"run","exit_status":0,"removed_files":3,"removed_directories":2,"counts_available":true}
+```
+
+The schema is fixed: `tmpcleaner` is always `"run"`, `exit_status` is the
+integer process exit status, `removed_files` and `removed_directories` are
+non-negative integer disappearance counts, and `counts_available` is a JSON
+boolean. Successful runs with counts available use `true`, including zero
+removals. Failures before or during cleanup use `false` and zero counts,
+even if the backend removed some paths before failing. A successful run that
+cannot obtain counts also uses `false` and zeros. Exit statuses are unchanged.
+
+The exit handler writes the record as one line, without a journal severity
+prefix. Warnings, errors and backend logs may still appear on stderr; collectors
+can select the JSON record by its `tmpcleaner` field. `SIGHUP`, `SIGINT` and
+`SIGTERM` produce exit statuses `129`, `130` and `143`; `SIGKILL` cannot emit a
+completion record. Preview modes (`--dry-run`, `--check`, `--check0`,
+`--print-rules`, `--print-in-use0`, `--print-holders0`, `--suggest-exclusions`)
+emit no JSON completion record, including when they fail.
+
+Unset or empty preserves the default prose output. Any value other than
+`json` or empty stops the run before cleaning. Enable journal collection with
+`sudo systemctl edit tmpcleaner.service`:
+
+```ini
+[Service]
+Environment=TMPCLEANER_SUMMARY=json
+```
+
+This requires no collector directory or additional `ReadWritePaths` access.
+It can be combined with removal listings and Prometheus metrics.
 
 `TMPCLEANER_LIST=1` adds escaped path records on stderr. `TMPCLEANER_LIST=nul`
 instead exports each path observed to disappear once as raw bytes plus NUL on

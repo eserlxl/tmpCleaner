@@ -9,6 +9,37 @@
 # every NUL-terminated path in FILE.
 set -eu
 
+previewing=0
+case "${1:-}" in
+	-h|--help|--print-rules|--print-in-use0|--print-holders0|--suggest-exclusions|--check|--check0) previewing=1 ;;
+	*)
+		for arg do
+			[ "$arg" != --dry-run ] || previewing=1
+		done
+		;;
+esac
+scratch='' metrics_ready='' summary_files=0 summary_directories=0 counts_available=false
+finish() {
+	exit_status=$?
+	trap - EXIT
+	if [ "$previewing" = 0 ] && [ "${TMPCLEANER_SUMMARY:-}" = json ]; then
+		if [ "$exit_status" -ne 0 ]; then
+			summary_files=0 summary_directories=0 counts_available=false
+		fi
+		printf '{"tmpcleaner":"run","exit_status":%d,"removed_files":%d,"removed_directories":%d,"counts_available":%s}\n' \
+			"$exit_status" "$summary_files" "$summary_directories" "$counts_available" >&2 || :
+	fi
+	if [ -n "$metrics_ready" ] && [ "$previewing" = 0 ] && [ -n "${TMPCLEANER_METRICS:-}" ]; then
+		write_metrics || :
+	fi
+	[ -z "$scratch" ] || rm -rf "$scratch" || :
+	exit "$exit_status"
+}
+trap finish EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
 with_sources=
 for arg do
 	[ "$arg" != --with-sources ] || with_sources=1
@@ -86,6 +117,8 @@ Environment variables:
                             and backslashes escaped, top for the top-10
                             per-entry breakdown, or nul for raw NUL-separated
                             paths on stdout (real runs only; default: off)
+  TMPCLEANER_SUMMARY        Set to json for one JSON completion record on stderr
+                            (real runs only; default: prose)
   TMPCLEANER_METRICS        Absolute path of a *.prom file for the
                             node_exporter textfile collector (real runs only)
 EOF
@@ -214,6 +247,10 @@ elif [ "${1:-}" = --check0 ]; then
 	done
 fi
 
+case "${TMPCLEANER_SUMMARY:-}" in
+	''|json) ;;
+	*) echo "${err_tag}tmpcleaner: invalid TMPCLEANER_SUMMARY (expected json or empty)" >&2; exit "$errstatus" ;;
+esac
 case "${TMPCLEANER_METRICS:-}" in
 	'') ;;
 	/?*.prom)
@@ -227,16 +264,6 @@ case "${TMPCLEANER_PROTECT_TMPDIR:-}" in
 	''|1) ;;
 	*) echo "${err_tag}tmpcleaner: invalid TMPCLEANER_PROTECT_TMPDIR (expected 1 or empty)" >&2; exit "$errstatus" ;;
 esac
-previewing=0
-case "${1:-}" in
-	--print-rules|--print-in-use0|--print-holders0|--suggest-exclusions|--check|--check0) previewing=1 ;;
-	*)
-		for arg do
-			[ "$arg" = --dry-run ] && previewing=1
-		done
-		;;
-esac
-[ -z "$check$check0" ] || previewing=1
 write_metrics() {
 	mtmp=
 	metric_duration=$(START=$metric_started LC_ALL=C awk '
@@ -301,20 +328,8 @@ EOF
 		echo "${warn_tag}tmpcleaner: cannot write metrics to $TMPCLEANER_METRICS" >&2
 	fi
 }
-scratch='' metric_files=0 metric_directories=0 metric_bytes=0 metric_protected=0 metric_marked=0 metric_pressure_active=0
-finish() {
-	exit_status=$?
-	trap - EXIT
-	if [ "$previewing" = 0 ] && [ -n "${TMPCLEANER_METRICS:-}" ]; then
-		write_metrics || :
-	fi
-	[ -z "$scratch" ] || rm -rf "$scratch" || :
-	exit "$exit_status"
-}
-trap finish EXIT
-trap 'exit 129' HUP
-trap 'exit 130' INT
-trap 'exit 143' TERM
+metric_files=0 metric_directories=0 metric_bytes=0 metric_protected=0 metric_marked=0 metric_pressure_active=0
+metrics_ready=1
 metric_started=
 if [ "$previewing" = 0 ] && [ -n "${TMPCLEANER_METRICS:-}" ]; then
 	read -r metric_started _ 2>/dev/null < /proc/uptime || metric_started=
@@ -1514,7 +1529,7 @@ fi
 
 snapshot "$scratch/after"
 LC_ALL=C comm -z -23 "$scratch/before" "$scratch/after" |
-	COUNTS=$scratch/counts SIZES=$sizes_file LC_ALL=C awk -v list="${TMPCLEANER_LIST:-}" "$breakdown_awk"'
+	COUNTS=$scratch/counts SIZES=$sizes_file SUMMARY=${TMPCLEANER_SUMMARY:-} LC_ALL=C awk -v list="${TMPCLEANER_LIST:-}" "$breakdown_awk"'
 	BEGIN {
 		RS = "\0"
 		bytes = 0
@@ -1550,7 +1565,8 @@ LC_ALL=C comm -z -23 "$scratch/before" "$scratch/after" |
 		if (list == "nul") printf "%s%c", path, 0
 	}
 	END {
-		printf "tmpcleaner: %d files and %d directories disappeared during the run\n", files, directories > "/dev/stderr"
+		if (ENVIRON["SUMMARY"] != "json")
+			printf "tmpcleaner: %d files and %d directories disappeared during the run\n", files, directories > "/dev/stderr"
 		if (list == "top") print_top()
 		# -v would decode backslashes in the scratch path; ENVIRON keeps it raw.
 		printf "%d %d %.0f\n", files, directories, bytes > ENVIRON["COUNTS"]
@@ -1558,5 +1574,8 @@ LC_ALL=C comm -z -23 "$scratch/before" "$scratch/after" |
 	'
 if read -r files directories bytes < "$scratch/counts" 2>/dev/null; then
 	metric_files=$files metric_directories=$directories metric_bytes=$bytes
+	if [ "$status" -eq 0 ]; then
+		summary_files=$files summary_directories=$directories counts_available=true
+	fi
 fi
 exit "$status"

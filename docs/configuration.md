@@ -62,6 +62,7 @@ Service environment settings below go in a unit drop-in via `sudo systemctl edit
 - `TMPCLEANER_FULL_PERCENT`: Threshold percentage of `/tmp` usage (1-100); the larger of block and inode usage counts (`-` is 0), and a `df` error aborts the run.
 - `TMPCLEANER_FULL_AGE`: Age duration to use when `/tmp` usage meets or exceeds `TMPCLEANER_FULL_PERCENT`.
 - `TMPCLEANER_LIST`: Set to `1` for escaped removal logs, `top` for the top-10 per-entry breakdown, or `nul` for raw NUL-separated paths on stdout (real runs only; default: off).
+- `TMPCLEANER_SUMMARY`: Set to `json` for one JSON completion record on stderr per real run (unset or empty: usual prose; any other value stops before cleaning).
 - `TMPCLEANER_METRICS`: Absolute path of a `*.prom` file for the `node_exporter` textfile collector (real runs only).
 
 A configuration file other than the installed one can be previewed with
@@ -183,7 +184,8 @@ cleanup, in addition to the summary. Files are logged as
 `tmpcleaner: removed directory: PATH`. Control bytes and backslashes in each
 path use `\xHH` escapes so a filename cannot start a new journal line.
 Set `TMPCLEANER_LIST=top` to log up to ten `tmpcleaner:   N under PATH`
-lines on stderr right after the summary, grouped by top-level `/tmp` entry
+lines on stderr right after the prose summary (before the completion record
+with `TMPCLEANER_SUMMARY=json`), grouped by top-level `/tmp` entry
 in descending count order (ties broken by path byte order) with control bytes
 shown as `?`, matching the `--dry-run` breakdown.
 Listings and counts cover every supported age-cleanup rule type, including
@@ -204,3 +206,31 @@ For the service, run `sudo systemctl edit tmpcleaner.service` and add:
 [Service]
 Environment=TMPCLEANER_LIST=1
 ```
+
+## Emit JSON completion records
+
+Set `TMPCLEANER_SUMMARY=json` to replace the prose disappearance summary with
+one fixed-schema JSON line on stderr per real run, including failed runs:
+
+```json
+{"tmpcleaner":"run","exit_status":0,"removed_files":3,"removed_directories":2,"counts_available":true}
+```
+
+`tmpcleaner` is always `"run"`; `exit_status`, `removed_files`, and
+`removed_directories` are integers, and `counts_available` is a boolean.
+Failed runs use zero counts and `counts_available:false`, including failures
+before cleanup and backend failures after partial deletion. Successful runs
+with unavailable counts also use zeros and `false`; measured zero removals
+use `true`. Exit statuses stay unchanged. All preview modes emit no completion
+record. Unset or empty preserves prose output; other values stop before cleaning.
+
+For journal collectors, add this service drop-in with
+`sudo systemctl edit tmpcleaner.service`:
+
+```ini
+[Service]
+Environment=TMPCLEANER_SUMMARY=json
+```
+
+No collector-directory write access is needed. See
+[status and logs](status-and-logs.md) for counting semantics and signal handling.
