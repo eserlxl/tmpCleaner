@@ -293,11 +293,12 @@ Set `TMPCLEANER_SUMMARY=json` to replace the prose disappearance summary with
 one fixed-schema JSON line on stderr per real run, including failed runs:
 
 ```json
-{"tmpcleaner":"run","exit_status":0,"removed_files":3,"removed_directories":2,"counts_available":true}
+{"tmpcleaner":"run","exit_status":0,"removed_files":3,"removed_directories":2,"removed_bytes":4096,"counts_available":true}
 ```
 
-`tmpcleaner` is always `"run"`; `exit_status`, `removed_files`, and
-`removed_directories` are integers, and `counts_available` is a boolean.
+`tmpcleaner` is always `"run"`; `exit_status`, `removed_files`,
+`removed_directories` and `removed_bytes` are integers, and
+`counts_available` is a boolean.
 Failed runs use zero counts and `counts_available:false`, including failures
 before cleanup and backend failures after partial deletion. Successful runs
 with unavailable counts also use zeros and `false`; measured zero removals
