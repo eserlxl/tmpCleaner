@@ -51,6 +51,8 @@ change it; see [configuration.md](configuration.md).
 
 ## Never deleted
 
+Each row holds except for the cases listed under [Limits](#limits) below.
+
 | Category | Examples | Why it is kept |
 |----------|----------|----------------|
 | Files in use | Executables of running processes, files a running process holds open, memory-mapped files such as loaded libraries | Each one gets its own exclusion, read from `/proc` just before the run |
