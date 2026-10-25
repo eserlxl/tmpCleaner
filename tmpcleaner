@@ -877,7 +877,7 @@ in_use() {
 			if (failed) exit 1
 			if (!nwanted) exit
 			holders_file = ENVIRON["HOLDERS"]
-			cmd = "find /tmp -xdev -printf \"%i %p\\0\" 2>/dev/null"
+			cmd = "find /tmp -ignore_readdir_race -xdev -printf \"%i %p\\0\" 2>/dev/null"
 			while ((cmd | getline line) > 0) {
 				n = index(line, " ")
 				inode = substr(line, 1, n - 1)
@@ -980,7 +980,7 @@ rules() {
 	if [ "${TMPCLEANER_MARKER_AGE+x}" ]; then
 		set -- -mmin "-$marker_age_minutes"
 	fi
-	find /tmp -xdev -mindepth 2 -maxdepth 3 -name .tmpcleaner-keep -type f "$@" -printf '%h\0' \
+	find /tmp -ignore_readdir_race -xdev -mindepth 2 -maxdepth 3 -name .tmpcleaner-keep -type f "$@" -printf '%h\0' \
 		> "$scratch/markers" 2>/dev/null || {
 		[ "$?" -eq 1 ] || return 1
 		metric_partial_protection_walk=1
@@ -1199,7 +1199,7 @@ check_entries() {
 		fi
 		descendants=$scratch/check-descendants
 		[ -z "$check0" ] || descendants=/dev/null
-		entries=$(find "$check" -mindepth 1 -fprint0 "$descendants" -printf . 2>/dev/null) || {
+		entries=$(find "$check" -ignore_readdir_race -mindepth 1 -fprint0 "$descendants" -printf . 2>/dev/null) || {
 			echo "${err_tag}tmpcleaner: --check cannot read $shown" >&2
 			exit 2
 		}
@@ -1607,12 +1607,12 @@ snapshot() {
 		root=$(realpath -ms -- "$root" 2>/dev/null) || continue
 		if [ -n "${2:-}" ]; then
 			: > "$scratch/root-sizes"
-			find "$root" -xdev -samefile "$scratch" -prune -o -printf '%y %p\0' -fprintf "$scratch/root-sizes" '%s %y %p\0' 2>/dev/null || {
+			find "$root" -ignore_readdir_race -xdev -samefile "$scratch" -prune -o -printf '%y %p\0' -fprintf "$scratch/root-sizes" '%s %y %p\0' 2>/dev/null || {
 				[ ! -e "$root" ] || : > "$scratch/walk-failed"
 			}
 			cat "$scratch/root-sizes" >> "$2"
 		else
-			find "$root" -xdev -samefile "$scratch" -prune -o -printf '%y %p\0' 2>/dev/null || {
+			find "$root" -ignore_readdir_race -xdev -samefile "$scratch" -prune -o -printf '%y %p\0' 2>/dev/null || {
 				[ ! -e "$root" ] || : > "$scratch/walk-failed"
 			}
 		fi

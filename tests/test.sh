@@ -60,9 +60,9 @@ SHIM
 cat > "$shimdir/find" <<SHIM
 #!/bin/sh
 case "\${FIND_SHIM_FAIL:-}:\$*" in
-	walk:"/tmp -xdev -printf"*) exit 1 ;;
-	walk-partial:"/tmp -xdev -printf"*) "$(command -v find)" /tmp -maxdepth 0 -printf '%i %p\0'; exit 1 ;;
-	walk-killed:"/tmp -xdev -printf"*) "$(command -v find)" /tmp -maxdepth 0 -printf '%i %p\0'; kill -KILL \$\$ ;;
+	walk:"/tmp -ignore_readdir_race -xdev -printf"*|walk:"/tmp -xdev -printf"*) exit 1 ;;
+	walk-partial:"/tmp -ignore_readdir_race -xdev -printf"*|walk-partial:"/tmp -xdev -printf"*) "$(command -v find)" /tmp -maxdepth 0 -printf '%i %p\0'; exit 1 ;;
+	walk-killed:"/tmp -ignore_readdir_race -xdev -printf"*|walk-killed:"/tmp -xdev -printf"*) "$(command -v find)" /tmp -maxdepth 0 -printf '%i %p\0'; kill -KILL \$\$ ;;
 	snapshot-before-partial:*"-fprintf"*) "$(command -v find)" "\$1" -maxdepth 0 -printf '%y %p\0'; exit 1 ;;
 	snapshot-after-partial:*"-samefile"*)
 		case "\$*" in
@@ -89,10 +89,10 @@ esac
 # Complete-walk controls must not inherit unreadable host /tmp subtrees.
 if [ -n "\${FIND_SHIM_ROOT:-}" ]; then
 	case "\$*" in
-		"/tmp -xdev -printf"*)
+		"/tmp -ignore_readdir_race -xdev -printf"*|"/tmp -xdev -printf"*)
 			"$(command -v find)" /tmp -maxdepth 0 -printf '%i %p\0' || exit \$?
 			shift; set -- "\$FIND_SHIM_ROOT" "\$@" ;;
-		"/tmp -xdev -mindepth 2 -maxdepth 3 -name .tmpcleaner-keep"*)
+		"/tmp -ignore_readdir_race -xdev -mindepth 2 -maxdepth 3 -name .tmpcleaner-keep"*|"/tmp -xdev -mindepth 2 -maxdepth 3 -name .tmpcleaner-keep"*)
 			shift; set -- "\$FIND_SHIM_ROOT" "\$@" ;;
 	esac
 fi
@@ -102,6 +102,14 @@ esac
 case "\$*" in
 	*"-samefile"*) [ -z "\${FIND_SHIM_SNAPSHOT_DELAY:-}" ] || sleep "\$FIND_SHIM_SNAPSHOT_DELAY" ;;
 esac
+if [ -n "\${FIND_SHIM_RACE:-}" ]; then
+	"$(command -v find)" "\$@" || exit \$?
+	for arg do
+		[ "\$arg" != -ignore_readdir_race ] || exit 0
+	done
+	echo "find: '\$1/vanished': No such file or directory" >&2
+	exit 1
+fi
 exec "$(command -v find)" "\$@"
 SHIM
 cat > "$shimdir/mktemp" <<SHIM
@@ -3188,6 +3196,41 @@ shim env FIND_SHIM_FAIL=snapshot-before-partial CLEAN_SHIM_STATUS=0 TMPCLEANER_S
 	> "$cfg/summary.out" 2> "$cfg/summary.err" || status=$?
 if [ "$status" -ne 0 ] || ! summary_ok 0 null 0 0 0 true; then
 	echo 'FAIL: a partial before-walk must not invalidate counts from a complete after-walk'
+	fail=1
+fi
+# Deletion races during find walks must not count as incomplete walks or unreadable directories.
+mkdir "$summary_root/racedir"
+printf 'race bytes\n' > "$summary_root/racedir/old"
+race_bytes=$(wc -c < "$summary_root/racedir/old")
+old "$summary_root/racedir/old" "$summary_root/racedir"
+status=0
+check_out=$(shim env FIND_SHIM_RACE=1 FIND_SHIM_ROOT="$dir" TMPCLEANER_REQUIRE_COMPLETE_SCAN=1 \
+	TMPCLEANER_CONF=$cfg/summary.conf sh "$here/tmpcleaner" --check "$summary_root/racedir" \
+	2> "$cfg/summary.err") || status=$?
+if [ "$status" -ne 0 ] || [ "$check_out" != "would be removed: $summary_root/racedir" ] || [ -s "$cfg/summary.err" ]; then
+	echo 'FAIL: --check of an existing directory must ignore find deletion races'
+	fail=1
+fi
+status=0
+check_out=$(shim env FIND_SHIM_RACE=1 FIND_SHIM_ROOT="$dir" TMPCLEANER_REQUIRE_COMPLETE_SCAN=1 \
+	TMPCLEANER_CONF=$cfg/summary.conf sh "$here/tmpcleaner" --check "$summary_root/kept" \
+	2> "$cfg/summary.err") || status=$?
+if [ "$status" -ne 1 ] || [ "$check_out" != "kept: $summary_root/kept" ]; then
+	echo 'FAIL: --check of a kept directory must ignore find deletion races without exiting 2'
+	fail=1
+fi
+status=0
+shim env FIND_SHIM_RACE=1 FIND_SHIM_ROOT="$dir" TMPCLEANER_REQUIRE_COMPLETE_SCAN=1 \
+	TMPCLEANER_METRICS=$cfg/summary.prom TMPCLEANER_SUMMARY=json \
+	TMPCLEANER_CONF=$cfg/summary.conf sh "$here/tmpcleaner" \
+	> "$cfg/summary.out" 2> "$cfg/summary.err" || status=$?
+if [ "$status" -ne 0 ] || [ -s "$cfg/summary.out" ] || [ -e "$summary_root/racedir" ] ||
+	! grep -Fxq 'tmpcleaner_partial_protection_walk 0' "$cfg/summary.prom" ||
+	! grep -Fxq 'tmpcleaner_removed_files 1' "$cfg/summary.prom" ||
+	! grep -Fxq 'tmpcleaner_removed_directories 1' "$cfg/summary.prom" ||
+	! grep -Fxq "tmpcleaner_removed_bytes $race_bytes" "$cfg/summary.prom" ||
+	! summary_ok 0 null 1 1 "$race_bytes" true; then
+	echo 'FAIL: find deletion races must not fail strict cleanup, mark the protection walk partial, or invalidate counts'
 	fail=1
 fi
 rm -rf "$summary_root/kept" "$cfg/summary.prom"

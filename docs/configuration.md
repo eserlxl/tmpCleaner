@@ -171,11 +171,12 @@ Environment=TMPCLEANER_PROTECT_TMPDIR=1
 ## Require complete protection walks
 
 Set `TMPCLEANER_REQUIRE_COMPLETE_SCAN=1` to reject find status 1 from either
-the `/tmp` inode walk or the `.tmpcleaner-keep` marker walk. An unreadable or
-vanished subtree can otherwise hide an in-use path or marker. The run stops
+the `/tmp` inode walk or the `.tmpcleaner-keep` marker walk. An unreadable
+subtree can otherwise hide an in-use path or marker. The run stops
 before cleaning with `cannot apply path protections; nothing was removed`
 and exits 1 (2 with `--check` or `--check0`). This also applies to previews.
-Tolerance of vanished `/proc` entries is unchanged.
+Entries deleted while the walk runs are not counted as an incomplete walk, and
+tolerance of vanished `/proc` entries is unchanged.
 
 Unset or empty preserves the default tolerance of partial walks. Any other
 value stops before cleaning. For the service, add a drop-in with
