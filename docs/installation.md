@@ -5,7 +5,7 @@ Requirements, AUR and source installs, Makefile variables, and uninstalling.
 ## Requirements
 
 Linux with systemd (`systemd-tmpfiles`: systemd >= 249 for the service, >= 256 for the previews: `--dry-run`, `--check`, `--check0` and `--suggest-exclusions`).
-GNU coreutils >= 8.32, GNU findutils, gawk, grep, and sed.
+GNU coreutils >= 8.32, GNU findutils, gawk, grep, and sed. diffutils is optional for a source install: only the merge notice's diff output needs it.
 
 ## Install
 

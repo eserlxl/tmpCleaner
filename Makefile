@@ -63,14 +63,14 @@ install-conf:
 	@case $(call shell_quote,$(UNITDIR)) in /*) ;; *) echo "make: UNITDIR must be absolute" >&2; exit 1 ;; esac
 	@install -dm755 $(call shell_quote,$(DESTDIR)$(CONFDIR)/tmpcleaner.conf.d)
 	@c=$(call shell_quote,$(DESTDIR)$(CONFDIR)/tmpcleaner.conf); \
-	if [ ! -e "$$c" ] || cmp -s "$$c" "$$c.default" || cmp -s tmpcleaner.conf "$$c"; then \
+	if [ ! -e "$$c" ] || { [ -e "$$c.default" ] && [ "$$(sha256sum < "$$c")" = "$$(sha256sum < "$$c.default")" ]; } || [ "$$(sha256sum < tmpcleaner.conf)" = "$$(sha256sum < "$$c")" ]; then \
 		install -Dm644 tmpcleaner.conf "$$c" && \
 		install -Dm644 tmpcleaner.conf "$$c.default"; \
 	else \
 		install -Dm644 tmpcleaner.conf "$$c.new" && \
 		install -Dm644 tmpcleaner.conf "$$c.default" && \
 		echo "Notice: $$c has local changes; new defaults installed as $$c.new (please merge)" && \
-		{ diff -u "$$c" "$$c.new" || true; }; \
+		{ ! command -v diff >/dev/null || diff -u "$$c" "$$c.new" || true; }; \
 	fi
 
 uninstall:

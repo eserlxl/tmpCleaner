@@ -4292,6 +4292,44 @@ cmp -s "$confpath/tmpcleaner.conf.new" "$here/tmpcleaner.conf" || {
 	echo "FAIL: edited reinstall should create tmpcleaner.conf.new matching shipped file"
 	fail=1
 }
+
+# Staged install-conf without diffutils: shims for cmp and diff exit 127.
+nodiff_dest="$confdir/nodiff stage"
+nodiff_path="$nodiff_dest/target [safe]"
+nodiff_shims="$confdir/nodiff-shims"
+mkdir -p "$nodiff_shims"
+printf '#!/bin/sh\nexit 127\n' > "$nodiff_shims/cmp"
+printf '#!/bin/sh\nexit 127\n' > "$nodiff_shims/diff"
+chmod +x "$nodiff_shims/cmp" "$nodiff_shims/diff"
+
+PATH="$nodiff_shims:$PATH" make -s -C "$confsource" install-conf DESTDIR="$nodiff_dest" CONFDIR='/target [safe]' >/dev/null
+
+sed '$d' "$here/tmpcleaner.conf" > "$nodiff_path/tmpcleaner.conf"
+cp "$nodiff_path/tmpcleaner.conf" "$nodiff_path/tmpcleaner.conf.default"
+conf_log=$(PATH="$nodiff_shims:$PATH" make -s -C "$confsource" install-conf DESTDIR="$nodiff_dest" CONFDIR='/target [safe]' 2>&1)
+cmp -s "$nodiff_path/tmpcleaner.conf" "$here/tmpcleaner.conf" || {
+	echo "FAIL: unedited upgrade without diffutils should update tmpcleaner.conf to shipped file"
+	fail=1
+}
+[ ! -e "$nodiff_path/tmpcleaner.conf.new" ] || {
+	echo "FAIL: unedited upgrade without diffutils should not create tmpcleaner.conf.new"
+	fail=1
+}
+if printf '%s\n' "$conf_log" | grep -Fq "local changes"; then
+	echo "FAIL: unedited upgrade without diffutils should not print merge notice"
+	fail=1
+fi
+
+printf 'x /tmp/local-rule\n' >> "$nodiff_path/tmpcleaner.conf"
+PATH="$nodiff_shims:$PATH" make -s -C "$confsource" install-conf DESTDIR="$nodiff_dest" CONFDIR='/target [safe]' >/dev/null
+grep -Fxq 'x /tmp/local-rule' "$nodiff_path/tmpcleaner.conf" || {
+	echo "FAIL: local rule should survive reinstall without diffutils"
+	fail=1
+}
+cmp -s "$nodiff_path/tmpcleaner.conf.new" "$here/tmpcleaner.conf" || {
+	echo "FAIL: edited reinstall without diffutils should create tmpcleaner.conf.new matching shipped file"
+	fail=1
+}
 [ -z "$(find "$confsource" -mindepth 1 ! -name Makefile ! -name tmpcleaner.conf -print -quit)" ] || {
 	echo "FAIL: config install should not create files in the source directory"
 	fail=1
