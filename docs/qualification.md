@@ -1,0 +1,49 @@
+# Container qualification
+
+What `tests/qualify-container.sh` proves, how to run and read it, its cost, and the limits of the container environment.
+
+## What it proves
+
+The mandatory unit suite (`tests/test.sh`) runs `tmpcleaner` directly under `PATH` shims with a retargeted scratch directory and birth/ctime age letters stripped. It does not exercise a real `systemd` PID 1 or the installed unit sandbox.
+
+`tests/qualify-container.sh` boots a disposable Arch Linux container with `/usr/lib/systemd/systemd` as PID 1 and verifies five checks end to end:
+
+1. **`make install`**: Installs `/usr/local/bin/tmpcleaner`, `/etc/systemd/system/tmpcleaner.service`, `/etc/systemd/system/tmpcleaner.timer`, `/etc/tmpcleaner/tmpcleaner.conf`, `/etc/tmpcleaner/tmpcleaner.conf.default` and `/etc/tmpcleaner/tmpcleaner.conf.d` with default Makefile variables, reloads `systemd`, and leaves `tmpcleaner.timer` disabled and inactive.
+2. **`tmpcleaner --dry-run`**: Runs the installed `/usr/local/bin/tmpcleaner --dry-run` against `/tmp` and exits `0`.
+3. **`tmpcleaner.service` run**: Exercises the installed service under its real sandbox (`ProtectSystem=strict`, `ReadWritePaths=/tmp`, `RuntimeDirectory=tmpcleaner`, `Environment=TMPDIR=/run/tmpcleaner`, `ProtectHome=read-only`, `NoNewPrivileges=yes`) and real `abcmBM` timestamp aging (`TMPCLEANER_AGE=2s` via a service drop-in). Verifies that an aged unprotected file is removed while an aged file held open by a background `sleep`, an aged directory protected by `.tmpcleaner-keep`, `/tmp/krb5cc_qualify`, and a newly created file all survive; that the service logs the prose journal summary line and, with `TMPCLEANER_SUMMARY=json`, emits exactly one JSON completion record with `"exit_status":0`; and that `TMPCLEANER_METRICS` writes `tmpcleaner_last_exit_status 0` to `/var/lib/tmpcleaner-qualify/tmpcleaner.prom` through `ReadWritePaths=/var/lib/tmpcleaner-qualify`.
+4. **`tmpcleaner.timer`**: Runs `systemctl enable --now tmpcleaner.timer` and verifies that the timer is enabled and listed with a scheduled next elapse in `systemctl list-timers`.
+5. **Install/uninstall lifecycle**: Verifies that `make uninstall` disables the timer and removes the binary and units while preserving `/etc/tmpcleaner/tmpcleaner.conf`; that a subsequent `make install` keeps local edits to `/etc/tmpcleaner/tmpcleaner.conf` and writes `/etc/tmpcleaner/tmpcleaner.conf.new`; and that `make uninstall KEEP_CONFIG=0` removes the binary, units and `/etc/tmpcleaner`.
+
+## How to run it
+
+From the repository root on a host with Docker access:
+
+```sh
+sh tests/qualify-container.sh
+```
+
+The script prints one `PASS <check>` or `FAIL <check>: <detail>` line per check and exits `0` only when all five checks pass:
+
+```text
+PASS make install
+PASS tmpcleaner --dry-run
+PASS tmpcleaner.service run
+PASS tmpcleaner.timer
+PASS install/uninstall lifecycle
+```
+
+If `docker info` fails, the script prints `SKIP: docker unavailable` and exits `77`.
+
+The checkout is bind-mounted read-only at `/src` and copied to `/build` inside the container, so the host working tree and host `/etc`/`/usr/local` are never modified. An `EXIT`/`INT`/`TERM` trap removes the container on completion or interruption.
+
+## Cost and gate policy
+
+- **First run**: Builds `tmpcleaner-qualify:latest` from `archlinux:latest` (installing `make` via `docker build --network host` with a Dockerfile on stdin) if the image is not already cached, then boots the container and sleeps 3 seconds to age fixtures.
+- **Cached runs**: Reuses `tmpcleaner-qualify:latest` and runs offline (`--network none`) in roughly 5-10 seconds. To refresh the base image after an Arch update, remove it with `docker rmi tmpcleaner-qualify:latest` and re-run the script.
+- **Optional**: Container qualification is optional and outside the mandatory developer gate (`sh tests/test.sh && make lint`). Run it when changing `tmpcleaner.service`, `tmpcleaner.timer`, `Makefile` install/uninstall rules, or journal/metrics integration.
+
+## Container limits
+
+- **Shared host kernel and clock**: The container shares the host kernel, `/proc` uptime, and system clock; kernel-specific behavior and real 12-hour wall-clock elapse are not isolated from the host.
+- **No network (`--network none`)**: The running container has no network interfaces; image builds use `docker build --network host` so qualification does not depend on Docker bridge networking.
+- **Degraded `systemd` state (`systemd-resolved` failing is expected)**: In an unprivileged `--network none` container (`/usr/lib/systemd/systemd` with `--cgroupns=private --security-opt writable-cgroups=true`), `systemd-resolved.service` fails during boot and `systemctl is-system-running` reports `degraded`. The qualification script accepts `running` or `degraded` once boot settles.

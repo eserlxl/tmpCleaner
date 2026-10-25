@@ -130,6 +130,7 @@ settings are in [docs/configuration.md](docs/configuration.md).
 | Document | Contents |
 |----------|----------|
 | [docs/installation.md](docs/installation.md#makefile-variables-and-targets) | AURGen packaging flow and the `lint` target |
+| [docs/qualification.md](docs/qualification.md) | Optional disposable systemd container qualification (`tests/qualify-container.sh`) |
 | [aur/aurgen.install.yaml](aur/aurgen.install.yaml) | AUR package recipe |
 | [tests/test.sh](tests/test.sh) | Test suite run by `make test` |
 | [tests/check-package.sh](tests/check-package.sh) | Hermetic smoke checks run by `make check-package` in the AUR package's check() |
