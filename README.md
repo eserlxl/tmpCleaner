@@ -41,18 +41,20 @@ timer is **not** enabled automatically: preview with `sudo tmpcleaner --dry-run`
 keep what you need with `--suggest-exclusions`, then enable it as in the quick
 start.
 
-From a checkout, save a preview to `preview.txt`, then install; `make install`
-**enables the timer at once**:
+From a checkout, save a preview to `preview.txt`, install, preview the installed
+configuration, and enable the timer when ready (`make install` reloads systemd
+without enabling the timer):
 
 ```sh
 sudo make preview
 sudo make install
+sudo /usr/local/bin/tmpcleaner --dry-run
+sudo systemctl enable --now tmpcleaner.timer
 ```
 
-To install before activation, run `sudo make install ENABLE_TIMER=0`, preview
-the installed configuration with `sudo /usr/local/bin/tmpcleaner --dry-run`,
-then run `sudo systemctl enable --now tmpcleaner.timer` when ready.
-Value `0` does not stop an already running timer; the default remains `1`.
+To enable the timer during installation (the previous default), run
+`sudo make install ENABLE_TIMER=1`. Value `0` (default `0`) does not stop an
+already running timer.
 
 Linux with systemd >= 249 (>= 256 for the previews: `--dry-run`, `--check`,
 `--check0` and `--suggest-exclusions`) and GNU
@@ -61,9 +63,10 @@ from a source install to the package, and uninstalling are in
 [docs/installation.md](docs/installation.md).
 
 > [!WARNING]
-> `sudo make uninstall` removes `tmpcleaner.conf`, its `.default`/`.new` copies,
-> and the `tmpcleaner.conf.d` drop-ins (the local exclusions), while keeping
-> anything else in the directory; `KEEP_CONFIG=1` keeps the configuration.
+> `sudo make uninstall` keeps `tmpcleaner.conf`, its `.default`/`.new` copies,
+> and the `tmpcleaner.conf.d` drop-ins by default (`KEEP_CONFIG=1`); passing
+> `KEEP_CONFIG=0` (the previous default) removes them and deletes the local
+> exclusions.
 
 ## What gets deleted
 

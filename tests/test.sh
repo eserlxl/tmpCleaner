@@ -4352,8 +4352,14 @@ PATH="$staged/fakes:$PATH" make -s -C "$here" uninstall DESTDIR="$staged_dest" P
 if [ -e "$staged_dest/usr/bin/tmpcleaner" ] ||
 	[ -e "$staged_dest$staged_units/tmpcleaner.service" ] ||
 	[ -e "$staged_dest$staged_units/tmpcleaner.timer" ] ||
-	[ -e "$staged_dest/etc/tmpcleaner" ]; then
-	echo "FAIL: staged uninstall should remove binary, units, and CONFDIR"
+	[ ! -f "$staged_dest/etc/tmpcleaner/tmpcleaner.conf" ] ||
+	[ ! -d "$staged_dest/etc/tmpcleaner/tmpcleaner.conf.d" ]; then
+	echo "FAIL: staged uninstall should remove binary and units while keeping CONFDIR by default"
+	fail=1
+fi
+PATH="$staged/fakes:$PATH" make -s -C "$here" uninstall KEEP_CONFIG=0 DESTDIR="$staged_dest" PREFIX=/usr UNITDIR="$staged_units" >/dev/null
+if [ -e "$staged_dest/etc/tmpcleaner" ]; then
+	echo "FAIL: staged uninstall with KEEP_CONFIG=0 should remove CONFDIR"
 	fail=1
 fi
 [ ! -e "$staged/systemctl.log" ] || {
@@ -4391,7 +4397,7 @@ SHIM
 	chmod +x "$uninstall_root/shim/systemctl"
 	status=0
 	(cd "$uninstall_work" && PATH="$uninstall_root/shim:$PATH" UNINSTALL_SYSTEMCTL_MARKER=$uninstall_root/systemctl.called \
-		make -s -f "$here/Makefile" uninstall DESTDIR="$uninstall_dest" CONFDIR="$uninstall_conf" \
+		make -s -f "$here/Makefile" uninstall KEEP_CONFIG=0 DESTDIR="$uninstall_dest" CONFDIR="$uninstall_conf" \
 		UNITDIR="$uninstall_units" BINDIR="$uninstall_bin") > "$uninstall_root/log" 2>&1 || status=$?
 	if [ "$status" -ne 0 ] || [ ! -d "$uninstall_dest$uninstall_conf" ] || [ ! -e "$uninstall_dest$uninstall_conf/real.conf" ] ||
 		[ -e "$uninstall_dest$uninstall_conf/tmpcleaner.conf" ] || [ -e "$uninstall_dest$uninstall_conf/tmpcleaner.conf.default" ] ||
@@ -4423,7 +4429,7 @@ touch "$uninstall_symlink_target/tmpcleaner.conf" "$uninstall_symlink_target/tmp
 	"$uninstall_symlink_dest$uninstall_symlink_units/tmpcleaner.timer" \
 	"$uninstall_symlink_dest$uninstall_symlink_bin/tmpcleaner"
 status=0
-PATH="$staged/fakes:$PATH" make -s -C "$here" uninstall DESTDIR="$uninstall_symlink_dest" \
+PATH="$staged/fakes:$PATH" make -s -C "$here" uninstall KEEP_CONFIG=0 DESTDIR="$uninstall_symlink_dest" \
 	CONFDIR="$uninstall_symlink_conf" UNITDIR="$uninstall_symlink_units" \
 	BINDIR="$uninstall_symlink_bin" > "$uninstall_symlink_root/log" 2>&1 || status=$?
 if [ "$status" -ne 0 ] || [ ! -L "$uninstall_symlink_dest$uninstall_symlink_conf" ] ||
@@ -4441,14 +4447,16 @@ if [ "$status" -ne 0 ] || [ ! -L "$uninstall_symlink_dest$uninstall_symlink_conf
 fi
 rm -rf "$uninstall_symlink_root"
 
-PATH="$staged/fakes:$PATH" make -s -C "$here" install ENABLE_TIMER=0 \
-	DESTDIR="$staged_dest" PREFIX=/usr UNITDIR="$staged_units" >/dev/null
-if [ ! -x "$staged_dest/usr/bin/tmpcleaner" ] || [ ! -f "$staged_dest$staged_units/tmpcleaner.service" ] ||
-	[ ! -f "$staged_dest$staged_units/tmpcleaner.timer" ] || [ ! -f "$staged_dest/etc/tmpcleaner/tmpcleaner.conf" ] ||
-	[ -e "$staged/systemctl.log" ]; then
-	echo 'FAIL: staged install with ENABLE_TIMER=0 must install files without service actions'
-	fail=1
-fi
+for staged_timer in 0 1; do
+	PATH="$staged/fakes:$PATH" make -s -C "$here" install "ENABLE_TIMER=$staged_timer" \
+		DESTDIR="$staged_dest" PREFIX=/usr UNITDIR="$staged_units" >/dev/null
+	if [ ! -x "$staged_dest/usr/bin/tmpcleaner" ] || [ ! -f "$staged_dest$staged_units/tmpcleaner.service" ] ||
+		[ ! -f "$staged_dest$staged_units/tmpcleaner.timer" ] || [ ! -f "$staged_dest/etc/tmpcleaner/tmpcleaner.conf" ] ||
+		[ -e "$staged/systemctl.log" ]; then
+		echo "FAIL: staged install with ENABLE_TIMER=$staged_timer must install files without service actions"
+		fail=1
+	fi
+done
 mkdir "$staged_dest/etc/tmpcleaner/local dir"
 printf 'local\000bytes\n' > "$staged_dest/etc/tmpcleaner/local dir/notes"
 printf 'pending defaults\n' > "$staged_dest/etc/tmpcleaner/tmpcleaner.conf.new"
@@ -4549,15 +4557,15 @@ fi
 	fail=1
 }
 if [ ! -f "$staged/systemctl.log" ] ||
-	[ "$(cat "$staged/systemctl.log")" != "$(printf 'daemon-reload\nenable --now tmpcleaner.timer')" ]; then
-	echo "FAIL: unstaged install should run daemon-reload then enable --now tmpcleaner.timer"
+	[ "$(cat "$staged/systemctl.log")" != daemon-reload ]; then
+	echo "FAIL: unstaged install should only run daemon-reload by default"
 	fail=1
 fi
 : > "$staged/systemctl.log"
 PATH="$staged/fakes:$PATH" make -s -C "$here" install ENABLE_TIMER=1 \
 	BINDIR="$make_bin" CONFDIR="$make_conf" UNITDIR="$make_units" >/dev/null
 if [ "$(cat "$staged/systemctl.log")" != "$(printf 'daemon-reload\nenable --now tmpcleaner.timer')" ]; then
-	echo 'FAIL: ENABLE_TIMER=1 must retain default activation calls'
+	echo 'FAIL: ENABLE_TIMER=1 must run daemon-reload then enable --now tmpcleaner.timer'
 	fail=1
 fi
 printf 'x /tmp/local-install-rule\n' >> "$custom_conf/tmpcleaner.conf"
@@ -4600,6 +4608,17 @@ for invalid_keep in '' 2 yes '0 1' '1 0' 00; do
 	fi
 done
 : > "$staged/systemctl.log"
+PATH="$staged/fakes:$PATH" make -s -C "$here" uninstall \
+	BINDIR="$make_bin" CONFDIR="$make_conf" UNITDIR="$make_units" >/dev/null
+if [ -e "$custom_bin/tmpcleaner" ] || [ -e "$custom_units/tmpcleaner.service" ] ||
+	[ -e "$custom_units/tmpcleaner.timer" ] || ! diff -r "$staged/custom-config.expected" "$custom_conf" >/dev/null ||
+	[ "$(cat "$staged/systemctl.log")" != "$(printf 'disable --now tmpcleaner.timer\ndaemon-reload')" ]; then
+	echo 'FAIL: unstaged uninstall must preserve the config tree by default while removing binary/units and stopping the timer'
+	fail=1
+fi
+PATH="$staged/fakes:$PATH" make -s -C "$here" install \
+	BINDIR="$make_bin" CONFDIR="$make_conf" UNITDIR="$make_units" >/dev/null
+: > "$staged/systemctl.log"
 PATH="$staged/fakes:$PATH" make -s -C "$here" uninstall KEEP_CONFIG=1 \
 	BINDIR="$make_bin" CONFDIR="$make_conf" UNITDIR="$make_units" >/dev/null
 if [ -e "$custom_bin/tmpcleaner" ] || [ -e "$custom_units/tmpcleaner.service" ] ||
@@ -4620,7 +4639,7 @@ if [ -e "$custom_bin/tmpcleaner" ] ||
 	[ -e "$custom_units/tmpcleaner.service" ] ||
 	[ -e "$custom_units/tmpcleaner.timer" ] ||
 	[ -e "$custom_conf" ]; then
-	echo "FAIL: unstaged uninstall should remove binary, units, and custom CONFDIR"
+	echo "FAIL: unstaged uninstall with KEEP_CONFIG=0 should remove binary, units, and custom CONFDIR"
 	fail=1
 fi
 if [ ! -f "$staged/systemctl.log" ] ||

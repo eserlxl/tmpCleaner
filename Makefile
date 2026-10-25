@@ -3,13 +3,13 @@ BINDIR ?= $(PREFIX)/bin
 CONFDIR ?= /etc/tmpcleaner
 UNITDIR ?= /etc/systemd/system
 DESTDIR ?=
-ENABLE_TIMER ?= 1
+ENABLE_TIMER ?= 0
 ifneq ($(ENABLE_TIMER),0)
 ifneq ($(ENABLE_TIMER),1)
 $(error ENABLE_TIMER must be 0 or 1)
 endif
 endif
-KEEP_CONFIG ?= 0
+KEEP_CONFIG ?= 1
 ifneq ($(KEEP_CONFIG),0)
 ifneq ($(KEEP_CONFIG),1)
 $(error KEEP_CONFIG must be 0 or 1)

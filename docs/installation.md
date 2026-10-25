@@ -28,7 +28,7 @@ sudo tmpcleaner --suggest-exclusions | sudo tee -a /etc/tmpcleaner/tmpcleaner.co
 sudo systemctl enable --now tmpcleaner.timer
 ```
 
-**Migrating from a source install:** remove a previous `make install` first (back up `/etc/tmpcleaner/tmpcleaner.conf` and the `/etc/tmpcleaner/tmpcleaner.conf.d/` drop-ins, which hold your kept paths, run `sudo make uninstall`, install the package, then restore both). Pacman refuses to overwrite untracked files, and units left in `/etc/systemd/system` would shadow the packaged ones in `/usr/lib/systemd/system`.
+**Migrating from a source install:** remove a previous `make install` first (back up `/etc/tmpcleaner/tmpcleaner.conf` and the `/etc/tmpcleaner/tmpcleaner.conf.d/` drop-ins, which hold your kept paths, run `sudo make uninstall KEEP_CONFIG=0`, install the package, then restore both). Pacman refuses to overwrite untracked files, and units left in `/etc/systemd/system` would shadow the packaged ones in `/usr/lib/systemd/system`.
 
 ### From source
 
@@ -40,22 +40,23 @@ preview of what would go to `preview.txt`, without deleting:
 sudo make preview
 ```
 
-Add any needed exclusions to `tmpcleaner.conf` (see [Configuration](configuration.md)), then install; this copies the config to `/etc/tmpcleaner/tmpcleaner.conf`, creates the drop-in directory `/etc/tmpcleaner/tmpcleaner.conf.d`, copies the wrapper to `/usr/local/bin/tmpcleaner`, and enables the timer:
+Add any needed exclusions to `tmpcleaner.conf` (see [Configuration](configuration.md)), then install, preview the installed configuration, and enable the timer when ready (`make install` copies the config to `/etc/tmpcleaner/tmpcleaner.conf`, creates the drop-in directory `/etc/tmpcleaner/tmpcleaner.conf.d`, copies the wrapper to `/usr/local/bin/tmpcleaner`, installs the units, and reloads systemd without enabling the timer):
 
 ```sh
 sudo make install
-```
-
-For an install-then-preview sequence, defer activation:
-
-```sh
-sudo make install ENABLE_TIMER=0
 sudo /usr/local/bin/tmpcleaner --dry-run
 sudo systemctl enable --now tmpcleaner.timer
 ```
 
-`ENABLE_TIMER` accepts only `0` or `1` (default `1`). Value `0` still reloads
-systemd after installation but does not stop an already running timer.
+To enable and start the timer during installation, pass `ENABLE_TIMER=1`:
+
+```sh
+sudo make install ENABLE_TIMER=1
+```
+
+`ENABLE_TIMER` accepts only `0` or `1` (default `0`). Value `0` still reloads
+systemd after installation but does not stop an already running timer; value `1`
+also runs `systemctl enable --now tmpcleaner.timer`.
 Staged installs skip all service actions with either value; uninstall still
 disables and stops the timer when `DESTDIR` is empty.
 
@@ -63,7 +64,7 @@ disables and stops the timer when `DESTDIR` is empty.
 
 #### Makefile variables and targets
 
-Variables: `PREFIX=/usr/local`, `BINDIR=$(PREFIX)/bin`, `CONFDIR=/etc/tmpcleaner`, `UNITDIR=/etc/systemd/system`, `ENABLE_TIMER=1`, `KEEP_CONFIG=0`, and `DESTDIR=` (staged install; skips `systemctl` calls when non-empty). `install` rewrites `ExecStart=` in the installed service to `$(BINDIR)/tmpcleaner`. The wrapper's built-in default config is `/etc/tmpcleaner/tmpcleaner.conf`; with a different `CONFDIR`, `install` also adds `Environment="TMPCLEANER_CONF=$(CONFDIR)/tmpcleaner.conf"` to the installed service. `CONFDIR` must be absolute; quotes, backslashes, control bytes and `%` are escaped for systemd.
+Variables: `PREFIX=/usr/local`, `BINDIR=$(PREFIX)/bin`, `CONFDIR=/etc/tmpcleaner`, `UNITDIR=/etc/systemd/system`, `ENABLE_TIMER=0`, `KEEP_CONFIG=1`, and `DESTDIR=` (staged install; skips `systemctl` calls when non-empty). `install` rewrites `ExecStart=` in the installed service to `$(BINDIR)/tmpcleaner`. The wrapper's built-in default config is `/etc/tmpcleaner/tmpcleaner.conf`; with a different `CONFDIR`, `install` also adds `Environment="TMPCLEANER_CONF=$(CONFDIR)/tmpcleaner.conf"` to the installed service. `CONFDIR` must be absolute; quotes, backslashes, control bytes and `%` are escaped for systemd.
 
 Quote shell arguments when setting paths containing spaces or punctuation.
 Source-install paths cannot contain newlines. `BINDIR` must be absolute and
@@ -93,20 +94,27 @@ Pacman preserves an edited `/etc/tmpcleaner/tmpcleaner.conf` as `/etc/tmpcleaner
 sudo make uninstall
 ```
 
-**Warning:** By default, `make uninstall` removes `tmpcleaner.conf`, its `.default`/`.new`
-copies, and the `tmpcleaner.conf.d` drop-ins (the local exclusions), while keeping anything
-else in the directory (removing `CONFDIR` itself only when empty); back up your rules first
-or pass `KEEP_CONFIG=1` to keep the configuration.
+By default (`KEEP_CONFIG=1`), `make uninstall` keeps `tmpcleaner.conf`, its `.default`/`.new`
+copies, and the `tmpcleaner.conf.d` drop-ins (the local exclusions), while disabling and
+stopping the timer and removing the binary and systemd units.
 
-To keep the configuration (`tmpcleaner.conf`, its `.default`/`.new` copies, and
-`tmpcleaner.conf.d`), use:
+To remove the configuration as well, pass `KEEP_CONFIG=0`:
 
 ```sh
-sudo make uninstall KEEP_CONFIG=1
+sudo make uninstall KEEP_CONFIG=0
 ```
 
-`KEEP_CONFIG` accepts only `0` or `1` (default `0`). It changes only configuration
+**Warning:** `KEEP_CONFIG=0` removes `tmpcleaner.conf`, its `.default`/`.new` copies,
+and the `tmpcleaner.conf.d` drop-ins (the local exclusions), while keeping anything
+else in the directory (removing `CONFDIR` itself only when empty); back up your rules first.
+
+`KEEP_CONFIG` accepts only `0` or `1` (default `1`). It changes only configuration
 removal; the binary and units are still removed and the timer is stopped and
 disabled. Staged uninstall still skips service actions.
+
+**Migration note:** Earlier versions defaulted to `ENABLE_TIMER=1` (enabling the timer
+during `make install`) and `KEEP_CONFIG=0` (removing the configuration during
+`make uninstall`). Pass `sudo make install ENABLE_TIMER=1` and
+`sudo make uninstall KEEP_CONFIG=0` when you want the previous behaviour.
 
 If `PREFIX`, `BINDIR`, `CONFDIR`, or `UNITDIR` was customized during installation, pass the same values when uninstalling (e.g. `sudo make uninstall CONFDIR=... UNITDIR=...`).
