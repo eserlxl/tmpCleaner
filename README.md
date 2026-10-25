@@ -149,6 +149,9 @@ Publishing: edit `aur/aurgen.install.yaml`, tag the release, run `aurgen aur`, t
 `make test` runs the rules against a scratch directory (no root needed), including a file
 held open and a directory used by a background process.
 
+`make mutate` runs the guard mutants against a disposable copy (about 6 minutes per case),
+is optional before a release, and the mandatory gate stays `sh tests/test.sh && make lint`.
+
 ## License
 
 tmpCleaner is free software: you can redistribute it and/or modify it under the

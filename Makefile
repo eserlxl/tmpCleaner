@@ -106,6 +106,9 @@ preview:
 
 # Warning level and above; notes and style hints stay advisory.
 lint:
-	shellcheck -s sh -S warning tmpcleaner tests/test.sh tests/check-package.sh
+	shellcheck -s sh -S warning tmpcleaner tests/test.sh tests/check-package.sh tests/test-mutations.sh
 
-.PHONY: install install-conf uninstall test check-package preview lint
+mutate:
+	sh tests/test-mutations.sh
+
+.PHONY: install install-conf uninstall test check-package preview lint mutate
