@@ -16,6 +16,11 @@ strict-scan-refusal	(status == 1 && ENVIRON["TMPCLEANER_REQUIRE_COMPLETE_SCAN"] 
 stale-snapshot-refusal	if (scan_age > ENVIRON["LIMIT"] * 100) exit 1	if (0 && scan_age > ENVIRON["LIMIT"] * 100) exit 1	FAIL: stale in-use snapshot must refuse both cleanup output modes without calling the backend
 tmpdir-owner-check	((path in path_uid) && id[4] == path_uid[path])	(path in path_uid)	FAIL: TMPDIR must not add protection for a directory owned by another UID
 in-use-readdir-race	cmd = "find /tmp -ignore_readdir_race -xdev -printf \"%i %p\\0\" 2>/dev/null"	cmd = "find /tmp -xdev -printf \"%i %p\\0\" 2>/dev/null"	FAIL: find deletion races must not fail strict cleanup, mark the protection walk partial, or invalidate counts
+long-path-ancestor	while (length($0) > 1000) sub(/\/[^/]*$/, ""); printf "%s%c", $0, 0	printf "%s%c", $0, 0	FAIL: a cwd beyond PATH_MAX must produce one exclusion for its deepest ancestor within 1000 bytes
+dot-root-refusal	if (path ~ /(^|\/)\.\.?($|\/)/) refuse("cleanup root has a . or .. component")	if (0) refuse("cleanup root has a . or .. component")	FAIL: --check must reject retained noncanonical roots without a verdict or cleanup
+root-suppression	if (under(lexical, prefixes[i]) || under(canonical, prefixes[i])) next	if (0) next	FAIL: explicit exclusion must protect exact/deeper roots and keep siblings eligible
+strict-marker-walk	walk_incomplete=1; return 1;	:;	FAIL: strict partial-walk cleanup must remove nothing and never invoke cleanup
+exclusion-parse-refusal	if [ "$keep_status" -ne 0 ]; then	if false; then	FAIL: malformed exclusion rule in drop-in must stop
 EOF
 }
 
