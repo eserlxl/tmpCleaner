@@ -194,7 +194,8 @@ else
 fi
 
 # (6) Leaving a source install in place does not block package installation,
-# but the scriptlet warns about the binary and units that shadow the package.
+# but the scriptlet warns about the binary and units that shadow the package,
+# on a fresh install (post_install) and on a reinstall (post_upgrade).
 if ! out=$(pacman -R --noconfirm linux-tmpcleaner 2>&1); then
 	fail_check "source install left in place" "package removal failed: $out"
 elif ! out=$(make install 2>&1); then
@@ -206,6 +207,12 @@ elif ! printf '%s\n' "$out" | grep -Fq 'WARNING: tmpcleaner source install left 
 	! printf '%s\n' "$out" | grep -Fq '/etc/systemd/system/tmpcleaner.timer' ||
 	! printf '%s\n' "$out" | grep -Fq '/usr/local/bin/tmpcleaner'; then
 	fail_check "source install left in place" "missing source-install warning or leftover paths: $out"
+elif ! out=$(pacman -U --noconfirm "$pkg" 2>&1); then
+	# A same-version reinstall over the installed package runs post_upgrade.
+	fail_check "source install left in place" "reinstall failed: $out"
+elif ! printf '%s\n' "$out" | grep -Fq 'WARNING: tmpcleaner source install left in place' ||
+	! printf '%s\n' "$out" | grep -Fq '/etc/systemd/system/tmpcleaner.service'; then
+	fail_check "source install left in place" "missing source-install warning on upgrade: $out"
 else
 	pass "source install left in place"
 fi
