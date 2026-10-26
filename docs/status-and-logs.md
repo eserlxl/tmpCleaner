@@ -202,7 +202,8 @@ classification, before scratch creation. Real runs that fail after that point
 stale success metrics with their nonzero exit status and zero removals when
 cleanup counts were not obtained. Successful cleanup retains its measured
 counts when the post-cleanup walk is complete, otherwise removal gauges are
-zero. Invalid CLI usage or an invalid metrics path leaves metrics untouched.
+zero. Invalid CLI usage, an invalid metrics path or an invalid
+`TMPCLEANER_PREVIEW` leaves metrics untouched.
 All preview modes preserve an existing metrics file even when they fail.
 Publication uses the shell's exit handler: `SIGHUP`, `SIGINT`, and `SIGTERM`
 publish exit status `129`, `130`, and `143`, while `SIGKILL` leaves the

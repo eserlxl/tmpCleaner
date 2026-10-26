@@ -3401,11 +3401,29 @@ for earlyfail in "TMPCLEANER_CONF=$cfg/missing.conf" TMPCLEANER_AGE=bogus TMPCLE
 		fail=1
 	fi
 done
+for invalid_setting in TMPCLEANER_PROTECT_TMPDIR TMPCLEANER_REQUIRE_COMPLETE_SCAN TMPCLEANER_MAX_SCAN_AGE; do
+	expected_error="tmpcleaner: invalid $invalid_setting"
+	case "$invalid_setting" in
+		TMPCLEANER_MAX_SCAN_AGE) ;;
+		*) expected_error="$expected_error (expected 1 or empty)" ;;
+	esac
+	printf 'tmpcleaner_last_exit_status 0\n' > "$cfg/failure.prom"
+	rm -f "$cfg/failed-clean"
+	status=0
+	shim env "$invalid_setting=bogus" TMPCLEANER_CONF="$conf" TMPCLEANER_METRICS=$cfg/failure.prom \
+		CLEAN_SHIM_MARKER=$cfg/failed-clean sh "$here/tmpcleaner" >/dev/null 2> "$cfg/invalid-setting.err" || status=$?
+	if [ "$status" -ne 1 ] || [ -e "$cfg/failed-clean" ] || ! failure_metrics_ok ||
+		[ "$(cat "$cfg/invalid-setting.err")" != "$expected_error" ]; then
+		echo "FAIL: invalid $invalid_setting must refresh metrics with the usual status and message"
+		fail=1
+	fi
+done
 printf 'existing metrics bytes\n' > "$cfg/metrics.expected"
 for mode in --print-rules --print-in-use0 --dry-run --check; do
 	set -- "$mode"
 	[ "$mode" != --check ] || set -- --check "$dir/old.txt"
-	for previewfail in '' CAT_SHIM_FAIL=1; do
+	for previewfail in '' CAT_SHIM_FAIL=1 TMPCLEANER_PROTECT_TMPDIR=bogus \
+		TMPCLEANER_REQUIRE_COMPLETE_SCAN=bogus TMPCLEANER_MAX_SCAN_AGE=bogus; do
 		cp "$cfg/metrics.expected" "$cfg/metrics.prom"
 		rm -f "$cfg/duration.called"
 		status=0
@@ -3419,6 +3437,13 @@ for mode in --print-rules --print-in-use0 --dry-run --check; do
 		fi
 	done
 done
+status=0
+TMPCLEANER_PREVIEW=bogus TMPCLEANER_METRICS=$cfg/metrics.prom TMPCLEANER_CONF=$conf \
+	sh "$here/tmpcleaner" >/dev/null 2>&1 || status=$?
+if [ "$status" -ne 1 ] || ! cmp -s "$cfg/metrics.expected" "$cfg/metrics.prom"; then
+	echo 'FAIL: an invalid preview setting must leave existing metrics untouched'
+	fail=1
+fi
 status=0
 TMPCLEANER_METRICS=$cfg/metrics.prom TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --unknown >/dev/null 2>&1 || status=$?
 if [ "$status" -ne 2 ] || ! cmp -s "$cfg/metrics.expected" "$cfg/metrics.prom"; then

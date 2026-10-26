@@ -295,27 +295,9 @@ case "${TMPCLEANER_METRICS:-}" in
 		;;
 	*) echo "${err_tag}tmpcleaner: invalid TMPCLEANER_METRICS (expected absolute *.prom path)" >&2; exit "$errstatus" ;;
 esac
-case "${TMPCLEANER_PROTECT_TMPDIR:-}" in
-	''|1) ;;
-	*) echo "${err_tag}tmpcleaner: invalid TMPCLEANER_PROTECT_TMPDIR (expected 1 or empty)" >&2; exit "$errstatus" ;;
-esac
-case "${TMPCLEANER_REQUIRE_COMPLETE_SCAN:-}" in
-	''|1) ;;
-	*) echo "${err_tag}tmpcleaner: invalid TMPCLEANER_REQUIRE_COMPLETE_SCAN (expected 1 or empty)" >&2; exit "$errstatus" ;;
-esac
 case "${TMPCLEANER_PREVIEW:-}" in
 	''|1) ;;
 	*) echo "${err_tag}tmpcleaner: invalid TMPCLEANER_PREVIEW (expected 1 or empty)" >&2; exit "$errstatus" ;;
-esac
-case "${TMPCLEANER_MAX_SCAN_AGE:-}" in
-	'') ;;
-	*[!0-9]*|???????*) echo "${err_tag}tmpcleaner: invalid TMPCLEANER_MAX_SCAN_AGE" >&2; exit "$errstatus" ;;
-	*)
-		[ "$TMPCLEANER_MAX_SCAN_AGE" -gt 0 ] || {
-			echo "${err_tag}tmpcleaner: invalid TMPCLEANER_MAX_SCAN_AGE" >&2
-			exit "$errstatus"
-		}
-		;;
 esac
 write_metrics() {
 	mtmp=
@@ -394,6 +376,24 @@ metric_started=
 if [ "$previewing" = 0 ] && [ -n "${TMPCLEANER_METRICS:-}" ]; then
 	read -r metric_started _ 2>/dev/null < /proc/uptime || metric_started=
 fi
+case "${TMPCLEANER_PROTECT_TMPDIR:-}" in
+	''|1) ;;
+	*) echo "${err_tag}tmpcleaner: invalid TMPCLEANER_PROTECT_TMPDIR (expected 1 or empty)" >&2; exit "$errstatus" ;;
+esac
+case "${TMPCLEANER_REQUIRE_COMPLETE_SCAN:-}" in
+	''|1) ;;
+	*) echo "${err_tag}tmpcleaner: invalid TMPCLEANER_REQUIRE_COMPLETE_SCAN (expected 1 or empty)" >&2; exit "$errstatus" ;;
+esac
+case "${TMPCLEANER_MAX_SCAN_AGE:-}" in
+	'') ;;
+	*[!0-9]*|???????*) echo "${err_tag}tmpcleaner: invalid TMPCLEANER_MAX_SCAN_AGE" >&2; exit "$errstatus" ;;
+	*)
+		[ "$TMPCLEANER_MAX_SCAN_AGE" -gt 0 ] || {
+			echo "${err_tag}tmpcleaner: invalid TMPCLEANER_MAX_SCAN_AGE" >&2
+			exit "$errstatus"
+		}
+		;;
+esac
 
 # A full /tmp may still hold a new directory but no data: when the default
 # location cannot store a byte, retry once in /dev/shm before aborting.
