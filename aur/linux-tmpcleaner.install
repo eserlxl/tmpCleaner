@@ -12,8 +12,9 @@ warn_source_install() {
 	done
 	if [ "$source_install_found" -eq 1 ]; then
 		cat <<'SOURCE_INSTALL_WARNING'
-The source install's units override the packaged ones, so the package version is not the one running.
-Run sudo make uninstall from the source checkout, or:
+The source install's units override the packaged ones, and /usr/local/bin/tmpcleaner comes before
+/usr/bin/tmpcleaner on PATH, so the package version is not the one that runs.
+Run sudo make uninstall KEEP_CONFIG=1 from the source checkout (keeps your configuration), or:
   sudo systemctl disable --now tmpcleaner.timer
   Delete the listed files, then run sudo systemctl daemon-reload.
 Then run sudo systemctl enable --now tmpcleaner.timer if it was enabled.
