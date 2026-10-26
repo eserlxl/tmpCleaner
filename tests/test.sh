@@ -4155,6 +4155,60 @@ kill "$list_pid"; wait "$list_pid" 2>/dev/null || :
 forget_pid "$list_pid"
 rm -rf "$list_root"
 
+# A cwd beyond PATH_MAX protects its subtree through a parseable ancestor.
+deep_root=$dir/deep-cwd
+mkdir "$deep_root"
+deep_part=$(printf '%0200d' 0)
+deep_cwd=$deep_root
+deep_level=0
+while [ "$deep_level" -lt 22 ]; do
+	deep_cwd=$deep_cwd/$deep_part
+	deep_level=$((deep_level + 1))
+done
+(
+	cd "$deep_root"
+	deep_level=0
+	while [ "$deep_level" -lt 22 ]; do
+		mkdir "$deep_part"
+		cd "$deep_part"
+		deep_level=$((deep_level + 1))
+	done
+	touch kept
+	old kept
+	exec sleep infinity
+) & deep_pid=$!
+pids="$pids $deep_pid"
+tries=0
+# readlink cannot report a cwd longer than PATH_MAX, so wait for the fixture through the link.
+until [ -f "/proc/$deep_pid/cwd/kept" ] &&
+	[ "$(cat "/proc/$deep_pid/comm" 2>/dev/null)" = sleep ]; do
+	tries=$((tries + 1)); [ "$tries" -lt 100 ] || { echo 'FAIL: deep cwd holder did not start'; exit 1; }
+	sleep 0.01
+done
+deep_ancestor=$deep_cwd
+while [ "${#deep_ancestor}" -gt 1000 ]; do
+	deep_ancestor=${deep_ancestor%/*}
+done
+touch "$deep_root/unprotected"
+old "$deep_root/unprotected"
+printf 'd %s - - - amM:12h\n' "$deep_root" > "$cfg/deep.conf"
+status=0
+TMPCLEANER_CONF=$cfg/deep.conf sh "$here/tmpcleaner" --print-rules > "$cfg/deep.rules" 2> "$cfg/deep.err" || status=$?
+if [ "$status" -ne 0 ] || [ "${#deep_cwd}" -le 4096 ] ||
+	[ "$(grep -Fxc "x \"$deep_ancestor\"" "$cfg/deep.rules")" -ne 1 ]; then
+	echo 'FAIL: a cwd beyond PATH_MAX must produce one exclusion for its deepest ancestor within 1000 bytes'
+	fail=1
+fi
+status=0
+TMPCLEANER_CONF=$cfg/deep.conf sh "$here/tmpcleaner" > /dev/null 2> "$cfg/deep.err" || status=$?
+if [ "$status" -ne 0 ] || [ ! -f "/proc/$deep_pid/cwd/kept" ] || [ -e "$deep_root/unprotected" ]; then
+	echo 'FAIL: a cwd beyond PATH_MAX must keep its aged file while unrelated aged files are removed'
+	fail=1
+fi
+kill "$deep_pid"; wait "$deep_pid" 2>/dev/null || :
+forget_pid "$deep_pid"
+rm -rf "$deep_root"
+
 # A second run tests that the shipped age rule keeps freshly extracted files
 # (birth and ctime stay current even when atime and mtime are backdated).
 dir2=$(mktemp -d /tmp/tmpcleaner-test.XXXXXX)

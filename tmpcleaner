@@ -988,6 +988,12 @@ rules() {
 	}
 	[ "$metric_partial_protection_walk" = 1 ] || metric_partial_protection_walk=0
 	LC_ALL=C sort -zu "$scratch/inuse" "$scratch/markers" "$scratch/excludes" > "$scratch/sorted" || return 1
+	# Keep deep paths through an ancestor; 1000 raw bytes fit even after C/glob escaping.
+	LC_ALL=C awk '
+		BEGIN { RS = "\0" }
+		{ while (length($0) > 1000) sub(/\/[^/]*$/, ""); printf "%s%c", $0, 0 }
+	' "$scratch/sorted" > "$scratch/ancestors" || return 1
+	LC_ALL=C sort -zu "$scratch/ancestors" > "$scratch/sorted" || return 1
 	escape_x_rules "$scratch/sorted" > "$scratch/excl" || return 1
 	if [ -n "$with_sources" ]; then
 		printf '# source: generated (in-use, markers, --exclude-prefix, --exclude-from0)\n' || return 1
