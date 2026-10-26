@@ -26,7 +26,7 @@ files that running programs still use.
 ```sh
 sudo tmpcleaner --dry-run                     # preview what a run would remove
 sudo tmpcleaner --suggest-exclusions | sudo tee -a /etc/tmpcleaner/tmpcleaner.conf.d/50-keep.conf # keep what you need, delete the rest
-sudo systemctl enable --now tmpcleaner.timer  # clean every 15 minutes
+sudo systemctl enable --now tmpcleaner.timer  # clean right away, then every 15 minutes
 sudo tmpcleaner --check /tmp/my-job/file      # ask whether one path would be removed
 journalctl -u tmpcleaner.service              # one summary line per run
 ```
