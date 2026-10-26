@@ -107,7 +107,7 @@ preview:
 
 # Warning level and above; notes and style hints stay advisory.
 lint:
-	shellcheck -s sh -S warning tmpcleaner tests/test.sh tests/check-package.sh tests/test-mutations.sh
+	shellcheck -s sh -S warning tmpcleaner tests/test.sh tests/check-package.sh tests/test-mutations.sh tests/qualify-container.sh tests/qualify-package.sh aur/linux-tmpcleaner.install
 
 mutate:
 	sh tests/test-mutations.sh

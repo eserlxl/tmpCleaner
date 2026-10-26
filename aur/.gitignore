@@ -1,3 +1,4 @@
 *
 !.gitignore
 !aurgen.install.yaml
+!linux-tmpcleaner.install

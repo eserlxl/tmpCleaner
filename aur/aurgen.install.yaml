@@ -115,6 +115,7 @@ aur_integration:
 
 package:
   name: 'linux-tmpcleaner'
+  install: 'linux-tmpcleaner.install'
   description: 'Systemd timer that deletes old /tmp entries while protecting files in use'
   license:
     - 'GPL-3.0-or-later'
@@ -125,13 +126,6 @@ package:
     - 'tmpcleaner'
   backup:
     - 'etc/tmpcleaner/tmpcleaner.conf'
-  install_messages:
-    post_install:
-      - 'tmpcleaner: the timer is not enabled automatically.'
-      - '  Preview first: sudo tmpcleaner --dry-run'
-      - '  Keep paths:    sudo tmpcleaner --suggest-exclusions | sudo tee -a /etc/tmpcleaner/tmpcleaner.conf.d/50-keep.conf'
-      - '                 then delete the rules for anything you do not need kept'
-      - '  Then enable:   sudo systemctl enable --now tmpcleaner.timer'
   check: 'make check-package'
   install_vars:
     - 'UNITDIR=/usr/lib/systemd/system'

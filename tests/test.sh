@@ -4694,23 +4694,16 @@ grep -Fxq 'ExecStart=/usr/local/bin/tmpcleaner' "$here/tmpcleaner.service" || {
 }
 rm -rf "$staged"
 
-# post_install text lives in aur/aurgen.install.yaml and is printed verbatim.
+# post_install text lives in aur/linux-tmpcleaner.install and is printed verbatim.
 # It must name this tree's timer unit and still tell new users to preview, keep paths, then enable.
 timer_unit=$(basename "$here/tmpcleaner.timer")
 install_status=0
 install_out=$(awk '
-	/^  install_messages:/ { msgs = 1; post = 0; next }
-	msgs && /^  [^ ]/ { msgs = 0; post = 0; next }
-	msgs && /^    post_install:/ { post = 1; next }
-	msgs && post && /^    [^ ]/ { post = 0; next }
-	post && /^      - / {
-		line = substr($0, 9)
-		n = length(line)
-		q = substr(line, 1, 1)
-		if ((q != "\047" && q != "\"") || substr(line, n, 1) != q || n < 2) exit 2
-		print substr(line, 2, n - 2)
-	}
-' "$here/aur/aurgen.install.yaml") || install_status=$?
+	/^post_install\(\)/ { post = 1; next }
+	post && /cat <<\047AURGEN_MESSAGES\047/ { msgs = 1; next }
+	msgs && /^AURGEN_MESSAGES$/ { exit }
+	msgs { print }
+' "$here/aur/linux-tmpcleaner.install") || install_status=$?
 install_expected=$(printf '%s\n' \
 	"tmpcleaner: the timer is not enabled automatically." \
 	"  Preview first: sudo tmpcleaner --dry-run" \

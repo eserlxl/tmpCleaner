@@ -30,6 +30,8 @@ sudo systemctl enable --now tmpcleaner.timer
 
 **Migrating from a source install:** run `sudo make uninstall` from the current checkout, then install the package. Uninstall keeps `/etc/tmpcleaner/tmpcleaner.conf`, its `.new` copy and the `/etc/tmpcleaner/tmpcleaner.conf.d/` drop-ins, and removes the `.default` comparison copy. Pacman keeps the existing `tmpcleaner.conf` and writes new defaults as `.pacnew`. Removing the source units also prevents units left in `/etc/systemd/system` from shadowing the packaged ones in `/usr/lib/systemd/system`.
 
+Package installation and upgrades warn if `/usr/local/bin/tmpcleaner`, `/etc/systemd/system/tmpcleaner.service` or `/etc/systemd/system/tmpcleaner.timer` remain from a source install, listing each leftover path and how to remove it. The source units override the packaged ones, so package upgrades do not update the running copy. The warning only prints instructions: run `sudo make uninstall` from the source checkout, or disable the timer with `sudo systemctl disable --now tmpcleaner.timer`, delete the listed files and run `sudo systemctl daemon-reload`. Then run `sudo systemctl enable --now tmpcleaner.timer` if it was enabled before migration.
+
 ### From source
 
 **Preview first.** On a machine that keeps work in `/tmp` (build trees,

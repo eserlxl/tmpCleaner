@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Qualify the AUR package lifecycle (build from working tree via aurgen,
 # install, service run, config-preserving reinstall, removal with .pacsave,
-# and migration from a source install)
+# and migration from a source install, including leftovers)
 # in a disposable systemd container.
 set -eu
 
@@ -106,8 +106,11 @@ pkg=/pkg/linux-tmpcleaner.pkg.tar
 # /usr/lib/systemd/system/tmpcleaner.service and .timer,
 # /etc/tmpcleaner/tmpcleaner.conf and the license, the service's ExecStart
 # names /usr/bin/tmpcleaner, tmpcleaner.timer is not enabled, and .default is absent.
+# A clean install prints no source-install warning.
 if ! out=$(pacman -U --noconfirm "$pkg" 2>&1); then
 	fail_check "pacman -U install" "$out"
+elif printf '%s\n' "$out" | grep -Fq 'WARNING: tmpcleaner source install left in place'; then
+	fail_check "pacman -U install" "unexpected source-install warning: $out"
 elif [ ! -x /usr/bin/tmpcleaner ]; then
 	fail_check "pacman -U install" "/usr/bin/tmpcleaner not installed"
 elif [ ! -f /usr/lib/systemd/system/tmpcleaner.service ] || [ ! -f /usr/lib/systemd/system/tmpcleaner.timer ]; then
@@ -188,6 +191,23 @@ else
 	else
 		pass "source install then package"
 	fi
+fi
+
+# (6) Leaving a source install in place does not block package installation,
+# but the scriptlet warns about the binary and units that shadow the package.
+if ! out=$(pacman -R --noconfirm linux-tmpcleaner 2>&1); then
+	fail_check "source install left in place" "package removal failed: $out"
+elif ! out=$(make install 2>&1); then
+	fail_check "source install left in place" "make install failed: $out"
+elif ! out=$(pacman -U --noconfirm "$pkg" 2>&1); then
+	fail_check "source install left in place" "$out"
+elif ! printf '%s\n' "$out" | grep -Fq 'WARNING: tmpcleaner source install left in place' ||
+	! printf '%s\n' "$out" | grep -Fq '/etc/systemd/system/tmpcleaner.service' ||
+	! printf '%s\n' "$out" | grep -Fq '/etc/systemd/system/tmpcleaner.timer' ||
+	! printf '%s\n' "$out" | grep -Fq '/usr/local/bin/tmpcleaner'; then
+	fail_check "source install left in place" "missing source-install warning or leftover paths: $out"
+else
+	pass "source install left in place"
 fi
 
 exit "$fail"
