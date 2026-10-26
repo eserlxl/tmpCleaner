@@ -6,11 +6,12 @@
 set -eu
 unset TMPCLEANER_AGE TMPCLEANER_MARKER_AGE TMPCLEANER_PROTECT_TMPDIR TMPCLEANER_REQUIRE_COMPLETE_SCAN TMPCLEANER_PREVIEW TMPCLEANER_MAX_SCAN_AGE TMPCLEANER_FULL_PERCENT TMPCLEANER_FULL_AGE TMPCLEANER_LIST TMPCLEANER_SUMMARY TMPCLEANER_METRICS JOURNAL_STREAM
 here=$(cd "$(dirname "$0")/.." && pwd)
-dir=$(mktemp -d /tmp/tmpcleaner-test.XXXXXX)
-# Fixture configs live in a private directory, never at a guessable /tmp path.
-cfg=$(mktemp -d)
-conf=$cfg/conf
-shimdir=$(mktemp -d)
+dir=
+cfg=
+shimdir=
+dir2=
+confdir=
+staged=
 pids=
 bindpoint=
 detachpoint=
@@ -21,10 +22,26 @@ ctrl_top=
 marker_top=
 suggest_plain=
 suggest_awkward=
-trap 'kill $pids 2>/dev/null || :; wait $pids 2>/dev/null || :; rm -rf "$dir" "$cfg" "$shimdir" "$bindpoint" "$detachpoint" "$sockalias" "$shmdir" "$scope_outside" "$ctrl_top" "$marker_top" "$suggest_plain" "$suggest_awkward"' EXIT
+lowscratch=
+failscratch=
+trap 'kill $pids 2>/dev/null || :; wait $pids 2>/dev/null || :; rm -rf "$dir" "$cfg" "$shimdir" "$dir2" "$confdir" "$staged" "$bindpoint" "$detachpoint" "$sockalias" "$shmdir" "$scope_outside" "$ctrl_top" "$marker_top" "$suggest_plain" "$suggest_awkward" "$lowscratch" "$failscratch"' EXIT
 trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
+
+dir=$(mktemp -d /tmp/tmpcleaner-test.XXXXXX)
+# Fixture configs live in a private directory, never at a guessable /tmp path.
+cfg=$(mktemp -d)
+conf=$cfg/conf
+shimdir=$(mktemp -d)
+
+forget_pid() {
+	remaining_pids=
+	for tracked_pid in $pids; do
+		[ "$tracked_pid" = "$1" ] || remaining_pids="$remaining_pids $tracked_pid"
+	done
+	pids=$remaining_pids
+}
 
 awk '$1 == "d" { gsub(/[bcBC]/, "", $6) } { print }' "$here/tmpcleaner.conf" |
 	sed "s#/tmp#$dir#" > "$conf"
@@ -1013,6 +1030,7 @@ for raw_file in "$raw_open" "$raw_root/closed" "$raw_root/static"; do
 	[ "$(cat "$raw_file")" = unchanged ] || { echo 'FAIL: raw inventory changed a fixture file'; fail=1; }
 done
 kill "$raw_pid"; wait "$raw_pid" 2>/dev/null || :
+forget_pid "$raw_pid"
 rm -rf "$raw_root" "$cfg/raw-tmp"
 for opt in --print-in-use0 --print-holders0 --suggest-exclusions; do
 	for extra in --dry-run --prefix=/tmp --exclude-prefix=/tmp --print-rules --print-in-use0 --print-holders0 --suggest-exclusions --help '' positional; do
@@ -1653,6 +1671,8 @@ if [ "$status" -ne 0 ] || printf '%s\n' "$held_file_preview" | grep -Fq "$argdir
 	fail=1
 fi
 kill "$arg_held_pid" 2>/dev/null || :
+wait "$arg_held_pid" 2>/dev/null || :
+forget_pid "$arg_held_pid"
 rm -rf "$argdir"
 rm -f "$cfg/other.conf"
 [ "$fail" = 0 ] || exit 1
@@ -2136,7 +2156,7 @@ for filter_name in keep 'keep[ab]' 'keep%root' "keep' quoted"; do
 			echo "FAIL: --check must honor explicit exclusions of configured roots"
 			fail=1
 		fi
-		[ -z "$filter_pid" ] || { kill "$filter_pid"; wait "$filter_pid" 2>/dev/null || :; }
+		[ -z "$filter_pid" ] || { kill "$filter_pid"; wait "$filter_pid" 2>/dev/null || :; forget_pid "$filter_pid"; }
 		rm -rf "$filter_root"
 	done
 done
@@ -2698,6 +2718,7 @@ until [ "$(readlink "/proc/$ctrl_comm_pid/fd/0" 2>/dev/null)" = "$dir/ctrlparent
 done
 kill "$ctrl_fd_pid" 2>/dev/null || :
 wait "$ctrl_fd_pid" 2>/dev/null || :
+forget_pid "$ctrl_fd_pid"
 status=0
 check_out=$(TMPCLEANER_CONF=$conf sh "$here/tmpcleaner" --check "$dir/ctrlparent/$ctrl_name" 2>"$cfg/check.err") || status=$?
 check_err=$(cat "$cfg/check.err")
@@ -2708,6 +2729,8 @@ if [ "$status" -ne 1 ] || [ "$check_out" != "kept: $dir/ctrlparent/c?????z" ] ||
 fi
 kill "$ctrl_comm_pid" "$ctrl_cwd_pid" 2>/dev/null || :
 wait "$ctrl_comm_pid" "$ctrl_cwd_pid" 2>/dev/null || :
+forget_pid "$ctrl_comm_pid"
+forget_pid "$ctrl_cwd_pid"
 rm -rf "$dir/ctrlparent" "$dir/${ctrl_name:?}" "$cfg/check.err"
 # The caller's systemd log settings must not hide or reshape the preview lines.
 plain_summary=$(TMPCLEANER_CONF="$conf" sh "$here/tmpcleaner" --dry-run 2>&1 | grep '^tmpcleaner: would remove') || :
@@ -3451,6 +3474,7 @@ done
 kill -TERM "$term_pid"
 status=0
 wait "$term_pid" || status=$?
+forget_pid "$term_pid"
 if [ "$status" -ne 143 ] ||
 	! grep -Fxq 'tmpcleaner_last_exit_status 143' "$cfg/duration.prom" ||
 	! grep -Fxq 'tmpcleaner_last_success_timestamp_seconds 0' "$cfg/duration.prom" ||
@@ -3474,6 +3498,7 @@ done
 kill -TERM "$term_pid"
 status=0
 wait "$term_pid" || status=$?
+forget_pid "$term_pid"
 if [ "$status" -ne 143 ] || ! summary_ok 143 '"signal"' 0 0 0 false ||
 	[ -n "$(find "$term_tmp" -mindepth 1 -print -quit)" ]; then
 	echo 'FAIL: a TERM-killed JSON run must exit 143, emit exactly one signal completion record on stderr, and remove its scratch directory'
@@ -3768,6 +3793,7 @@ if [ "$bind_running" = 1 ]; then
 		gone big/f; kept held/f
 		kill "$alias_pid"
 		wait "$alias_pid" 2>/dev/null || :
+		forget_pid "$alias_pid"
 	done
 fi
 
@@ -4126,13 +4152,13 @@ for list_preview in rules dry check; do
 	esac || { echo "FAIL: NUL listing must preserve $list_preview preview output"; fail=1; }
 done
 kill "$list_pid"; wait "$list_pid" 2>/dev/null || :
+forget_pid "$list_pid"
 rm -rf "$list_root"
 
 # A second run tests that the shipped age rule keeps freshly extracted files
 # (birth and ctime stay current even when atime and mtime are backdated).
 dir2=$(mktemp -d /tmp/tmpcleaner-test.XXXXXX)
 conf2=$cfg/conf2
-trap 'kill $pids 2>/dev/null || :; rm -rf "$dir" "$cfg" "$dir2" "$shimdir" "$bindpoint" "$detachpoint" "$sockalias"' EXIT
 
 sed "s#/tmp#$dir2#" "$here/tmpcleaner.conf" > "$conf2"
 touch "$dir2/extracted.txt"
@@ -4196,7 +4222,6 @@ done
 # The three-way config upgrade that decides whether a reinstall keeps or replaces
 # an admin's exclusions.
 confdir=$(mktemp -d /tmp/tmpcleaner-test.XXXXXX)
-trap 'kill $pids 2>/dev/null || :; rm -rf "$dir" "$cfg" "$dir2" "$confdir" "$shimdir" "$bindpoint" "$detachpoint" "$sockalias"' EXIT
 confsource=$confdir/source
 confdest="$confdir/stage safe"
 confpath="$confdest/target [safe]"
@@ -4343,7 +4368,6 @@ rm -rf "$confdir"
 # Staged install (package build): honors DESTDIR, PREFIX and UNITDIR, rewrites
 # ExecStart in the installed unit, and never invokes systemctl.
 staged=$(mktemp -d /tmp/tmpcleaner-test.XXXXXX)
-trap 'kill $pids 2>/dev/null || :; rm -rf "$dir" "$cfg" "$dir2" "$staged" "$shimdir" "$bindpoint" "$detachpoint" "$sockalias"' EXIT
 staged_dest="$staged/root safe"
 staged_units="/usr/lib/systemd units"
 mkdir "$staged/fakes"
