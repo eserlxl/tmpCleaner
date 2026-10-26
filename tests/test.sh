@@ -807,7 +807,7 @@ if [ "$bind_running" = 1 ]; then
 	# The script is copied first: the new tmpfs hides it when the tree lies in /tmp (a makepkg build dir).
 	TMPDIR=$bindpoint unshare -rm sh -c '
 		cp "$1" "$TMPDIR/tmpcleaner" && set -- "$TMPDIR/tmpcleaner"
-		mount -t tmpfs -o size=64k,nr_inodes=16 tmpfs /tmp
+		mount -t tmpfs -o size=64k,nr_inodes=16 tmpfs /tmp || exit 97
 		touch /tmp/stale
 		touch -d "13 hours ago" /tmp/stale
 		i=0
@@ -815,7 +815,9 @@ if [ "$bind_running" = 1 ]; then
 		printf "d /tmp - - - amM:6h\n" > "$TMPDIR/full.conf"
 		TMPCLEANER_CONF=$TMPDIR/full.conf sh "$1" 2>/dev/null && [ ! -e /tmp/stale ]
 	' sh "$here/tmpcleaner" || status=$?
-	if [ "$status" -ne 0 ]; then
+	if [ "$status" -eq 97 ]; then
+		echo "SKIP: full /tmp case (tmpfs mount over /tmp is not permitted)"
+	elif [ "$status" -ne 0 ]; then
 		echo "FAIL: a full /tmp should still be cleaned when TMPDIR lies elsewhere"
 		fail=1
 	fi
@@ -828,7 +830,7 @@ if [ "$bind_running" = 1 ]; then
 	# The script is copied first: the new tmpfs hides it when the tree lies in /tmp (a makepkg build dir).
 	(unset TMPDIR; unshare -rm sh -c '
 		cp "$1" "$2/tmpcleaner"
-		mount -t tmpfs -o size=64k,nr_inodes=16 tmpfs /tmp
+		mount -t tmpfs -o size=64k,nr_inodes=16 tmpfs /tmp || exit 97
 		touch /tmp/stale
 		touch -d "13 hours ago" /tmp/stale
 		i=0
@@ -839,7 +841,9 @@ if [ "$bind_running" = 1 ]; then
 	' sh "$here/tmpcleaner" "$shmdir") || status=$?
 	rm -rf "$shmdir"
 	shmdir=
-	if [ "$status" -ne 0 ]; then
+	if [ "$status" -eq 97 ]; then
+		echo "SKIP: full /tmp case (tmpfs mount over /tmp is not permitted)"
+	elif [ "$status" -ne 0 ]; then
 		echo "FAIL: a full /tmp should still be cleaned when TMPDIR is unset"
 		fail=1
 	fi
