@@ -173,8 +173,10 @@ Environment=TMPCLEANER_PROTECT_TMPDIR=1
 Set `TMPCLEANER_REQUIRE_COMPLETE_SCAN=1` to reject find status 1 from either
 the `/tmp` inode walk or the `.tmpcleaner-keep` marker walk. An unreadable
 subtree can otherwise hide an in-use path or marker. The run stops
-before cleaning with `cannot apply path protections; nothing was removed`
-and exits 1 (2 with `--check` or `--check0`). This also applies to previews.
+before cleaning and exits 1 (2 with `--check` or `--check0`): an incomplete
+inode walk reports `cannot scan processes in use; nothing was removed`, an
+incomplete marker walk `cannot apply path protections; nothing was removed`.
+This also applies to previews.
 Entries deleted while the walk runs are not counted as an incomplete walk, and
 tolerance of vanished `/proc` entries is unchanged.
 
