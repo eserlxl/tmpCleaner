@@ -63,7 +63,7 @@ from a source install to the package, and uninstalling are in
 [docs/installation.md](docs/installation.md).
 
 > [!WARNING]
-> `sudo make uninstall` keeps `tmpcleaner.conf`, its `.default`/`.new` copies,
+> `sudo make uninstall` keeps `tmpcleaner.conf`, its `.new` copy,
 > and the `tmpcleaner.conf.d` drop-ins by default (`KEEP_CONFIG=1`); passing
 > `KEEP_CONFIG=0` (the previous default) removes them and deletes the local
 > exclusions.

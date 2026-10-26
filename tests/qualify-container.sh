@@ -190,7 +190,7 @@ else
 	fi
 fi
 
-# (5) make uninstall keeps config, make install over an unedited config leaves
+# (5) make uninstall removes .default and keeps config, make install over an unedited config leaves
 # no tmpcleaner.conf.new, make install preserves edited config and writes
 # tmpcleaner.conf.new, and make uninstall KEEP_CONFIG=0 removes config.
 lifecycle_err=
@@ -200,6 +200,8 @@ elif [ -e /usr/local/bin/tmpcleaner ] || [ -e /etc/systemd/system/tmpcleaner.ser
 	lifecycle_err="make uninstall left binary or units behind"
 elif [ ! -f /etc/tmpcleaner/tmpcleaner.conf ]; then
 	lifecycle_err="make uninstall removed /etc/tmpcleaner/tmpcleaner.conf"
+elif [ -e /etc/tmpcleaner/tmpcleaner.conf.default ]; then
+	lifecycle_err="make uninstall left /etc/tmpcleaner/tmpcleaner.conf.default behind"
 elif ! out=$(make install 2>&1); then
 	lifecycle_err="unedited reinstall failed: $out"
 elif [ -e /etc/tmpcleaner/tmpcleaner.conf.new ]; then

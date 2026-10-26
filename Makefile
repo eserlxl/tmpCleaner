@@ -81,8 +81,9 @@ ifeq ($(DESTDIR),)
 	-systemctl disable --now tmpcleaner.timer
 endif
 	rm -f -- $(call shell_quote,$(DESTDIR)$(UNITDIR)/tmpcleaner.service) $(call shell_quote,$(DESTDIR)$(UNITDIR)/tmpcleaner.timer)
+	rm -f -- $(call shell_quote,$(DESTDIR)$(CONFDIR)/tmpcleaner.conf.default)
 ifeq ($(KEEP_CONFIG),0)
-	rm -f -- $(call shell_quote,$(DESTDIR)$(CONFDIR)/tmpcleaner.conf) $(call shell_quote,$(DESTDIR)$(CONFDIR)/tmpcleaner.conf.default) $(call shell_quote,$(DESTDIR)$(CONFDIR)/tmpcleaner.conf.new)
+	rm -f -- $(call shell_quote,$(DESTDIR)$(CONFDIR)/tmpcleaner.conf) $(call shell_quote,$(DESTDIR)$(CONFDIR)/tmpcleaner.conf.new)
 	rm -rf -- $(call shell_quote,$(DESTDIR)$(CONFDIR)/tmpcleaner.conf.d)
 	if [ -d $(call shell_quote,$(DESTDIR)$(CONFDIR)) ] && [ ! -L $(call shell_quote,$(DESTDIR)$(CONFDIR)) ]; then rmdir --ignore-fail-on-non-empty -- $(call shell_quote,$(DESTDIR)$(CONFDIR)); fi
 endif

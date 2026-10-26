@@ -1,7 +1,8 @@
 #!/bin/sh
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Qualify the AUR package lifecycle (build from working tree via aurgen,
-# install, service run, config-preserving reinstall, and removal with .pacsave)
+# install, service run, config-preserving reinstall, removal with .pacsave,
+# and migration from a source install)
 # in a disposable systemd container.
 set -eu
 
@@ -67,6 +68,7 @@ cid=$(docker run -d \
 	--tmpfs /run/lock \
 	--tmpfs /tmp \
 	-v "$pkgfile:/pkg/linux-tmpcleaner.pkg.tar:ro" \
+	-v "$here:/src:ro" \
 	"$image" /usr/lib/systemd/systemd)
 
 booted=0
@@ -103,7 +105,7 @@ pkg=/pkg/linux-tmpcleaner.pkg.tar
 # (1) pacman -U --noconfirm installs /usr/bin/tmpcleaner,
 # /usr/lib/systemd/system/tmpcleaner.service and .timer,
 # /etc/tmpcleaner/tmpcleaner.conf and the license, the service's ExecStart
-# names /usr/bin/tmpcleaner, and tmpcleaner.timer is not enabled.
+# names /usr/bin/tmpcleaner, tmpcleaner.timer is not enabled, and .default is absent.
 if ! out=$(pacman -U --noconfirm "$pkg" 2>&1); then
 	fail_check "pacman -U install" "$out"
 elif [ ! -x /usr/bin/tmpcleaner ]; then
@@ -112,6 +114,8 @@ elif [ ! -f /usr/lib/systemd/system/tmpcleaner.service ] || [ ! -f /usr/lib/syst
 	fail_check "pacman -U install" "systemd units missing under /usr/lib/systemd/system"
 elif [ ! -f /etc/tmpcleaner/tmpcleaner.conf ]; then
 	fail_check "pacman -U install" "/etc/tmpcleaner/tmpcleaner.conf missing"
+elif [ -e /etc/tmpcleaner/tmpcleaner.conf.default ] || pacman -Qlq linux-tmpcleaner 2>/dev/null | grep -Fxq '/etc/tmpcleaner/tmpcleaner.conf.default'; then
+	fail_check "pacman -U install" "/etc/tmpcleaner/tmpcleaner.conf.default is present or packaged"
 elif ! pacman -Qlq linux-tmpcleaner 2>/dev/null | grep -Eq '^/usr/share/licenses/linux-tmpcleaner/.+'; then
 	fail_check "pacman -U install" "license missing under /usr/share/licenses/linux-tmpcleaner"
 elif ! grep -Eq '^ExecStart="?/usr/bin/tmpcleaner"?$' /usr/lib/systemd/system/tmpcleaner.service; then
@@ -163,6 +167,27 @@ elif ! grep -qx 'x /tmp/qualify-package-keep' /etc/tmpcleaner/tmpcleaner.conf.pa
 	fail_check "pacman -R remove" "/etc/tmpcleaner/tmpcleaner.conf.pacsave missing local rule"
 else
 	pass "pacman -R remove"
+fi
+
+# (5) A source install followed by default uninstall leaves an edited config
+# that pacman -U --noconfirm preserves without filesystem conflicts.
+cp -R /src /build
+cd /build
+if pacman -Q linux-tmpcleaner >/dev/null 2>&1; then
+	fail_check "source install then package" "package still installed before source install"
+elif ! out=$(make install 2>&1); then
+	fail_check "source install then package" "make install failed: $out"
+else
+	printf '\nx /tmp/qualify-source-keep\n' >> /etc/tmpcleaner/tmpcleaner.conf
+	if ! out=$(make uninstall 2>&1); then
+		fail_check "source install then package" "make uninstall failed: $out"
+	elif ! out=$(pacman -U --noconfirm "$pkg" 2>&1); then
+		fail_check "source install then package" "$out"
+	elif ! grep -qx 'x /tmp/qualify-source-keep' /etc/tmpcleaner/tmpcleaner.conf; then
+		fail_check "source install then package" "package install overwrote source config's local rule"
+	else
+		pass "source install then package"
+	fi
 fi
 
 exit "$fail"

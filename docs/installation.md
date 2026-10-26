@@ -28,7 +28,7 @@ sudo tmpcleaner --suggest-exclusions | sudo tee -a /etc/tmpcleaner/tmpcleaner.co
 sudo systemctl enable --now tmpcleaner.timer
 ```
 
-**Migrating from a source install:** remove a previous `make install` first (back up `/etc/tmpcleaner/tmpcleaner.conf` and the `/etc/tmpcleaner/tmpcleaner.conf.d/` drop-ins, which hold your kept paths, run `sudo make uninstall KEEP_CONFIG=0`, install the package, then restore both). Pacman refuses to overwrite untracked files, and units left in `/etc/systemd/system` would shadow the packaged ones in `/usr/lib/systemd/system`.
+**Migrating from a source install:** run `sudo make uninstall` from the current checkout, then install the package. Uninstall keeps `/etc/tmpcleaner/tmpcleaner.conf`, its `.new` copy and the `/etc/tmpcleaner/tmpcleaner.conf.d/` drop-ins, and removes the `.default` comparison copy. Pacman keeps the existing `tmpcleaner.conf` and writes new defaults as `.pacnew`. Removing the source units also prevents units left in `/etc/systemd/system` from shadowing the packaged ones in `/usr/lib/systemd/system`.
 
 ### From source
 
@@ -94,9 +94,11 @@ Pacman preserves an edited `/etc/tmpcleaner/tmpcleaner.conf` as `/etc/tmpcleaner
 sudo make uninstall
 ```
 
-By default (`KEEP_CONFIG=1`), `make uninstall` keeps `tmpcleaner.conf`, its `.default`/`.new`
-copies, and the `tmpcleaner.conf.d` drop-ins (the local exclusions), while disabling and
+By default (`KEEP_CONFIG=1`), `make uninstall` keeps `tmpcleaner.conf`, its `.new`
+copy, and the `tmpcleaner.conf.d` drop-ins (the local exclusions), while disabling and
 stopping the timer and removing the binary and systemd units.
+Uninstall always removes the `.default` comparison copy, so a later `make install`
+over an edited config writes a `.new` once, even if the shipped defaults are unchanged.
 
 To remove the configuration as well, pass `KEEP_CONFIG=0`:
 
@@ -104,7 +106,7 @@ To remove the configuration as well, pass `KEEP_CONFIG=0`:
 sudo make uninstall KEEP_CONFIG=0
 ```
 
-**Warning:** `KEEP_CONFIG=0` removes `tmpcleaner.conf`, its `.default`/`.new` copies,
+**Warning:** `KEEP_CONFIG=0` also removes `tmpcleaner.conf`, its `.new` copy,
 and the `tmpcleaner.conf.d` drop-ins (the local exclusions), while keeping anything
 else in the directory (removing `CONFDIR` itself only when empty); back up your rules first.
 

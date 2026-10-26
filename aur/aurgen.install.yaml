@@ -135,3 +135,5 @@ package:
   check: 'make check-package'
   install_vars:
     - 'UNITDIR=/usr/lib/systemd/system'
+  post_package:
+    - 'rm -f "$pkgdir/etc/tmpcleaner/tmpcleaner.conf.default"'

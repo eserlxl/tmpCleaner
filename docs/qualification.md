@@ -12,7 +12,7 @@ The mandatory unit suite (`tests/test.sh`) runs `tmpcleaner` directly under `PAT
 2. **`tmpcleaner --dry-run`**: Runs the installed `/usr/local/bin/tmpcleaner --dry-run` against `/tmp` and exits `0`.
 3. **`tmpcleaner.service` run**: Exercises the installed service under its real sandbox (`ProtectSystem=strict`, `ReadWritePaths=/tmp`, `RuntimeDirectory=tmpcleaner`, `Environment=TMPDIR=/run/tmpcleaner`, `ProtectHome=read-only`, `NoNewPrivileges=yes`) and real `abcmBM` timestamp aging (`TMPCLEANER_AGE=2s` via a service drop-in). Verifies that an aged unprotected file is removed while an aged file held open by a background `sleep`, an aged directory protected by `.tmpcleaner-keep`, `/tmp/krb5cc_qualify`, and a newly created file all survive; that the service logs the prose journal summary line and, with `TMPCLEANER_SUMMARY=json`, emits exactly one JSON completion record with `"exit_status":0`; and that `TMPCLEANER_METRICS` writes `tmpcleaner_last_exit_status 0` to `/var/lib/tmpcleaner-qualify/tmpcleaner.prom` through `ReadWritePaths=/var/lib/tmpcleaner-qualify`.
 4. **`tmpcleaner.timer`**: Runs `systemctl enable --now tmpcleaner.timer` and verifies that the timer is enabled and listed with a scheduled next elapse in `systemctl list-timers`.
-5. **Install/uninstall lifecycle**: Verifies that `make uninstall` disables the timer and removes the binary and units while preserving `/etc/tmpcleaner/tmpcleaner.conf`; that a subsequent `make install` keeps local edits to `/etc/tmpcleaner/tmpcleaner.conf` and writes `/etc/tmpcleaner/tmpcleaner.conf.new`; and that `make uninstall KEEP_CONFIG=0` removes the binary, units and `/etc/tmpcleaner`.
+5. **Install/uninstall lifecycle**: Verifies that `make uninstall` disables the timer and removes the binary, units and `/etc/tmpcleaner/tmpcleaner.conf.default` while preserving `/etc/tmpcleaner/tmpcleaner.conf`; that reinstalling an unedited config creates no `.new`; that a subsequent `make install` keeps local edits to `/etc/tmpcleaner/tmpcleaner.conf` and writes `/etc/tmpcleaner/tmpcleaner.conf.new`; and that `make uninstall KEEP_CONFIG=0` removes the binary, units and `/etc/tmpcleaner`.
 
 ## How to run it
 
@@ -52,12 +52,15 @@ The checkout is bind-mounted read-only at `/src` and copied to `/build` inside t
 
 `tests/qualify-package.sh` qualifies the AUR package lifecycle (`linux-tmpcleaner`) in the same disposable `systemd` container (`tmpcleaner-qualify:latest`). On the host it first runs `aurgen --build-only local` from the repository root (without `sudo`), rebuilding `aur/PKGBUILD` and `aur/.SRCINFO` from the tracked working tree and building the package archive with `makepkg` before binding that archive read-only into the container.
 
-Inside the container it verifies four checks end to end:
+The checkout is also bind-mounted read-only at `/src` and copied to `/build` inside the container for the source migration check.
 
-1. **`pacman -U install`**: `pacman -U --noconfirm` installs `/usr/bin/tmpcleaner`, `/usr/lib/systemd/system/tmpcleaner.service`, `/usr/lib/systemd/system/tmpcleaner.timer`, `/etc/tmpcleaner/tmpcleaner.conf` and the license file under `/usr/share/licenses/linux-tmpcleaner/`, the installed service's `ExecStart` names `/usr/bin/tmpcleaner`, and `tmpcleaner.timer` is not enabled or active.
+Inside the container it verifies five checks end to end:
+
+1. **`pacman -U install`**: `pacman -U --noconfirm` installs `/usr/bin/tmpcleaner`, `/usr/lib/systemd/system/tmpcleaner.service`, `/usr/lib/systemd/system/tmpcleaner.timer`, `/etc/tmpcleaner/tmpcleaner.conf` and the license file under `/usr/share/licenses/linux-tmpcleaner/`, the installed service's `ExecStart` names `/usr/bin/tmpcleaner`, and `tmpcleaner.timer` is not enabled or active. `/etc/tmpcleaner/tmpcleaner.conf.default` is absent both on disk and in `pacman -Qlq linux-tmpcleaner`.
 2. **`dry-run and service start`**: `/usr/bin/tmpcleaner --dry-run` exits `0` and `systemctl start tmpcleaner.service` succeeds.
 3. **`pacman -U reinstall keeps config`**: After appending a local `x` rule to `/etc/tmpcleaner/tmpcleaner.conf`, reinstalling the package with `pacman -U --noconfirm` preserves that rule via the PKGBUILD `backup` entry.
 4. **`pacman -R remove`**: `pacman -R --noconfirm linux-tmpcleaner` removes `/usr/bin/tmpcleaner` and the `systemd` units and leaves the edited configuration as `/etc/tmpcleaner/tmpcleaner.conf.pacsave`.
+5. **`source install then package`**: After package removal, runs `make install` from `/build`, appends a local `x` rule to `/etc/tmpcleaner/tmpcleaner.conf`, and runs `make uninstall` with default `KEEP_CONFIG=1`. Installing the package with `pacman -U --noconfirm` then succeeds without filesystem conflicts and preserves the local rule.
 
 Run it from the repository root on a host with `aurgen` and Docker access:
 

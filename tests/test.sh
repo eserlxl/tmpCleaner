@@ -4390,9 +4390,10 @@ PATH="$staged/fakes:$PATH" make -s -C "$here" uninstall DESTDIR="$staged_dest" P
 if [ -e "$staged_dest/usr/bin/tmpcleaner" ] ||
 	[ -e "$staged_dest$staged_units/tmpcleaner.service" ] ||
 	[ -e "$staged_dest$staged_units/tmpcleaner.timer" ] ||
+	[ -e "$staged_dest/etc/tmpcleaner/tmpcleaner.conf.default" ] ||
 	[ ! -f "$staged_dest/etc/tmpcleaner/tmpcleaner.conf" ] ||
 	[ ! -d "$staged_dest/etc/tmpcleaner/tmpcleaner.conf.d" ]; then
-	echo "FAIL: staged uninstall should remove binary and units while keeping CONFDIR by default"
+	echo "FAIL: staged uninstall should remove binary, units and .default while keeping config and drop-ins by default"
 	fail=1
 fi
 PATH="$staged/fakes:$PATH" make -s -C "$here" uninstall KEEP_CONFIG=0 DESTDIR="$staged_dest" PREFIX=/usr UNITDIR="$staged_units" >/dev/null
@@ -4499,12 +4500,13 @@ mkdir "$staged_dest/etc/tmpcleaner/local dir"
 printf 'local\000bytes\n' > "$staged_dest/etc/tmpcleaner/local dir/notes"
 printf 'pending defaults\n' > "$staged_dest/etc/tmpcleaner/tmpcleaner.conf.new"
 cp -a "$staged_dest/etc/tmpcleaner" "$staged/config.expected"
+rm "$staged/config.expected/tmpcleaner.conf.default"
 PATH="$staged/fakes:$PATH" make -s -C "$here" uninstall KEEP_CONFIG=1 \
 	DESTDIR="$staged_dest" PREFIX=/usr UNITDIR="$staged_units" >/dev/null
 if ! diff -r "$staged/config.expected" "$staged_dest/etc/tmpcleaner" >/dev/null ||
 	[ -e "$staged_dest/usr/bin/tmpcleaner" ] || [ -e "$staged_dest$staged_units/tmpcleaner.service" ] ||
 	[ -e "$staged_dest$staged_units/tmpcleaner.timer" ] || [ -e "$staged/systemctl.log" ]; then
-	echo 'FAIL: staged KEEP_CONFIG=1 must preserve the whole config tree and remove binary/units without service actions'
+	echo 'FAIL: staged KEEP_CONFIG=1 must preserve the config tree except .default and remove binary/units without service actions'
 	fail=1
 fi
 
@@ -4645,13 +4647,14 @@ for invalid_keep in '' 2 yes '0 1' '1 0' 00; do
 		fail=1
 	fi
 done
+rm "$staged/custom-config.expected/tmpcleaner.conf.default"
 : > "$staged/systemctl.log"
 PATH="$staged/fakes:$PATH" make -s -C "$here" uninstall \
 	BINDIR="$make_bin" CONFDIR="$make_conf" UNITDIR="$make_units" >/dev/null
 if [ -e "$custom_bin/tmpcleaner" ] || [ -e "$custom_units/tmpcleaner.service" ] ||
 	[ -e "$custom_units/tmpcleaner.timer" ] || ! diff -r "$staged/custom-config.expected" "$custom_conf" >/dev/null ||
 	[ "$(cat "$staged/systemctl.log")" != "$(printf 'disable --now tmpcleaner.timer\ndaemon-reload')" ]; then
-	echo 'FAIL: unstaged uninstall must preserve the config tree by default while removing binary/units and stopping the timer'
+	echo 'FAIL: unstaged uninstall must preserve the config tree except .default by default while removing binary/units and stopping the timer'
 	fail=1
 fi
 PATH="$staged/fakes:$PATH" make -s -C "$here" install \
@@ -4662,7 +4665,7 @@ PATH="$staged/fakes:$PATH" make -s -C "$here" uninstall KEEP_CONFIG=1 \
 if [ -e "$custom_bin/tmpcleaner" ] || [ -e "$custom_units/tmpcleaner.service" ] ||
 	[ -e "$custom_units/tmpcleaner.timer" ] || ! diff -r "$staged/custom-config.expected" "$custom_conf" >/dev/null ||
 	[ "$(cat "$staged/systemctl.log")" != "$(printf 'disable --now tmpcleaner.timer\ndaemon-reload')" ]; then
-	echo 'FAIL: unstaged KEEP_CONFIG=1 must preserve the config tree while removing binary/units and stopping the timer'
+	echo 'FAIL: unstaged KEEP_CONFIG=1 must preserve the config tree except .default while removing binary/units and stopping the timer'
 	fail=1
 fi
 rm -rf "$custom_conf/local dir"
