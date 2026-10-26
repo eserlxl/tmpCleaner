@@ -1784,13 +1784,42 @@ ln -s "$check_root/keep" "$check_root/alias"
 for alias_root in "$check_root/keep/." "$check_root/fake/../keep" "$check_root//keep" \
 	"$check_root/keep/" "$check_root/alias"; do
 	printf 'd %s - - - amM:12h\n' "$alias_root" > "$cfg/check-roots.conf"
+	alias_error='noncanonical cleanup root in --check'
+	case "$alias_root" in
+		*/.|*/..|*/./*|*/../*) alias_error='cleanup root has a . or .. component' ;;
+	esac
 	status=0
 	CLEAN_SHIM_STATUS=99 CLEAN_SHIM_MARKER=$cfg/check-roots.clean TMPCLEANER_CONF=$cfg/check-roots.conf \
 		sh "$here/tmpcleaner" --check "$check_root/keep/old" > "$cfg/check-roots.out" 2> "$cfg/check-roots.err" || status=$?
 	if [ "$status" -ne 2 ] || [ -s "$cfg/check-roots.out" ] || [ -e "$cfg/check-roots.clean" ] ||
-		! grep -Fq 'noncanonical cleanup root in --check' "$cfg/check-roots.err" || [ ! -e "$check_root/keep/old" ]; then
+		! grep -Fq "$alias_error" "$cfg/check-roots.err" || [ ! -e "$check_root/keep/old" ]; then
 		echo "FAIL: --check must reject retained noncanonical roots without a verdict or cleanup ($alias_root)"
 		fail=1
+	fi
+	if [ "$alias_error" = 'cleanup root has a . or .. component' ]; then
+		for alias_mode in real --dry-run --print-rules --print-in-use0 --print-holders0 --suggest-exclusions --check0 preview; do
+			expected_status=1
+			alias_preview=
+			case "$alias_mode" in
+				real) set -- ;;
+				preview) set -- ; alias_preview=1 ;;
+				--check0) set -- --check0; expected_status=2 ;;
+				--dry-run) set -- --dry-run "--prefix=$alias_root" ;;
+				*) set -- "$alias_mode" ;;
+			esac
+			status=0
+			printf '%s\0' "$check_root/keep/old" |
+				TMPCLEANER_PREVIEW=$alias_preview CLEAN_SHIM_STATUS=99 CLEAN_SHIM_MARKER=$cfg/check-roots.clean \
+				TMPCLEANER_CONF=$cfg/check-roots.conf sh "$here/tmpcleaner" "$@" \
+				> "$cfg/check-roots.out" 2> "$cfg/check-roots.err" || status=$?
+			if [ "$status" -ne "$expected_status" ] || [ -s "$cfg/check-roots.out" ] || [ -e "$cfg/check-roots.clean" ] ||
+				! grep -Fq "$alias_error" "$cfg/check-roots.err" || ! grep -Fq "$alias_root" "$cfg/check-roots.err" ||
+				[ ! -e "$check_root/keep/old" ]; then
+				echo "FAIL: $alias_mode must reject dot-component roots before cleanup ($alias_root)"
+				fail=1
+			fi
+		done
+		continue
 	fi
 	status=0
 	TMPCLEANER_CONF=$cfg/check-roots.conf sh "$here/tmpcleaner" --dry-run "--prefix=$alias_root" \
@@ -2265,7 +2294,7 @@ for bad_root in "$filter_root/encoded\\x20root" "$filter_root/%T" "$filter_root/
 done
 mkdir "$filter_root/inside"
 ln -s "$filter_root/inside" "$filter_root/alias"
-printf 'd /tmp - - - 12h\nd %s/inside/../inside - - - 12h\nd %s/alias - - - 12h\nx %s\nX %s/*\n' \
+printf 'd /tmp - - - 12h\nd %s/inside - - - 12h\nd %s/alias - - - 12h\nx %s\nX %s/*\n' \
 	"$filter_root" "$filter_root" "$scope_outside" "$scope_outside" > "$cfg/root-filter.conf"
 if ! TMPCLEANER_CONF=$cfg/root-filter.conf sh "$here/tmpcleaner" --print-rules > "$cfg/filter.out" ||
 	! grep -Fxq "x $scope_outside" "$cfg/filter.out" || ! grep -Fxq "X $scope_outside/*" "$cfg/filter.out"; then
@@ -4025,7 +4054,7 @@ printf 'x %s/e/kept\n' "$count_root" >> "$cfg/count.conf"
 mkdir -p "$count_root/overlap/nested"
 touch "$count_root/overlap/nested/old"
 old "$count_root/overlap/nested/old"
-printf 'd %s/overlap//. - - - amM:12h\nD %s/overlap//nested/. - - - amM:12h\n' "$count_root" "$count_root" >> "$cfg/count.conf"
+printf 'd %s/overlap/ - - - amM:12h\nD %s/overlap//nested/ - - - amM:12h\n' "$count_root" "$count_root" >> "$cfg/count.conf"
 printf 'tmpcleaner: removed: %s/overlap/nested/old\n' "$count_root" >> "$cfg/count.expected"
 count_files=8 count_dirs=0
 backend_major=$(systemd-tmpfiles --version | awk 'NR == 1 { print $2 + 0 }')
@@ -4082,7 +4111,7 @@ done
 
 # NUL removal listings preserve hostile bytes, directories and overlapping roots.
 list_root=$(mktemp -d "$dir/list-nul.XXXXXX")
-printf 'd %s - - - amM:12h\nd %s//. - - - amM:12h\n' "$list_root" "$list_root" > "$cfg/list.conf"
+printf 'd %s - - - amM:12h\nd %s/ - - - amM:12h\n' "$list_root" "$list_root" > "$cfg/list.conf"
 touch "$list_root/held"
 old "$list_root/held"
 # shellcheck disable=SC2217 # sleep holds this file open for protection

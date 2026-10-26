@@ -42,6 +42,7 @@ tree, whose traversal skips nested mounts; a mount at `/tmp` itself is supported
 Unreadable or malformed mount information stops the run before cleaning.
 
 Cleanup rule paths must be literal absolute paths, plain or simply quoted;
+cleanup roots must not contain `.` or `..` path components.
 `%%` represents a literal percent. Backslash encodings, other `%` specifiers,
 and ambiguous glob-capable roots stop every run before cleaning, including
 runs without CLI exclusions. See the [supported path grammar](cli-reference.md)

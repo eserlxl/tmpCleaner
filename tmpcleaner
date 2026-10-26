@@ -1088,6 +1088,7 @@ generate_rules() {
 			if (!under(lexical, "/tmp") || !under(canonical, canonical_tmp)) refuse("cleanup root is outside /tmp")
 			for (i = 1; i <= mount_count; i++) if (under(canonical, mounts[i])) refuse("cleanup root crosses a nested /tmp mount")
 			for (i = 1; i <= count; i++) if (under(lexical, prefixes[i]) || under(canonical, prefixes[i])) next
+			if (path ~ /(^|\/)\.\.?($|\/)/) refuse("cleanup root has a . or .. component")
 			if (ENVIRON["CHECKING"] != "" && path != canonical) refuse("noncanonical cleanup root in --check")
 			print
 		}' "$scratch/rules" > "$scratch/filtered" && mv "$scratch/filtered" "$scratch/rules" || {
