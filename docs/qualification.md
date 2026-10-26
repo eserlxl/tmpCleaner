@@ -47,3 +47,22 @@ The checkout is bind-mounted read-only at `/src` and copied to `/build` inside t
 - **Shared host kernel and clock**: The container shares the host kernel, `/proc` uptime, and system clock; kernel-specific behavior and real 12-hour wall-clock elapse are not isolated from the host.
 - **No network (`--network none`)**: The running container has no network interfaces; image builds use `docker build --network host` so qualification does not depend on Docker bridge networking.
 - **Degraded `systemd` state (`systemd-resolved` failing is expected)**: In an unprivileged `--network none` container (`/usr/lib/systemd/systemd` with `--cgroupns=private --security-opt writable-cgroups=true`), `systemd-resolved.service` fails during boot and `systemctl is-system-running` reports `degraded`. The qualification script accepts `running` or `degraded` once boot settles.
+
+## Package lifecycle
+
+`tests/qualify-package.sh` qualifies the AUR package lifecycle (`linux-tmpcleaner`) in the same disposable `systemd` container (`tmpcleaner-qualify:latest`). On the host it first runs `aurgen --build-only local` from the repository root (without `sudo`), rebuilding `aur/PKGBUILD` and `aur/.SRCINFO` from the tracked working tree and building the package archive with `makepkg` before binding that archive read-only into the container.
+
+Inside the container it verifies four checks end to end:
+
+1. **`pacman -U install`**: `pacman -U --noconfirm` installs `/usr/bin/tmpcleaner`, `/usr/lib/systemd/system/tmpcleaner.service`, `/usr/lib/systemd/system/tmpcleaner.timer`, `/etc/tmpcleaner/tmpcleaner.conf` and the license file under `/usr/share/licenses/linux-tmpcleaner/`, the installed service's `ExecStart` names `/usr/bin/tmpcleaner`, and `tmpcleaner.timer` is not enabled or active.
+2. **`dry-run and service start`**: `/usr/bin/tmpcleaner --dry-run` exits `0` and `systemctl start tmpcleaner.service` succeeds.
+3. **`pacman -U reinstall keeps config`**: After appending a local `x` rule to `/etc/tmpcleaner/tmpcleaner.conf`, reinstalling the package with `pacman -U --noconfirm` preserves that rule via the PKGBUILD `backup` entry.
+4. **`pacman -R remove`**: `pacman -R --noconfirm linux-tmpcleaner` removes `/usr/bin/tmpcleaner` and the `systemd` units and leaves the edited configuration as `/etc/tmpcleaner/tmpcleaner.conf.pacsave`.
+
+Run it from the repository root on a host with `aurgen` and Docker access:
+
+```sh
+sh tests/qualify-package.sh
+```
+
+Like `tests/qualify-container.sh`, this check is optional and requires both `aurgen` and `docker` (exiting `77` with `SKIP: ...` when either is unavailable). Generated files left under `aur/` are gitignored.
